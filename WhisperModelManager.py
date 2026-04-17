@@ -4,12 +4,12 @@ from transformers import pipeline
 class WhisperModelManager:
     """
     單例模式 (Singleton): 確保 Whisper 語音辨識模型只實例化一次。
+    本次升級：加入針對 Transformer 自迴歸死迴圈的防跳針過濾器。
     """
     _instance = None
 
     def __new__(cls):
         if cls._instance is None:
-            # 強化單例模式的錯誤處理，邏輯與 QwenModelManager 相同
             cls._instance = super(WhisperModelManager, cls).__new__(cls)
             try:
                 cls._instance._initialize()
@@ -22,33 +22,73 @@ class WhisperModelManager:
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
         self.model_id = "openai/whisper-large-v3"
         
-        # 使用 transformers 的 pipeline 可以大幅簡化音訊處理邏輯
         self.transcriber = pipeline(
             "automatic-speech-recognition",
             model=self.model_id,
             device=self.device,
-            chunk_length_s=30, # 支援長音檔分塊處理
+            chunk_length_s=30,
             return_timestamps=True 
         )
 
+    def _filter_hallucination(self, raw_result: dict) -> dict:
+        """
+        後處理過濾器 (Post-processing Filter)：
+        偵測連續重複的 Chunk，一旦發生死迴圈，直接切斷並丟棄幻覺雜音。
+        """
+        raw_chunks = raw_result.get("chunks", [])
+        cleaned_chunks = []
+        
+        consecutive_count = 1
+        last_text = ""
+
+        for chunk in raw_chunks:
+            # 轉小寫並去除前後空白，避免因標點或空格導致誤判
+            current_text = chunk["text"].strip().lower()
+            
+            if not current_text:
+                continue
+
+            if current_text == last_text:
+                consecutive_count += 1
+            else:
+                consecutive_count = 1
+                last_text = current_text
+
+            # 如果同一個句子連續跨越了 3 個時間 Chunk，判定為 Attention 鎖死
+            if consecutive_count >= 3:
+                # 把前面已經收錄的兩次「幻覺開頭」也一併刪除，確保資料乾淨
+                if len(cleaned_chunks) >= 2:
+                    cleaned_chunks = cleaned_chunks[:-2]
+                
+                # 終止後續的解析，因為模型一旦進入迴圈，後面的輸出通常也全是垃圾
+                break 
+            else:
+                cleaned_chunks.append(chunk)
+
+        # 將過濾後的乾淨 Chunk 重新組合回完整的純文字
+        final_text = " ".join([c["text"].strip() for c in cleaned_chunks])
+        
+        return {
+            "text": final_text,
+            "chunks": cleaned_chunks
+        }
+
     def transcribe(self, audio_path: str) -> dict:
         """
-        輸入音檔路徑，回傳逐字稿與時間戳記。
+        輸入音檔路徑，回傳乾淨且無幻覺的逐字稿。
         """
         try:
-            # 【關鍵修復】避開 Hugging Face 'logprobs' 變數缺失的 Bug。
-            # 移除 no_speech_threshold，且 whisper-large-v3 已經足夠聰明，
-            # 大多數時候即便不加參數也能有效避免幻覺。
-            result = self.transcriber(
+            # 1. 取得原始推論結果
+            raw_result = self.transcriber(
                 audio_path, 
                 generate_kwargs={
                     "task": "transcribe",
                     "condition_on_prev_tokens": False
                 }
             )
-            return {
-                "text": result["text"].strip(),
-                "chunks": result.get("chunks", [])
-            }
+            
+            # 2. 經過防跳針過濾器後回傳
+            return self._filter_hallucination(raw_result)
+            
         except Exception as e:
             return {"text": "", "error": str(e)}
