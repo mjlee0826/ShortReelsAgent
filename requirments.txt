@@ -1,6 +1,7 @@
 annotated-doc==0.0.4
 anyio==4.13.0
 audioread==3.1.0
+av==17.0.0
 certifi==2026.2.25
 cffi==2.0.0
 charset-normalizer==3.4.7
@@ -9,6 +10,7 @@ cuda-bindings==12.9.4
 cuda-pathfinder==1.2.2
 cuda-toolkit==12.6.3
 decorator==5.2.1
+decord==0.6.0
 filelock==3.25.2
 fsspec==2026.2.0
 h11==0.16.0
@@ -54,6 +56,7 @@ pooch==1.9.0
 pycparser==3.0
 Pygments==2.20.0
 PyYAML==6.0.3
+qwen-vl-utils==0.0.14
 regex==2026.4.4
 requests==2.33.1
 rich==15.0.0

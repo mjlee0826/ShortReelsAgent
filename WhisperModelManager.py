@@ -4,7 +4,6 @@ from transformers import pipeline
 class WhisperModelManager:
     """
     單例模式 (Singleton): 確保 Whisper 語音辨識模型只實例化一次。
-    用於將影片中的人聲轉換為帶有時間戳記的文字 (Transcript)。
     """
     _instance = None
 
@@ -16,29 +15,33 @@ class WhisperModelManager:
 
     def _initialize(self):
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
-        # 使用 small 版本以在本地端取得效能與準確度的平衡
-        self.model_id = "openai/whisper-small"
+        # 【升級】使用 large-v3 取得最強的語音辨識與抗噪能力
+        self.model_id = "openai/whisper-large-v3"
         
-        # 使用 transformers 的 pipeline 可以大幅簡化音訊處理邏輯
         self.transcriber = pipeline(
             "automatic-speech-recognition",
             model=self.model_id,
             device=self.device,
-            chunk_length_s=30, # 支援長音檔分塊處理
-            return_timestamps=True # 開啟時間戳記功能
+            chunk_length_s=30,
+            return_timestamps=True 
         )
 
     def transcribe(self, audio_path: str) -> dict:
-        """
-        輸入音檔路徑，回傳逐字稿與時間戳記。
-        如果影片沒有人講話，回傳空字串。
-        """
         try:
-            # 讓 Whisper 自動偵測語言並進行辨識
-            result = self.transcriber(audio_path, generate_kwargs={"task": "transcribe"})
+            # 【關鍵修復】加入防幻覺參數
+            # condition_on_prev_tokens=False: 避免模型因為先前的靜音而開始腦補 YouTube 結尾詞
+            # no_speech_threshold=0.6: 信心度低於此值的片段直接捨棄，判定為無人聲
+            result = self.transcriber(
+                audio_path, 
+                generate_kwargs={
+                    "task": "transcribe",
+                    "condition_on_prev_tokens": False,
+                    "no_speech_threshold": 0.6
+                }
+            )
             return {
                 "text": result["text"].strip(),
-                "chunks": result.get("chunks", []) # 包含每個句子的開始與結束時間
+                "chunks": result.get("chunks", [])
             }
         except Exception as e:
             return {"text": "", "error": str(e)}
