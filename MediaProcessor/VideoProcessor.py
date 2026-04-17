@@ -123,7 +123,7 @@ class VideoProcessor(MediaStrategy):
                 return {"status": "rejected", "reason": "too shaky or blurry", "file": file_path}
 
             # 4. 視覺連續動作解析
-            sampled_frames = self._extract_uniform_frames(cap, total_frames, num_frames=8)
+            sampled_frames = self._extract_uniform_frames(cap, total_frames, num_frames=6)
             video_caption = self.video_caption_engine.generate_caption(sampled_frames)
             cap.release()
 
