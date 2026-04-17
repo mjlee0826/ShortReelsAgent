@@ -98,19 +98,34 @@ class VideoProcessor(MediaStrategy):
 
         return float(np.mean(blur_scores)), float(np.mean(shake_scores))
 
-    def _extract_uniform_frames(self, cap: cv2.VideoCapture, total_frames: int, num_frames: int = 8) -> list[Image.Image]:
-        """均勻提取影格供視覺模型使用 (維持原有邏輯)"""
+    def _extract_uniform_frames(self, cap: cv2.VideoCapture, total_frames: int, num_frames: int = 6) -> list[Image.Image]:
+        """
+        封裝方法：從影片中均勻抽取指定數量的影格。
+        針對 GIT 模型，這裡的 num_frames 必須嚴格等於 6。
+        """
         frames = []
-        if total_frames == 0: return frames
+        if total_frames == 0: 
+            return frames
+
+        # 計算均勻採樣的間距 (至少為 1)
         step = max(1, total_frames // num_frames)
+        
         for i in range(num_frames):
             frame_idx = i * step
-            if frame_idx >= total_frames: break
+            # 【防呆】如果算出的 index 超過總長度，強制停留在最後一幀，避免 OpenCV 報錯
+            frame_idx = min(frame_idx, total_frames - 1)
+            
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
             ret, frame = cap.read()
             if ret:
                 pil_image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                 frames.append(pil_image)
+                
+        # 【關鍵防呆】如果因為影片過短或其他異常，導致抽出來的圖片不到 6 張
+        # 我們直接複製最後一張圖片 (Padding)，直到湊滿模型規定的數量為止
+        while len(frames) > 0 and len(frames) < num_frames:
+            frames.append(frames[-1].copy())
+            
         return frames
 
     def process(self, file_path: str) -> dict:
