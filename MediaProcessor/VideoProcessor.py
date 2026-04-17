@@ -64,25 +64,37 @@ class VideoProcessor(MediaStrategy):
             return False
 
     def _analyze_motion_and_blur(self, cap: cv2.VideoCapture, total_frames: int) -> tuple:
-        """光流法手震分析與模糊度分析 (維持原有邏輯)"""
         start_frame = max(0, int(total_frames / 2) - 5)
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
         ret, prev_frame = cap.read()
         if not ret: return 1000, 0 
 
         prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
-        blur_scores = [cv2.Laplacian(prev_gray, cv2.CV_64F).var()]
+        
+        # 【新增這段】標準化解析度
+        h, w = prev_gray.shape
+        std_w = 500
+        std_h = int(h * std_w / w)
+        prev_gray_resized = cv2.resize(prev_gray, (std_w, std_h))
+
+        blur_scores = [cv2.Laplacian(prev_gray_resized, cv2.CV_64F).var()]
         shake_scores = []
 
         for _ in range(10):
             ret, curr_frame = cap.read()
             if not ret: break
+            
             curr_gray = cv2.cvtColor(curr_frame, cv2.COLOR_BGR2GRAY)
-            blur_scores.append(cv2.Laplacian(curr_gray, cv2.CV_64F).var())
-            flow = cv2.calcOpticalFlowFarneback(prev_gray, curr_gray, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+            curr_gray_resized = cv2.resize(curr_gray, (std_w, std_h))
+            
+            blur_scores.append(cv2.Laplacian(curr_gray_resized, cv2.CV_64F).var())
+            
+            # 在縮放後的畫面上計算光流，確保像素位移標準化
+            flow = cv2.calcOpticalFlowFarneback(prev_gray_resized, curr_gray_resized, None, 0.5, 3, 15, 3, 5, 1.2, 0)
             mag, ang = cv2.cartToPolar(flow[..., 0], flow[..., 1])
             shake_scores.append(np.mean(mag)) 
-            prev_gray = curr_gray
+            
+            prev_gray_resized = curr_gray_resized
 
         return float(np.mean(blur_scores)), float(np.mean(shake_scores))
 
@@ -118,9 +130,9 @@ class VideoProcessor(MediaStrategy):
 
             # 3. 物理動態偵測 (剔除廢片)
             avg_blur, avg_shake = self._analyze_motion_and_blur(cap, total_frames)
-            if avg_shake > 5.0 or avg_blur < 50:
+            if avg_shake > 10.0 or avg_blur < 30:
                 cap.release()
-                return {"status": "rejected", "reason": "too shaky or blurry", "file": file_path}
+                return {"status": "rejected", "reason": f'too shaky ({avg_shake:.2f}) or blurry ({avg_blur:.2f})', "file": file_path}
 
             # 4. 視覺連續動作解析
             sampled_frames = self._extract_uniform_frames(cap, total_frames, num_frames=6)

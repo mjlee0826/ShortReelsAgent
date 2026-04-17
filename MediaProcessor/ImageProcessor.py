@@ -45,8 +45,8 @@ class ImageProcessor(MediaStrategy):
             gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
             
             blur_score = cv2.Laplacian(gray, cv2.CV_64F).var()
-            if blur_score < 100: 
-                return {"status": "rejected", "reason": "too blurry", "file": file_path}
+            if blur_score < 30: 
+                return {"status": "rejected", "reason": f'too blurry, blur score = {blur_score}', "file": file_path}
 
             exif_data = self._extract_exif_metadata(pil_image)
             caption = self.vision_engine.generate_caption(pil_image)
