@@ -15,18 +15,28 @@ class QwenModelManager:
 
     def __new__(cls):
         if cls._instance is None:
+            # 1. 先分配記憶體空間給實例
             cls._instance = super(QwenModelManager, cls).__new__(cls)
-            cls._instance._initialize()
+            try:
+                # 2. 嘗試進行初始化
+                cls._instance._initialize()
+            except Exception as e:
+                # 3. 【防呆重構】如果初始化過程發生錯誤 (例如缺少套件)，
+                # 必須把 _instance 重置為 None，避免留下「沒有 processor 屬性」的半殘物件。
+                cls._instance = None
+                raise e
         return cls._instance
 
     def _initialize(self):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model_id = "Qwen/Qwen2-VL-7B-Instruct"
         
-        # 載入 Qwen2-VL 模型 (使用 bfloat16 或 float16 節省 VRAM)
+        # 【重構】移除 device_map="auto" 以避免強制依賴 accelerate 套件，
+        # 改為載入至記憶體後，再手動 .to(self.device) 推入 GPU。
         self.model = Qwen2VLForConditionalGeneration.from_pretrained(
-            self.model_id, torch_dtype=torch.bfloat16, device_map="auto"
-        )
+            self.model_id, torch_dtype=torch.bfloat16
+        ).to(self.device)
+        
         self.processor = AutoProcessor.from_pretrained(self.model_id)
 
     def _parse_json_output(self, text: str) -> dict:
@@ -64,7 +74,7 @@ class QwenModelManager:
             content = [
                 {
                     "type": "video",
-                    "video": media_input, # 直接傳入影片路徑，Qwen 底層會自動均勻抽幀
+                    "video": media_input, 
                     "max_pixels": 100352, # 限制解析度以避免 VRAM 爆掉
                     "fps": 1.0,           # 每秒抽 1 幀
                 },
