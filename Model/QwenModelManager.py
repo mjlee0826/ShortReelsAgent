@@ -79,7 +79,7 @@ class QwenModelManager:
                 padding=True, return_tensors="pt"
             ).to(self.device)
 
-            generated_ids = self.model.generate(**inputs, max_new_tokens=256)
+            generated_ids = self.model.generate(**inputs, max_new_tokens=512)
             generated_ids_trimmed = [
                 out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
             ]
