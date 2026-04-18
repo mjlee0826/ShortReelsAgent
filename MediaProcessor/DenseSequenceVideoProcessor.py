@@ -1,30 +1,26 @@
 import os
+import cv2
 import numpy as np
 import tempfile
 import subprocess
+from PIL import Image
 from MediaProcessor.AbstractVideoProcessor import AbstractVideoProcessor
 from Model.QwenModelManager import QwenModelManager
 from PromptManager.TaskMode import TaskMode
 
 class DenseSequenceVideoProcessor(AbstractVideoProcessor):
-    """
-    具體策略 B：針對 15 秒以上的長影音或跳舞影片。
-    邏輯：放棄全局美學評分，將影片每 3 秒切割為一個物理片段，
-    密集呼叫 Qwen 建立「絕對時間動作索引 (Action Index)」，為精準對齊音樂重拍做準備。
-    """
+    """具體策略 B：針對 15 秒以上的長影音。"""
     def __init__(self):
         super().__init__()
-        # 只載入 Qwen，不載入單張打分大腦，節省 VRAM
         self.vision_engine = QwenModelManager()
-        self.chunk_duration = 3.0 # 每 3 秒一個切片
+        self.chunk_duration = 4.0 
 
     def analyze_visual_semantics(self, file_path: str, duration: float) -> dict:
         action_index = []
         
-        # 迴圈依序切割並分析
         for start_time in np.arange(0, duration, self.chunk_duration):
             end_time = min(start_time + self.chunk_duration, duration)
-            if end_time - start_time < 1.0: # 忽略結尾不到 1 秒的碎段
+            if end_time - start_time < 1.0:
                 continue
                 
             temp_chunk = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
@@ -32,21 +28,32 @@ class DenseSequenceVideoProcessor(AbstractVideoProcessor):
             temp_chunk.close()
 
             try:
-                # 使用 FFmpeg 無損且極速地切出 3 秒的影片區段給 Qwen
-                # -ss 放在 -i 前面可大幅加快切割速度
+                # 視覺推理：Qwen 分析動作
                 subprocess.run(
                     ["ffmpeg", "-y", "-ss", str(start_time), "-t", str(end_time - start_time), 
                         "-i", file_path, "-c", "copy", chunk_path],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )
-
-                # 詢問：「這 3 秒內發生了什麼關鍵動作？」
                 vlm_result = self.vision_engine.analyze_media(chunk_path, media_type="video", mode=TaskMode.ACTION_INDEX)
                 
+                # 物理重心分析：抽取該切片的中間幀計算重心
+                cap = cv2.VideoCapture(file_path)
+                # 定位到該切片的中央時間點
+                mid_time = start_time + (end_time - start_time) / 2
+                cap.set(cv2.CAP_PROP_POS_MSEC, mid_time * 1000)
+                ret, frame = cap.read()
+                cap.release()
+                
+                chunk_focus = {"x_percent": 50.0, "y_percent": 50.0}
+                if ret:
+                    pil_image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                    chunk_focus = self._calculate_saliency_focus(pil_image)
+
                 action_index.append({
                     "start_time": round(start_time, 2),
                     "end_time": round(end_time, 2),
-                    "action_description": vlm_result.get("caption", "Unknown action")
+                    "action_description": vlm_result.get("caption", "Unknown action"),
+                    "subject_focus": chunk_focus # 為長影片提供分段重心 [cite: 28]
                 })
             finally:
                 if os.path.exists(chunk_path):
@@ -55,7 +62,6 @@ class DenseSequenceVideoProcessor(AbstractVideoProcessor):
         return {
             "is_dense_indexed": True,
             "action_index": action_index,
-            # 長影片難以用單一張定生死，故給予預設值或跳過
             "technical_score": None, 
             "aesthetic_score": None
         }

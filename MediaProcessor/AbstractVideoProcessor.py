@@ -2,31 +2,53 @@ import os
 import cv2
 import tempfile
 import subprocess
+import numpy as np
+from PIL import Image
 from abc import abstractmethod
 from MediaProcessor.MediaStrategy import MediaStrategy
 from Model.WhisperModelManager import WhisperModelManager    
 from Model.AudioEnvModelManager import AudioEnvModelManager  
 from Model.VadModelManager import VadModelManager           
+from Model.SaliencyModelManager import SaliencyModelManager 
 
 class AbstractVideoProcessor(MediaStrategy):
     """
     樣板方法模式 (Template Method Pattern)：
-    定義影片處理的標準流水線 (Pipeline)。
-    將聽覺解析 (Audio) 與基礎 Metadata 抽取放在父類別統一處理，
-    將視覺解析 (Visual) 挖空，強制子類別 (Standard / Dense) 依據自身策略實作。
+    將聽覺解析、基礎 Metadata 抽取與「顯著性重心計算」等共通邏輯放在父類別處理。 
     """
     def __init__(self):
         super().__init__()
-        # 初始化共用的聽覺感知大腦
+        # 初始化共用的聽覺與物理感知大腦
         self.whisper_engine = WhisperModelManager()
         self.audio_env_engine = AudioEnvModelManager()
         self.vad_engine = VadModelManager()           
+        self.saliency_engine = SaliencyModelManager() # 共通的重心偵測大腦 
+
+    def _calculate_saliency_focus(self, pil_image: Image.Image) -> dict:
+        """
+        共通邏輯：使用 U2-Net 遮罩計算主體重心的百分比座標。
+        這能協助 Phase 5 的 Remotion 進行 9:16 的智慧裁切。 [cite: 15, 28]
+        """
+        try:
+            mask = self.saliency_engine.get_saliency_mask(pil_image)
+            M = cv2.moments(mask)
+            if M["m00"] != 0:
+                cX = int(M["m10"] / M["m00"])
+                cY = int(M["m01"] / M["m00"])
+                width, height = pil_image.size
+                return {
+                    "x_percent": round((cX / width) * 100, 1),
+                    "y_percent": round((cY / height) * 100, 1)
+                }
+        except Exception as e:
+            print(f"[Saliency Calculation Error]: {e}")
+            
+        return {"x_percent": 50.0, "y_percent": 50.0}
 
     def process(self, file_path: str) -> dict:
-        """定義演算法的骨架 (Template Method)，子類別不應覆寫此方法"""
+        """定義演算法的骨架 (Template Method)"""
         temp_audio_path = None
         try:
-            # 1. 抽取基礎影片 Metadata
             cap = cv2.VideoCapture(file_path)
             width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -35,12 +57,11 @@ class AbstractVideoProcessor(MediaStrategy):
             duration = float(frame_count) / float(fps) if fps > 0 else 0.0
             cap.release()
 
-            # 2. 聽覺分析：音畫分離與人聲/環境音辨識
+            # 音訊分析邏輯
             temp_audio = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
             temp_audio_path = temp_audio.name
             temp_audio.close()
             
-            # 使用 FFmpeg 快速抽音軌
             subprocess.run(
                 ["ffmpeg", "-y", "-i", file_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", temp_audio_path],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
@@ -49,16 +70,13 @@ class AbstractVideoProcessor(MediaStrategy):
             audio_transcript = None
             env_sounds = []
             if os.path.exists(temp_audio_path) and os.path.getsize(temp_audio_path) > 1000:
-                # VAD 防呆與 Whisper 逐字稿
                 if self.vad_engine.has_speech(temp_audio_path):
                     audio_transcript = self.whisper_engine.transcribe(temp_audio_path)
-                # 開放世界環境音描述 (已替換為 Whisper-audio-caption)
                 env_sounds = self.audio_env_engine.classify_environment(temp_audio_path)
 
-            # 3. 視覺分析：呼叫抽象方法，由子類別決定要「全局看」還是「切片看」
+            # 呼叫子類別實作的視覺分析
             visual_metadata = self.analyze_visual_semantics(file_path, duration)
 
-            # 4. 組裝最終結果
             return {
                 "status": "success",
                 "type": "video",
@@ -69,21 +87,16 @@ class AbstractVideoProcessor(MediaStrategy):
                     "duration": duration,
                     "audio_transcript": audio_transcript, 
                     "environmental_sounds": env_sounds,
-                    **visual_metadata # 展開子類別回傳的視覺分析結果
+                    **visual_metadata 
                 }
             }
         except Exception as e:
             return {"status": "error", "file": file_path, "message": str(e)}
         finally:
-            # 清理暫存音軌
             if temp_audio_path and os.path.exists(temp_audio_path):
                 try: os.remove(temp_audio_path)
                 except OSError: pass
 
     @abstractmethod
     def analyze_visual_semantics(self, file_path: str, duration: float) -> dict:
-        """
-        抽象擴充點 (Hook)：
-        子類別必須實作這個方法，回傳包含視覺特徵 (caption, scores, action_index 等) 的字典。
-        """
         pass
