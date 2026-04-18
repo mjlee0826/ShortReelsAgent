@@ -8,19 +8,21 @@ from PIL import Image
 import pillow_heif
 
 from MediaProcessor.MediaStrategy import MediaStrategy
-from QwenModelManager import QwenModelManager          
-from WhisperModelManager import WhisperModelManager    
-from AudioEnvModelManager import AudioEnvModelManager  
-from SaliencyModelManager import SaliencyModelManager 
-from VadModelManager import VadModelManager           
-from QAlignModelManager import QAlignModelManager      # 【新增】美學評分大腦
+from Model.QwenModelManager import QwenModelManager          
+from Model.WhisperModelManager import WhisperModelManager    
+from Model.AudioEnvModelManager import AudioEnvModelManager  
+from Model.SaliencyModelManager import SaliencyModelManager 
+from Model.VadModelManager import VadModelManager           
+# 【替換】匯入拆分後的雙打分大腦
+from Model.ManiqaModelManager import ManiqaModelManager
+from Model.LaionModelManager import LaionModelManager
 
 pillow_heif.register_heif_opener()
 
 class VideoProcessor(MediaStrategy):
     """
     具體策略：處理動態影片。
-    重構：整合雙腦架構 (Q-Align 打分 + Qwen 影評)。
+    重構：整合雙腦架構 (PyIQA 技術打分 + LAION 美學打分 + Qwen 影評)。
     """
     def __init__(self):
         super().__init__()
@@ -30,7 +32,8 @@ class VideoProcessor(MediaStrategy):
         self.audio_env_engine = AudioEnvModelManager()
         self.saliency_engine = SaliencyModelManager() 
         self.vad_engine = VadModelManager()           
-        self.scorer_engine = QAlignModelManager()      # 依賴注入
+        self.tech_engine = ManiqaModelManager()   # 技術畫質大腦
+        self.aes_engine = LaionModelManager()    # 美學大腦
 
     def _get_ffprobe_metadata(self, file_path: str) -> dict:
         cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", file_path]
@@ -76,7 +79,8 @@ class VideoProcessor(MediaStrategy):
             cap.release()
 
             subject_focus = {"x": 50, "y": 50}
-            scores = {"technical_score": 60.0, "aesthetic_score": 60.0}
+            tech_score = 60.0
+            aes_score = 60.0
 
             if ret:
                 pil_frame = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
@@ -90,12 +94,15 @@ class VideoProcessor(MediaStrategy):
                         "y": int((M["m01"] / M["m00"]) / height * 100)
                     }
 
-                # 2. Q-Align 品質與美感評估
-                scores = self.scorer_engine.score_media(pil_frame)
-                if scores["technical_score"] < 50.0:
+                # 2. 雙重評估機制
+                tech_score = self.tech_engine.get_technical_score(pil_frame)
+                aes_score = self.aes_engine.get_aesthetic_score(pil_frame)
+                
+                # 針對手震模糊嚴重的影片進行防呆阻斷
+                if tech_score < 40.0:
                     return {
                         "status": "rejected", 
-                        "reason": f"Q-Align Technical Score too low: {scores['technical_score']}", 
+                        "reason": f"Technical Score too low (Blur/Noise): {tech_score:.1f}", 
                         "file": file_path
                     }
 
@@ -130,9 +137,9 @@ class VideoProcessor(MediaStrategy):
                     "creation_time": meta_info.get("creation_time"),
                     "location_gps": meta_info.get("location"),
                     "visual_caption": vlm_result.get("caption"),
-                    "cinematic_critique": vlm_result.get("cinematic_critique"), # 【新增】攝影評語
-                    "technical_score": scores["technical_score"],               # 【新增】畫質分數
-                    "aesthetic_score": scores["aesthetic_score"],               # 【新增】美感分數
+                    "cinematic_critique": vlm_result.get("cinematic_critique"), 
+                    "technical_score": round(tech_score, 2),
+                    "aesthetic_score": round(aes_score, 2),
                     "subject_focus": subject_focus, 
                     "audio_transcript": audio_transcript, 
                     "environmental_sounds": env_sounds

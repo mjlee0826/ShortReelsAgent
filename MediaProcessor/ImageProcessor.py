@@ -4,23 +4,26 @@ import cv2
 import numpy as np
 
 from MediaProcessor.MediaStrategy import MediaStrategy
-from QwenModelManager import QwenModelManager
-from SaliencyModelManager import SaliencyModelManager
-from QAlignModelManager import QAlignModelManager
+from Model.QwenModelManager import QwenModelManager
+from Model.SaliencyModelManager import SaliencyModelManager
+# 【替換】匯入拆分後的雙打分大腦
+from Model.ManiqaModelManager import ManiqaModelManager
+from Model.LaionModelManager import LaionModelManager
 
 pillow_heif.register_heif_opener()
 
 class ImageProcessor(MediaStrategy):
     """
     具體策略：處理靜態照片 (支援 JPG, PNG, HEIC)
-    重構：使用 Q-Align 取代 OpenCV 進行畫質與美學評估。
+    重構：引入 PyIQA (硬體指標) 與 LAION Aesthetic (美學指標) 雙重過濾機制。
     """
     def __init__(self):
         super().__init__()
-        # 依賴注入多顆大腦
+        # 依賴注入四顆大腦
         self.vision_engine = QwenModelManager()
         self.saliency_engine = SaliencyModelManager()
-        self.scorer_engine = QAlignModelManager() 
+        self.tech_engine = ManiqaModelManager()
+        self.aes_engine = LaionModelManager()
 
     def _extract_exif_metadata(self, pil_image: Image.Image) -> dict:
         metadata = {"datetime": None, "gps_info": None}
@@ -66,14 +69,16 @@ class ImageProcessor(MediaStrategy):
             else:
                 subject_focus = {"x": 50, "y": 50} 
 
-            # 2. 【核心改動】使用 Q-Align 評估技術畫質與美學
-            scores = self.scorer_engine.score_media(pil_image)
+            # 2. 【核心改動】雙重評分機制
+            tech_score = self.tech_engine.get_technical_score(pil_image)
+            aes_score = self.aes_engine.get_aesthetic_score(pil_image)
             
-            # 如果技術畫質太差 (例如嚴重的動態模糊、失焦)，直接淘汰
-            if scores["technical_score"] < 50.0:
+            # 如果技術畫質太差 (例如嚴重的動態模糊、失焦)，直接在前端淘汰
+            # 閾值可依據 MANIQA 的實際表現微調 (此處設為 40 分)
+            if tech_score < 40.0:
                 return {
                     "status": "rejected", 
-                    "reason": f"Q-Align Technical Score too low: {scores['technical_score']}", 
+                    "reason": f"Technical Score too low (Blur/Noise): {tech_score:.1f}", 
                     "file": file_path
                 }
 
@@ -90,9 +95,9 @@ class ImageProcessor(MediaStrategy):
                     "height": height,           
                     "aspect_ratio": aspect_ratio, 
                     "caption": vlm_result.get("caption"),
-                    "cinematic_critique": vlm_result.get("cinematic_critique"), # 【新增】攝影評語
-                    "technical_score": scores["technical_score"],               # 【新增】畫質分數
-                    "aesthetic_score": scores["aesthetic_score"],               # 【新增】美感分數
+                    "cinematic_critique": vlm_result.get("cinematic_critique"), 
+                    "technical_score": round(tech_score, 2), # 畫質分數 (精準度至小數點後兩位)
+                    "aesthetic_score": round(aes_score, 2),  # 美感分數
                     "subject_focus": subject_focus, 
                     "creation_time": exif_data.get("datetime"),
                     "location_gps": exif_data.get("gps_info")
