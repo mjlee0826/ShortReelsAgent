@@ -9,6 +9,8 @@ from Model.SaliencyModelManager import SaliencyModelManager
 # 【替換】匯入拆分後的雙打分大腦
 from Model.MusiqModelManager import MusiqModelManager
 from Model.LaionModelManager import LaionModelManager
+from PromptManager.TaskMode import TaskMode
+
 
 pillow_heif.register_heif_opener()
 
@@ -84,7 +86,7 @@ class ImageProcessor(MediaStrategy):
 
             # 3. 呼叫大腦 B (Qwen) 給出攝影評語與描述
             exif_data = self._extract_exif_metadata(pil_image)
-            vlm_result = self.vision_engine.analyze_media(pil_image, media_type="image")
+            vlm_result = self.vision_engine.analyze_media(pil_image, media_type=TaskMode.GLOBAL_ANALYSIS)
 
             return {
                 "status": "success",
