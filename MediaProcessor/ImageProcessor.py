@@ -22,7 +22,7 @@ class ImageProcessor(MediaStrategy):
         # 依賴注入四顆大腦
         self.vision_engine = QwenModelManager()
         self.saliency_engine = SaliencyModelManager()
-        self.tech_engine = ManiqaModelManager()
+        self.tech_engine = MusiqModelManager()
         self.aes_engine = LaionModelManager()
 
     def _extract_exif_metadata(self, pil_image: Image.Image) -> dict:

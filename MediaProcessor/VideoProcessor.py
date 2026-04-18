@@ -32,7 +32,7 @@ class VideoProcessor(MediaStrategy):
         self.audio_env_engine = AudioEnvModelManager()
         self.saliency_engine = SaliencyModelManager() 
         self.vad_engine = VadModelManager()           
-        self.tech_engine = ManiqaModelManager()   # 技術畫質大腦
+        self.tech_engine = MusiqModelManager()   # 技術畫質大腦
         self.aes_engine = LaionModelManager()    # 美學大腦
 
     def _get_ffprobe_metadata(self, file_path: str) -> dict:
