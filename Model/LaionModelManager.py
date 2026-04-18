@@ -65,7 +65,7 @@ class LaionModelManager:
 
     def _normalize_score(self, raw_score: float) -> float:
         """
-        LAION 分數通常為 1~10 分制，將其轉換為 0~100 分制。
+        LAION 分數通常為 1~10 分制，將其轉換為系統統一的 0~100 分制。
         """
         clamped_score = max(1.0, min(10.0, raw_score))
         return (clamped_score - 1.0) / 9.0 * 100.0
@@ -81,13 +81,22 @@ class LaionModelManager:
             inputs = self.processor(images=pil_image, return_tensors="pt").to(self.device)
             
             with torch.no_grad():
-                # 取得模型完整輸出
-                outputs = self.clip_model(**inputs)
-                # 明確指定提取 image_embeds 張量
-                image_features = outputs.image_embeds 
+                # 【修復 Bug】使用 get_image_features 只跑視覺通道，避免缺少 input_ids 的報錯
+                image_features = self.clip_model.get_image_features(**inputs)
+                
+                # 【防呆機制】因應不同版本的 transformers，確保取出來的一定是純 Tensor
+                if not isinstance(image_features, torch.Tensor):
+                    if hasattr(image_features, "image_embeds"):
+                        image_features = image_features.image_embeds
+                    elif hasattr(image_features, "pooler_output"):
+                        image_features = image_features.pooler_output
+                    else:
+                        image_features = image_features[0]
 
-                # 接下來的正規化就能順利執行了
+                # L2 正規化 (LAION 模型的硬性要求)
                 image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
+                
+                # 透過 MLP 預測分數
                 prediction = self.mlp(image_features)
                 raw_score = prediction.item()
                 
