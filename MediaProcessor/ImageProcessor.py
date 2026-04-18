@@ -7,7 +7,7 @@ from MediaProcessor.MediaStrategy import MediaStrategy
 from Model.QwenModelManager import QwenModelManager
 from Model.SaliencyModelManager import SaliencyModelManager
 # 【替換】匯入拆分後的雙打分大腦
-from Model.ManiqaModelManager import ManiqaModelManager
+from Model.MusiqModelManager import MusiqModelManager
 from Model.LaionModelManager import LaionModelManager
 
 pillow_heif.register_heif_opener()
