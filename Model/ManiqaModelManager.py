@@ -53,7 +53,6 @@ class ManiqaModelManager:
                 # 取得預測分數
                 raw_score = self.metric_network(img_tensor).item()
             
-            print(raw_score)
             return self._normalize_score(raw_score)
             
         except Exception as e:

@@ -99,7 +99,9 @@ class LaionModelManager:
                 # 透過 MLP 預測分數
                 prediction = self.mlp(image_features)
                 raw_score = prediction.item()
-                
+            
+            print(prediction)
+            print(raw_score)
             return self._normalize_score(raw_score)
             
         except Exception as e:
