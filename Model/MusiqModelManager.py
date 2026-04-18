@@ -38,6 +38,16 @@ class MusiqModelManager:
             if pil_image.mode != "RGB":
                 pil_image = pil_image.convert("RGB")
             
+            
+            max_size = 512
+            width, height = pil_image.size
+            if min(width, height) > max_size:
+                # 保持比例縮放，讓短邊等於 max_size
+                scale = max_size / min(width, height)
+                new_width = int(width * scale)
+                new_height = int(height * scale)
+                pil_image = pil_image.resize((new_width, new_height), Image.Resampling.BILINEAR)
+                
             # 將 PIL Image 轉換為 PyIQA 預期的 Tensor 格式 [1, C, H, W]
             img_tensor = self.transform(pil_image).unsqueeze(0).to(self.device)
             

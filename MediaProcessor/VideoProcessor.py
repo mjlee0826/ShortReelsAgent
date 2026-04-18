@@ -99,7 +99,7 @@ class VideoProcessor(MediaStrategy):
                 aes_score = self.aes_engine.get_aesthetic_score(pil_frame)
                 
                 # 針對手震模糊嚴重的影片進行防呆阻斷
-                if tech_score < 40.0:
+                if tech_score < 30.0:
                     return {
                         "status": "rejected", 
                         "reason": f"Technical Score too low (Blur/Noise): {tech_score:.1f}", 

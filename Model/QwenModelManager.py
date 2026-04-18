@@ -35,17 +35,24 @@ class QwenModelManager:
         self.processor = AutoProcessor.from_pretrained(self.model_id)
 
     def _parse_json_output(self, text: str) -> dict:
-        """重構：解析 Caption 與 Cinematic Critique"""
-        match = re.search(r'\{.*\}', text, re.DOTALL)
-        if match:
-            try:
-                result = json.loads(match.group(0))
-                if "cinematic_critique" not in result:
-                    result["cinematic_critique"] = ""
-                return result
-            except json.JSONDecodeError:
-                pass
-        return {"caption": text, "cinematic_critique": ""}
+        """重構：解析 Caption 與 Cinematic Critique，具備 Markdown 剝除能力"""
+        try:
+            # 清理字串頭尾的空白與可能出現的 markdown 標記
+            cleaned_text = text.strip()
+            if cleaned_text.startswith("```json"):
+                cleaned_text = cleaned_text[7:]
+            elif cleaned_text.startswith("```"):
+                cleaned_text = cleaned_text[3:]
+                
+            if cleaned_text.endswith("```"):
+                cleaned_text = cleaned_text[:-3]
+                
+            # 處理潛在的控制字元後解析 JSON
+            return json.loads(cleaned_text.strip())
+        except Exception as e:
+            print(f"[JSON Parse Error] 無法解析 Qwen 輸出: {e}")
+            # 如果真的解析徹底失敗，至少回傳原始字串讓使用者能看到
+            return {"caption": text, "cinematic_critique": "JSON 解析失敗"}
 
     def analyze_media(self, media_input, media_type="image") -> dict:
         prompt_text = self.prompt_manager.get_media_analysis_prompt()
