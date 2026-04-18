@@ -84,6 +84,10 @@ class QwenModelManager:
                 generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
             )[0]
 
+            print('=' * 20)
+            print(output_text)
+            print('=' * 20)
+
             return self._parse_json_output(output_text)
             
         except Exception as e:
