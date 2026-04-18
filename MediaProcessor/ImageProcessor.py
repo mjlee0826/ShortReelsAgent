@@ -86,7 +86,7 @@ class ImageProcessor(MediaStrategy):
 
             # 3. 呼叫大腦 B (Qwen) 給出攝影評語與描述
             exif_data = self._extract_exif_metadata(pil_image)
-            vlm_result = self.vision_engine.analyze_media(pil_image, media_type="image", media_type=TaskMode.GLOBAL_ANALYSIS)
+            vlm_result = self.vision_engine.analyze_media(pil_image, media_type="image", mode=TaskMode.GLOBAL_ANALYSIS)
 
             return {
                 "status": "success",
