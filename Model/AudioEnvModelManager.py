@@ -1,12 +1,16 @@
 import torch
 import librosa
 import gc
-from transformers import ClapModel, ClapProcessor
+import os
+from transformers import AutoProcessor, AutoModelForSeq2SeqLM
 
 class AudioEnvModelManager:
     """
-    單例模式 (Singleton): 確保 CLAP 環境音效模型只實例化一次。
-    用於分析音檔，給出環境聲音的標籤與信心度。
+    單例模式 (Singleton): 確保 WavCaps 環境音效描述模型只實例化一次。
+    
+    技術核心：
+    將音訊感知從「選擇題 (Classification)」提升為「申論題 (Captioning)」。
+    採用 HTSAT-BART 架構，參數量約 200M，具備極高的推理速度與環境理解力。
     """
     _instance = None
 
@@ -16,62 +20,78 @@ class AudioEnvModelManager:
             try:
                 cls._instance._initialize()
             except Exception as e:
-                # 防呆機制：初始化失敗時清空實例，避免留下半殘物件
                 cls._instance = None
                 raise e
         return cls._instance
 
     def _initialize(self):
+        """
+        初始化模型與處理器，並設定硬體加速。
+        """
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.model_id = "laion/clap-htsat-unfused"
+        # 使用 WavCaps 預訓練模型，這是在旅遊場景中表現最穩定的輕量級版本
+        self.model_id = "nanael-shinn/wavcaps-htsat-bart" 
         
-        self.processor = ClapProcessor.from_pretrained(self.model_id)
-        self.model = ClapModel.from_pretrained(self.model_id).to(self.device)
+        # 載入處理器
+        self.processor = AutoProcessor.from_pretrained(self.model_id)
         
-        # 擴充我們在旅遊影片中關注的環境音標籤
-        self.candidate_labels = [
-            "people talking", "ocean waves", "city traffic", 
-            "wind blowing", "dog barking", "music playing", 
-            "restaurant noise", "nature sounds", "footsteps", "silence"
-        ]
+        # 載入模型並強制使用 FP16 精度，以利與 Qwen2-VL 共存於 VRAM
+        self.model = AutoModelForSeq2SeqLM.from_pretrained(
+            self.model_id,
+            torch_dtype=torch.float16 if self.device == "cuda" else torch.float32
+        ).to(self.device)
+        
+        # 切換至評估模式
+        self.model.eval()
+
+    def get_audio_description(self, audio_path: str) -> str:
+        """
+        核心方法：輸入音檔路徑，回傳自然語言的環境描述。
+        """
+        try:
+            # 讀取音檔並重採樣。WavCaps 模型通常要求 32kHz 或 44.1kHz
+            # 這裡設定 sr=32000 以符合多數 HTSAT 變體的訓練標準
+            audio_array, sampling_rate = librosa.load(audio_path, sr=32000)
+            
+            # 特徵提取並搬移至 GPU
+            inputs = self.processor(
+                audio_array, 
+                sampling_rate=sampling_rate, 
+                return_tensors="pt"
+            ).to(self.device)
+
+            # 如果在 CUDA 上執行，確保輸入特徵也是半精度
+            if self.device == "cuda":
+                inputs = {k: v.to(torch.float16) if v.is_floating_point() else v for k, v in inputs.items()}
+
+            with torch.no_grad():
+                # 生成環境描述，設定適當的長度限制以維持推理速度
+                output_ids = self.model.generate(
+                    **inputs, 
+                    max_new_tokens=128, 
+                    num_beams=4,      # 使用 Beam Search 提升句子流暢度
+                    early_stopping=True
+                )
+                
+                # 解碼為純文字
+                caption = self.processor.batch_decode(output_ids, skip_special_tokens=True)[0]
+            
+            return caption.strip()
+            
+        except Exception as e:
+            print(f"[AudioEnv Error] WavCaps 生成描述失敗: {e}")
+            return "Ambient background noise"
+        finally:
+            # 強制回收 VRAM 片段，避免 Phase 1 批次處理時堆積過多顯存
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            gc.collect()
 
     def classify_environment(self, audio_path: str) -> list:
         """
-        輸入音檔路徑，回傳符合的環境音標籤與分數。
+        相容性介面：為了不破壞現有 VideoProcessor.py 的 Metadata 串接邏輯。
+        將原本的 List[Dict] 格式包裝自然語言描述回傳。
         """
-        try:
-            # 使用 librosa 讀取音檔，並統一採樣率為 48kHz (CLAP 模型預設要求)
-            audio_array, sampling_rate = librosa.load(audio_path, sr=48000)
-            
-            inputs = self.processor(
-                text=self.candidate_labels, 
-                audio=audio_array, 
-                return_tensors="pt", 
-                padding=True, 
-                sampling_rate=sampling_rate
-            ).to(self.device)
-
-            # 加入 torch.no_grad() 避免在推論時計算梯度，可大幅節省 VRAM
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-                logits_per_audio = outputs.logits_per_audio
-                probs = logits_per_audio.softmax(dim=-1).detach().cpu().numpy()[0]
-
-            results = []
-            for label, prob in zip(self.candidate_labels, probs):
-                # 【修改閾值】將原本的 0.15 調降至 0.05，讓微弱的環境音也能被捕獲
-                if prob > 0.05: 
-                    results.append({"sound": label, "score": float(prob)})
-            
-            return sorted(results, key=lambda x: x['score'], reverse=True)
-            
-        except Exception as e:
-            # 【取消靜默失敗】把真正的錯誤原因印出來，方便除錯
-            print(f"[CLAP Error] 環境音分析失敗: {str(e)}")
-            return []
-            
-        finally:
-            # 手動釋放 VRAM，確保下一個影片進來時不會 OOM
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                gc.collect()
+        description = self.get_audio_description(audio_path)
+        # 回傳格式與原 CLAP 保持一致，但標籤改為描述內容
+        return [{"sound": "environment_description", "caption": description, "score": 1.0}]

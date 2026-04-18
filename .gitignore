@@ -3,3 +3,5 @@ dataset
 __pycache__
 */__pycache__
 */*/__pycache__
+sac+logos+ava1-l14-linearMSE.pth
+*/sac+logos+ava1-l14-linearMSE.pth

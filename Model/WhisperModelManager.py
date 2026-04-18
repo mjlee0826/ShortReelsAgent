@@ -27,7 +27,8 @@ class WhisperModelManager:
             model=self.model_id,
             device=self.device,
             chunk_length_s=30,
-            return_timestamps=True 
+            return_timestamps=True,
+            torch_dtype=torch.float16 
         )
 
     def _filter_hallucination(self, raw_result: dict) -> dict:
