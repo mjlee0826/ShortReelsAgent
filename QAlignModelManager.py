@@ -2,6 +2,11 @@ import torch
 from PIL import Image
 from transformers import AutoModelForCausalLM, AutoProcessor
 
+import transformers.pytorch_utils
+if not hasattr(transformers.pytorch_utils, 'find_pruneable_heads_and_indices'):
+    # 偽造一個空函數，回傳空集合與空陣列以防報錯
+    transformers.pytorch_utils.find_pruneable_heads_and_indices = lambda *args, **kwargs: (set(), [])
+
 class QAlignModelManager:
     """
     單例模式 (Singleton): 美學與畫質評分大腦 (大腦 A)。
