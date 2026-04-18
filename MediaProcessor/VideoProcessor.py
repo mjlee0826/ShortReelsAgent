@@ -58,20 +58,22 @@ class VideoProcessor(MediaStrategy):
     def process(self, file_path: str) -> dict:
         temp_audio_path = None
         try:
-            # 1. 取得底層 Metadata
             meta_info = self._get_ffprobe_metadata(file_path)
 
-            # 使用 OpenCV 只為了取得影片總長度，不進行任何影像運算
             cap = cv2.VideoCapture(file_path)
             if not cap.isOpened():
                 return {"status": "error", "file": file_path, "message": "Failed to read video"}
+            
+            # 【新增】擷取影片的原始長寬屬性
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            aspect_ratio = round(width / height, 4) if height > 0 else 0
+            
             fps = cap.get(cv2.CAP_PROP_FPS)
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             duration = total_frames / fps if fps > 0 else 0
             cap.release()
 
-            # 2. 【核心改動】視覺與動態解析全面交由 Qwen2-VL
-            # 直接傳入檔案路徑，Qwen 會自己在底層抽幀分析動作與手震
             vlm_result = self.vision_engine.analyze_media(file_path, media_type="video")
 
             if vlm_result.get("is_blurry", False):
@@ -82,7 +84,6 @@ class VideoProcessor(MediaStrategy):
                     "vlm_caption": vlm_result.get("caption")
                 }
 
-            # 3. 音訊特徵萃取 (維持不變，強大的多軌解析)
             audio_transcript = {"text": "", "chunks": []}
             env_sounds = []
 
@@ -100,10 +101,14 @@ class VideoProcessor(MediaStrategy):
                 "type": "video",
                 "file": file_path,
                 "metadata": {
+                    "width": width,               # 【新增】
+                    "height": height,             # 【新增】
+                    "aspect_ratio": aspect_ratio, # 【新增】
                     "duration": duration,
                     "creation_time": meta_info.get("creation_time"),
                     "location_gps": meta_info.get("location"),
                     "visual_caption": vlm_result.get("caption"),
+                    "subject_focus": vlm_result.get("subject_focus"), # 【新增】主體座標
                     "audio_transcript": audio_transcript,
                     "environmental_sounds": env_sounds
                 }

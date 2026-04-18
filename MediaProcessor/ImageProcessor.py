@@ -38,22 +38,21 @@ class ImageProcessor(MediaStrategy):
 
     def process(self, file_path: str) -> dict:
         try:
-            # 使用 PIL 開啟圖片 (支援 Apple HEIC)
             pil_image = Image.open(file_path).convert('RGB')
             
-            # 提取底層 GPS 資訊
+            # 【新增】萃取素材的原始寬度、高度與長寬比 (以符合架構藍圖要求)
+            width, height = pil_image.size
+            aspect_ratio = round(width / height, 4) if height > 0 else 0
+            
             exif_data = self._extract_exif_metadata(pil_image)
-
-            # 【核心改動】將圖片交給 Qwen VLM 同時進行內容描述與品質判斷
             vlm_result = self.vision_engine.analyze_media(pil_image, media_type="image")
 
-            # 利用大語言模型的判斷來決定是否為廢片
             if vlm_result.get("is_blurry", False):
                 return {
                     "status": "rejected", 
                     "reason": "VLM judged as too blurry or out of focus", 
                     "file": file_path,
-                    "vlm_caption": vlm_result.get("caption") # 記錄被拒絕的原因
+                    "vlm_caption": vlm_result.get("caption") 
                 }
 
             return {
@@ -61,7 +60,11 @@ class ImageProcessor(MediaStrategy):
                 "type": "image",
                 "file": file_path,
                 "metadata": {
+                    "width": width,             # 【新增】
+                    "height": height,           # 【新增】
+                    "aspect_ratio": aspect_ratio, # 【新增】
                     "caption": vlm_result.get("caption"),
+                    "subject_focus": vlm_result.get("subject_focus"), # 【新增】主體座標
                     "creation_time": exif_data.get("datetime"),
                     "location_gps": exif_data.get("gps_info")
                 }
