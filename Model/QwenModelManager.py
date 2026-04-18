@@ -2,7 +2,7 @@ import torch
 import gc
 import re
 import json
-from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
+from transformers import Qwen2VLForConditionalGeneration, AutoProcessor, BitsAndBytesConfig
 from qwen_vl_utils import process_vision_info
 from PromptManager.BasePromptManager import BasePromptManager
 from PromptManager.DefaultPromptManager import DefaultPromptManager
@@ -26,9 +26,12 @@ class QwenModelManager:
         self.model_id = "Qwen/Qwen2-VL-7B-Instruct"
         self.prompt_manager = prompt_manager if prompt_manager else DefaultPromptManager()
         
+        quantization_config = BitsAndBytesConfig(load_in_8bit=True)
         self.model = Qwen2VLForConditionalGeneration.from_pretrained(
-            self.model_id, torch_dtype=torch.bfloat16
-        ).to(self.device)
+            self.model_id, 
+            quantization_config=quantization_config,
+            device_map="cuda" # 讓 accelerate 自動分配
+        )
         self.processor = AutoProcessor.from_pretrained(self.model_id)
 
     def _parse_json_output(self, text: str) -> dict:

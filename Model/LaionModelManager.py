@@ -81,10 +81,13 @@ class LaionModelManager:
             inputs = self.processor(images=pil_image, return_tensors="pt").to(self.device)
             
             with torch.no_grad():
-                # 取得 CLIP 特徵並正規化
-                image_features = self.clip_model.get_image_features(**inputs)
+                # 取得模型完整輸出
+                outputs = self.clip_model(**inputs)
+                # 明確指定提取 image_embeds 張量
+                image_features = outputs.image_embeds 
+
+                # 接下來的正規化就能順利執行了
                 image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
-                # 透過 MLP 預測美學分數
                 prediction = self.mlp(image_features)
                 raw_score = prediction.item()
                 
