@@ -100,8 +100,6 @@ class LaionModelManager:
                 prediction = self.mlp(image_features)
                 raw_score = prediction.item()
             
-            print(prediction)
-            print(raw_score)
             return self._normalize_score(raw_score)
             
         except Exception as e:

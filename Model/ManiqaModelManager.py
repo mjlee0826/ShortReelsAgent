@@ -31,12 +31,13 @@ class ManiqaModelManager:
 
     def _normalize_score(self, raw_score: float) -> float:
         """
-        MANIQA 的輸出通常為 MOS 分數 (Mean Opinion Score，約落在 1~5 之間)。
-        我們將其標準化轉換為系統統一的 0~100 分制。
+        【已修復 Bug】
+        PyIQA 框架下的 MANIQA 模型預設會將分數正規化到 0.0 ~ 1.0 之間 (越高代表畫質越好)。
+        我們直接將其按比例放大為系統統一的 0~100 分制。
         """
-        # 防止超出邊界
-        clamped_score = max(1.0, min(5.0, raw_score))
-        return (clamped_score - 1.0) / 4.0 * 100.0
+        # 防止意外的極端值超出邊界
+        clamped_score = max(0.0, min(1.0, raw_score))
+        return clamped_score * 100.0
 
     def get_technical_score(self, pil_image: Image.Image) -> float:
         """
@@ -50,14 +51,14 @@ class ManiqaModelManager:
             img_tensor = self.transform(pil_image).unsqueeze(0).to(self.device)
             
             with torch.no_grad():
-                # 取得預測分數
+                # 取得預測分數 (預期範圍 0.0 ~ 1.0)
                 raw_score = self.metric_network(img_tensor).item()
             
             return self._normalize_score(raw_score)
             
         except Exception as e:
             print(f"[Technical Scorer Error] 畫質評估失敗: {e}")
-            return 60.0 # 失敗時給予預設及格分
+            return 60.0 # 失敗時給予預設及格分，避免誤砍素材
         finally:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
