@@ -45,7 +45,7 @@ class AudioEnvModelManager:
             
             inputs = self.processor(
                 text=self.candidate_labels, 
-                audios=audio_array, 
+                audio=audio_array, 
                 return_tensors="pt", 
                 padding=True, 
                 sampling_rate=sampling_rate
