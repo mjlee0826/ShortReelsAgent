@@ -36,7 +36,8 @@ class QwenModelManager:
         self.model = Qwen2VLForConditionalGeneration.from_pretrained(
             self.model_id, 
             quantization_config=quantization_config,
-            device_map="auto" # 自動分配層級，避免與 Whisper 衝突
+            device_map="auto", # 自動分配層級，避免與 Whisper 衝突
+            dtype=torch.float16
         )
         self.processor = AutoProcessor.from_pretrained(self.model_id)
 
@@ -98,14 +99,23 @@ class QwenModelManager:
 
     def _parse_json_output(self, text: str) -> dict:
         """
-        強化的 JSON 解析器，專門處理 LLM 可能附帶的 Markdown 或雜字。
+        強化的 JSON 解析器，支援處理 Markdown 區塊與可能的換行符號。
         """
         try:
-            # 使用 Regex 提取第一個 { 到最後一個 } 之間的內容
-            match = re.search(r'\{.*\}', text, re.DOTALL)
+            # 1. 移除可能的 Markdown 標記
+            cleaned_text = text.strip()
+            if "```json" in cleaned_text:
+                cleaned_text = cleaned_text.split("```json")[-1].split("```")[0].strip()
+            elif "```" in cleaned_text:
+                cleaned_text = cleaned_text.split("```")[-1].split("```")[0].strip()
+            
+            # 2. 使用 Regex 再次兜底尋找大括號
+            match = re.search(r'\{.*\}', cleaned_text, re.DOTALL)
             if match:
                 return json.loads(match.group(0))
-            return {"raw_text": text}
+            
+            # 3. 如果連大括號都沒有，直接將整段文字包裝成 caption 回傳
+            return {"caption": cleaned_text.strip()}
         except Exception as e:
-            print(f"[JSON Parse Error] 無法解析 Qwen 輸出: {e}")
-            return {"error": "JSON parse error", "content": text}
+            print(f"[JSON Parse Error] 解析失敗，內容: {text}, 錯誤: {e}")
+            return {"caption": "Unknown action"}
