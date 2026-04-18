@@ -8,7 +8,7 @@ from PromptManager.BasePromptManager import BasePromptManager
 from PromptManager.DefaultPromptManager import DefaultPromptManager
 
 class QwenModelManager:
-    """單例模式 (Singleton): 統一的視覺與影片大腦。"""
+    """單例模式 (Singleton): 統一的視覺與影片大腦 (大腦 B)。專職輸出語意與攝影評論。"""
     _instance = None
 
     def __new__(cls, prompt_manager: BasePromptManager = None):
@@ -32,14 +32,17 @@ class QwenModelManager:
         self.processor = AutoProcessor.from_pretrained(self.model_id)
 
     def _parse_json_output(self, text: str) -> dict:
-        """重構：僅解析 Caption"""
+        """重構：解析 Caption 與 Cinematic Critique"""
         match = re.search(r'\{.*\}', text, re.DOTALL)
         if match:
             try:
-                return json.loads(match.group(0))
+                result = json.loads(match.group(0))
+                if "cinematic_critique" not in result:
+                    result["cinematic_critique"] = ""
+                return result
             except json.JSONDecodeError:
                 pass
-        return {"caption": text}
+        return {"caption": text, "cinematic_critique": ""}
 
     def analyze_media(self, media_input, media_type="image") -> dict:
         prompt_text = self.prompt_manager.get_media_analysis_prompt()
@@ -78,7 +81,7 @@ class QwenModelManager:
             
         except Exception as e:
             print(f"[Qwen VLM Error] 推理失敗: {str(e)}")
-            return {"caption": "Failed to analyze."}
+            return {"caption": "Failed to analyze.", "cinematic_critique": ""}
         finally:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()

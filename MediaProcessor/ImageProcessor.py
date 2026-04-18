@@ -1,26 +1,28 @@
 from PIL import Image, ExifTags
 import pillow_heif
+import cv2
+import numpy as np
+
 from MediaProcessor.MediaStrategy import MediaStrategy
 from QwenModelManager import QwenModelManager
 from SaliencyModelManager import SaliencyModelManager
-import cv2
-import numpy as np
+from QAlignModelManager import QAlignModelManager
 
 pillow_heif.register_heif_opener()
 
 class ImageProcessor(MediaStrategy):
     """
     具體策略：處理靜態照片 (支援 JPG, PNG, HEIC)
-    重構：移除 OpenCV 物理算法，全面交由 VLM 進行語意與品質審查。
+    重構：使用 Q-Align 取代 OpenCV 進行畫質與美學評估。
     """
     def __init__(self):
         super().__init__()
-        # 初始化統一視覺大腦
+        # 依賴注入多顆大腦
         self.vision_engine = QwenModelManager()
         self.saliency_engine = SaliencyModelManager()
+        self.scorer_engine = QAlignModelManager() 
 
     def _extract_exif_metadata(self, pil_image: Image.Image) -> dict:
-        # ... (維持原樣，略過以省篇幅) ...
         metadata = {"datetime": None, "gps_info": None}
         try:
             exif = pil_image.getexif()
@@ -54,35 +56,28 @@ class ImageProcessor(MediaStrategy):
             width, height = pil_image.size
             aspect_ratio = round(width / height, 4) if height > 0 else 0
             
-            # 【核心邏輯 1】取得顯著性遮罩 (U2-Net Mask)
+            # 1. 計算主體重心 (Saliency U2-Net)
             mask = self.saliency_engine.get_saliency_mask(pil_image)
-            
-            # 【核心邏輯 2】計算主體重心 (Center of Mass)
             M = cv2.moments(mask)
             if M["m00"] != 0:
                 cx = int(M["m10"] / M["m00"])
                 cy = int(M["m01"] / M["m00"])
                 subject_focus = {"x": int(cx / width * 100), "y": int(cy / height * 100)}
             else:
-                subject_focus = {"x": 50, "y": 50} # 找不到主體時回歸中心
+                subject_focus = {"x": 50, "y": 50} 
 
-            # 【核心邏輯 3】Saliency-Masked Laplacian 模糊偵測
-            # 只針對 Mask > 128 (顯著區域) 計算模糊度，完美避開背景散景干擾
-            gray = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2GRAY)
-            laplacian = cv2.Laplacian(gray, cv2.CV_64F)
-            masked_laplacian = laplacian[mask > 128]
+            # 2. 【核心改動】使用 Q-Align 評估技術畫質與美學
+            scores = self.scorer_engine.score_media(pil_image)
             
-            # 如果主體區域大於 0 才計算，否則退回全局計算
-            blur_score = masked_laplacian.var() if len(masked_laplacian) > 0 else laplacian.var()
-
-            # 嚴格的廢片閾值 (實測建議設為 50~100 之間)
-            if blur_score < 50:
+            # 如果技術畫質太差 (例如嚴重的動態模糊、失焦)，直接淘汰
+            if scores["technical_score"] < 50.0:
                 return {
                     "status": "rejected", 
-                    "reason": f"Saliency-Masked Blur (score: {blur_score:.1f})", 
+                    "reason": f"Q-Align Technical Score too low: {scores['technical_score']}", 
                     "file": file_path
                 }
 
+            # 3. 呼叫大腦 B (Qwen) 給出攝影評語與描述
             exif_data = self._extract_exif_metadata(pil_image)
             vlm_result = self.vision_engine.analyze_media(pil_image, media_type="image")
 
@@ -95,7 +90,10 @@ class ImageProcessor(MediaStrategy):
                     "height": height,           
                     "aspect_ratio": aspect_ratio, 
                     "caption": vlm_result.get("caption"),
-                    "subject_focus": subject_focus, # 【精準座標】
+                    "cinematic_critique": vlm_result.get("cinematic_critique"), # 【新增】攝影評語
+                    "technical_score": scores["technical_score"],               # 【新增】畫質分數
+                    "aesthetic_score": scores["aesthetic_score"],               # 【新增】美感分數
+                    "subject_focus": subject_focus, 
                     "creation_time": exif_data.get("datetime"),
                     "location_gps": exif_data.get("gps_info")
                 }

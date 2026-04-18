@@ -3,6 +3,7 @@ import subprocess
 import json
 import os
 import tempfile
+import numpy as np
 from PIL import Image
 import pillow_heif
 
@@ -10,20 +11,26 @@ from MediaProcessor.MediaStrategy import MediaStrategy
 from QwenModelManager import QwenModelManager          
 from WhisperModelManager import WhisperModelManager    
 from AudioEnvModelManager import AudioEnvModelManager  
-from SaliencyModelManager import SaliencyModelManager
-from VadModelManager import VadModelManager
+from SaliencyModelManager import SaliencyModelManager 
+from VadModelManager import VadModelManager           
+from QAlignModelManager import QAlignModelManager      # 【新增】美學評分大腦
 
 pillow_heif.register_heif_opener()
 
 class VideoProcessor(MediaStrategy):
-    """具體策略：處理動態影片"""
+    """
+    具體策略：處理動態影片。
+    重構：整合雙腦架構 (Q-Align 打分 + Qwen 影評)。
+    """
     def __init__(self):
         super().__init__()
+        # 初始化所有單例大腦
         self.vision_engine = QwenModelManager()
         self.whisper_engine = WhisperModelManager()
         self.audio_env_engine = AudioEnvModelManager()
-        self.saliency_engine = SaliencyModelManager()
-        self.vad_engine = VadModelManager()
+        self.saliency_engine = SaliencyModelManager() 
+        self.vad_engine = VadModelManager()           
+        self.scorer_engine = QAlignModelManager()      # 依賴注入
 
     def _get_ffprobe_metadata(self, file_path: str) -> dict:
         cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", file_path]
@@ -63,17 +70,19 @@ class VideoProcessor(MediaStrategy):
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             duration = total_frames / fps if fps > 0 else 0
 
-            # 【核心邏輯 1】抽取影片中段畫面，進行顯著性與模糊度運算
+            # 抽取中段畫面作為代表幀進行評估
             cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, total_frames // 2))
             ret, frame = cap.read()
             cap.release()
 
             subject_focus = {"x": 50, "y": 50}
+            scores = {"technical_score": 60.0, "aesthetic_score": 60.0}
+
             if ret:
                 pil_frame = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-                mask = self.saliency_engine.get_saliency_mask(pil_frame)
                 
-                # 計算主體重心
+                # 1. 顯著性重心
+                mask = self.saliency_engine.get_saliency_mask(pil_frame)
                 M = cv2.moments(mask)
                 if M["m00"] != 0:
                     subject_focus = {
@@ -81,20 +90,16 @@ class VideoProcessor(MediaStrategy):
                         "y": int((M["m01"] / M["m00"]) / height * 100)
                     }
 
-                # Saliency-Masked Laplacian
-                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                laplacian = cv2.Laplacian(gray, cv2.CV_64F)
-                masked_laplacian = laplacian[mask > 128]
-                blur_score = masked_laplacian.var() if len(masked_laplacian) > 0 else laplacian.var()
-
-                if blur_score < 50:
+                # 2. Q-Align 品質與美感評估
+                scores = self.scorer_engine.score_media(pil_frame)
+                if scores["technical_score"] < 50.0:
                     return {
                         "status": "rejected", 
-                        "reason": f"Saliency-Masked Blur (score: {blur_score:.1f})", 
+                        "reason": f"Q-Align Technical Score too low: {scores['technical_score']}", 
                         "file": file_path
                     }
 
-            # 呼叫 Qwen 生成語意
+            # 3. 呼叫大腦 B (Qwen) 取得攝影語意與評語
             vlm_result = self.vision_engine.analyze_media(file_path, media_type="video")
 
             audio_transcript = {"text": "", "chunks": []}
@@ -106,11 +111,11 @@ class VideoProcessor(MediaStrategy):
                 temp_audio.close()
 
                 if self._extract_audio(file_path, temp_audio_path):
-                    # 【核心邏輯 2】VAD 守門員：先確認有人聲，才呼叫 Whisper
+                    # 4. VAD 守門員 + Whisper
                     if self.vad_engine.has_speech(temp_audio_path):
                         audio_transcript = self.whisper_engine.transcribe(temp_audio_path)
                     
-                    # 環境音不受人聲影響，一律進行分析
+                    # 5. 環境音分類
                     env_sounds = self.audio_env_engine.classify_environment(temp_audio_path)
 
             return {
@@ -125,8 +130,11 @@ class VideoProcessor(MediaStrategy):
                     "creation_time": meta_info.get("creation_time"),
                     "location_gps": meta_info.get("location"),
                     "visual_caption": vlm_result.get("caption"),
-                    "subject_focus": subject_focus, # 【精準座標】
-                    "audio_transcript": audio_transcript, # 【已根除幻覺】
+                    "cinematic_critique": vlm_result.get("cinematic_critique"), # 【新增】攝影評語
+                    "technical_score": scores["technical_score"],               # 【新增】畫質分數
+                    "aesthetic_score": scores["aesthetic_score"],               # 【新增】美感分數
+                    "subject_focus": subject_focus, 
+                    "audio_transcript": audio_transcript, 
                     "environmental_sounds": env_sounds
                 }
             }
