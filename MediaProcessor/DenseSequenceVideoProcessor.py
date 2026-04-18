@@ -41,7 +41,7 @@ class DenseSequenceVideoProcessor(AbstractVideoProcessor):
                 )
 
                 # 詢問：「這 3 秒內發生了什麼關鍵動作？」
-                vlm_result = self.vision_engine.analyze_media(chunk_path, media_type=TaskMode.ACTION_INDEX)
+                vlm_result = self.vision_engine.analyze_media(chunk_path, media_type="video", mode=TaskMode.ACTION_INDEX)
                 
                 action_index.append({
                     "start_time": round(start_time, 2),
