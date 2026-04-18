@@ -2,28 +2,33 @@ import torch
 from PIL import Image
 from transformers import AutoModelForCausalLM, AutoProcessor
 
-import builtins # 【新增】用於修改 Python 內建全域變數
+import builtins
+import transformers.pytorch_utils
 
 # ==============================================================================
 # 【全局依賴衝突修復：Monkey Patch (猴子補丁)】
-# 必須放在所有 import 的最前面 (作為系統的 Entry Point)！
-# 解決 Q-Align (依賴舊版) 與 Qwen2-VL (依賴新版) 在 transformers 套件上的連鎖衝突。
 # ==============================================================================
-import transformers.pytorch_utils
 
 # 修復 1: 解決舊版函數被移除的問題 (find_pruneable_heads_and_indices)
 if not hasattr(transformers.pytorch_utils, 'find_pruneable_heads_and_indices'):
-    # 偽造一個空函數，回傳空集合與空陣列以滿足 Q-Align 遠端程式碼的預期
     transformers.pytorch_utils.find_pruneable_heads_and_indices = lambda *args, **kwargs: (set(), [])
 
-# 修復 2: 解決 Q-Align 遠端程式碼 (modeling_llama2.py) 缺少 Cache 類別的 NameError
+# 修復 2: 解決 Cache 類別的 NameError
 try:
     from transformers.cache_utils import Cache
-    # 【關鍵駭客技巧】將 Cache 強制注入到 Python 內建全域變數中。
-    # 這樣即使 Q-Align 的遠端腳本忘記 import，Python 直譯器也能在全域空間找到它，避免報錯。
     builtins.Cache = Cache
 except ImportError:
     pass
+
+# ==================== 👇 新增這一段 👇 ====================
+# 修復 3: 解決 Q-Align 遠端程式碼缺少 BaseModelOutputWithPast 等回傳類別的問題
+try:
+    from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast
+    builtins.BaseModelOutputWithPast = BaseModelOutputWithPast
+    builtins.CausalLMOutputWithPast = CausalLMOutputWithPast  # 順便補上這個，通常它也會跟著報錯
+except ImportError as e:
+    print(f"Monkey Patch Warning: {e}")
+# ==========================================================
 
 class QAlignModelManager:
     """
