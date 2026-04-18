@@ -29,6 +29,8 @@ try:
 except ImportError as e:
     print(f"Monkey Patch Warning: {e}")
 # ==========================================================
+import logging
+builtins.logger = logging.getLogger("transformers")
 
 class QAlignModelManager:
     """
