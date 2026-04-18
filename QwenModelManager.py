@@ -8,16 +8,13 @@ from PromptManager.BasePromptManager import BasePromptManager
 from PromptManager.DefaultPromptManager import DefaultPromptManager
 
 class QwenModelManager:
-    """
-    單例模式 (Singleton): 統一的視覺與影片大腦。
-    """
+    """單例模式 (Singleton): 統一的視覺與影片大腦。"""
     _instance = None
 
     def __new__(cls, prompt_manager: BasePromptManager = None):
         if cls._instance is None:
             cls._instance = super(QwenModelManager, cls).__new__(cls)
             try:
-                # 將 prompt_manager 傳給初始化方法
                 cls._instance._initialize(prompt_manager)
             except Exception as e:
                 cls._instance = None
@@ -27,8 +24,6 @@ class QwenModelManager:
     def _initialize(self, prompt_manager: BasePromptManager):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model_id = "Qwen/Qwen2-VL-7B-Instruct"
-        
-        # 【關鍵設計】依賴注入：把 PromptManager 存為實例屬性
         self.prompt_manager = prompt_manager if prompt_manager else DefaultPromptManager()
         
         self.model = Qwen2VLForConditionalGeneration.from_pretrained(
@@ -37,21 +32,16 @@ class QwenModelManager:
         self.processor = AutoProcessor.from_pretrained(self.model_id)
 
     def _parse_json_output(self, text: str) -> dict:
-        """安全萃取 JSON 結構，並加入預設值防呆"""
+        """重構：僅解析 Caption"""
         match = re.search(r'\{.*\}', text, re.DOTALL)
         if match:
             try:
-                result = json.loads(match.group(0))
-                # 確保回傳的 JSON 必定包含 subject_focus，若無則預設為正中心
-                if "subject_focus" not in result:
-                    result["subject_focus"] = {"x": "50%", "y": "50%"}
-                return result
+                return json.loads(match.group(0))
             except json.JSONDecodeError:
                 pass
-        return {"caption": text, "is_blurry": False, "subject_focus": {"x": "50%", "y": "50%"}}
+        return {"caption": text}
 
     def analyze_media(self, media_input, media_type="image") -> dict:
-        # 【重構】向 PromptManager 請求最新的 Prompt
         prompt_text = self.prompt_manager.get_media_analysis_prompt()
 
         if media_type == "image":
@@ -84,15 +74,11 @@ class QwenModelManager:
                 generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
             )[0]
 
-            print('=' * 20)
-            print(output_text)
-            print('=' * 20)
-
             return self._parse_json_output(output_text)
             
         except Exception as e:
             print(f"[Qwen VLM Error] 推理失敗: {str(e)}")
-            return {"caption": "Failed to analyze.", "is_blurry": False, "subject_focus": {"x": "50%", "y": "50%"}}
+            return {"caption": "Failed to analyze."}
         finally:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
