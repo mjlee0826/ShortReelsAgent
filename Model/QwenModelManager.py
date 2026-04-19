@@ -59,8 +59,10 @@ class QwenModelManager:
             ]
         else:
             # 影片處理：fps 設為 1.0 以節省 Token 並維持語意理解
+            target_fps = 4.0 if mode == TaskMode.ACTION_INDEX else 1.0
+            
             content = [
-                {"type": "video", "video": media_input, "max_pixels": 100352, "fps": 1.0},
+                {"type": "video", "video": media_input, "max_pixels": 100352, "fps": target_fps},
                 {"type": "text", "text": prompt_text}
             ]
 
