@@ -2,29 +2,69 @@ import os
 import cv2
 import tempfile
 import subprocess
+import gc
+import torch
 from PIL import Image
 from abc import abstractmethod
 from MediaProcessor.MediaStrategy import MediaStrategy
-from Model.WhisperModelManager import WhisperModelManager    
-from Model.AudioEnvModelManager import AudioEnvModelManager  
-from Model.VadModelManager import VadModelManager           
-from Model.SaliencyModelManager import SaliencyModelManager 
 
 class AbstractVideoProcessor(MediaStrategy):
     """
-    樣板方法模式 (Template Method)：
-    定義了包含「時間碼燒錄 (Timecode Burn-in)」的全新影片流水線。
+    樣板方法模式 (Template Method) + 延遲載入模式 (Lazy Initialization)：
+    定義了包含「時間碼燒錄」的影片流水線，並嚴格控管 VRAM 載入時機，防止 OOM。
     """
     def __init__(self):
         super().__init__()
-        self.whisper_engine = WhisperModelManager()
-        self.audio_env_engine = AudioEnvModelManager()
-        self.vad_engine = VadModelManager()           
-        self.saliency_engine = SaliencyModelManager()
+        # 【重構】拔除 __init__ 中的直接實例化，改為 None
+        # 這是為了解決 OOM，確保模型「被用到時」才載入 GPU
+        self._whisper_engine = None
+        self._audio_env_engine = None
+        self._vad_engine = None
+        self._saliency_engine = None
 
+    # ==========================================
+    # 延遲載入 (Lazy Initialization) 屬性區塊
+    # ==========================================
+    @property
+    def whisper_engine(self):
+        if self._whisper_engine is None:
+            from Model.WhisperModelManager import WhisperModelManager    
+            self._whisper_engine = WhisperModelManager()
+        return self._whisper_engine
+
+    @property
+    def audio_env_engine(self):
+        if self._audio_env_engine is None:
+            from Model.AudioEnvModelManager import AudioEnvModelManager  
+            self._audio_env_engine = AudioEnvModelManager()
+        return self._audio_env_engine
+
+    @property
+    def vad_engine(self):
+        if self._vad_engine is None:
+            from Model.VadModelManager import VadModelManager           
+            self._vad_engine = VadModelManager()
+        return self._vad_engine
+
+    @property
+    def saliency_engine(self):
+        if self._saliency_engine is None:
+            from Model.SaliencyModelManager import SaliencyModelManager 
+            self._saliency_engine = SaliencyModelManager()
+        return self._saliency_engine
+
+    # ==========================================
+    # 核心流水線
+    # ==========================================
     def process(self, file_path: str) -> dict:
         temp_audio_path = None
         temp_tc_video_path = None
+        
+        # 【防禦】執行前先清空可能的殘留 VRAM
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+        
         try:
             cap = cv2.VideoCapture(file_path)
             width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -39,7 +79,6 @@ class AbstractVideoProcessor(MediaStrategy):
             temp_tc_video_path = temp_tc_video.name
             temp_tc_video.close()
             
-            # 使用 pts:flt 產生浮點數秒數 (例如 12.345) 印在左上角
             subprocess.run([
                 "ffmpeg", "-y", "-i", file_path, 
                 "-vf", "drawtext=text='%{pts\\:flt}': x=20: y=20: fontsize=h/15: fontcolor=white: box=1: boxcolor=black@0.6", 
@@ -59,11 +98,17 @@ class AbstractVideoProcessor(MediaStrategy):
             audio_transcript = None
             env_sounds = []
             if os.path.exists(temp_audio_path) and os.path.getsize(temp_audio_path) > 1000:
+                # 透過 property 呼叫，此時才會真正載入模型
                 if self.vad_engine.has_speech(temp_audio_path):
                     audio_transcript = self.whisper_engine.transcribe(temp_audio_path)
                 env_sounds = self.audio_env_engine.classify_environment(temp_audio_path)
 
-            # 3. 視覺與語意分析：將『燒好時間碼的影片』與『原始路徑』一起傳給子類別
+            # 【防禦】音訊處理完畢後，清理不需要的張量，騰出 VRAM 給視覺模組
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            gc.collect()
+
+            # 3. 視覺與語意分析
             visual_metadata = self.analyze_visual_semantics(file_path, temp_tc_video_path, duration)
 
             return {
@@ -94,7 +139,6 @@ class AbstractVideoProcessor(MediaStrategy):
         pass
 
     def _get_saliency_at_time(self, file_path: str, time_sec: float) -> dict:
-        """協助在精確的秒數上抽出 Frame 並計算重心，供子類別填補 Action Index 使用"""
         try:
             cap = cv2.VideoCapture(file_path)
             cap.set(cv2.CAP_PROP_POS_MSEC, time_sec * 1000)
