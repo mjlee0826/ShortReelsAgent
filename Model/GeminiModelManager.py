@@ -33,7 +33,7 @@ class GeminiModelManager:
         
         # 【重構】使用新版 Client 實例化寫法
         self.client = genai.Client(api_key=api_key)
-        self.model_id = 'gemini-1.5-flash'
+        self.model_id = 'gemini-2.5-flash'
         self.prompt_manager = prompt_manager if prompt_manager else DefaultPromptManager()
 
     def analyze_media(self, media_input: str, media_type="video", mode: TaskMode = TaskMode.TIMECODED_ACTION_INDEX) -> dict:
