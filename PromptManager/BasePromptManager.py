@@ -8,15 +8,17 @@ class BasePromptManager(ABC):
     
     @abstractmethod
     def get_media_analysis_prompt(self) -> str:
-        """適用於 StandardVideoProcessor: 進行全局的攝影評論與描述"""
         pass
 
     @abstractmethod
     def get_action_index_prompt(self) -> str:
-        """適用於 DenseSequenceVideoProcessor: 針對 2-3 秒切片描述具體動作"""
         pass
 
     @abstractmethod
     def get_cinematic_style_prompt(self) -> str:
-        """適用於 Phase 2 TemplateAnalyzer: 萃取導演的運鏡與視覺 DNA"""
+        pass
+
+    @abstractmethod
+    def get_timecoded_action_index_prompt(self) -> str:
+        """適用於 Omni 架構：要求模型讀取畫面左上角的時間碼並進行分段"""
         pass

@@ -48,3 +48,30 @@ class DefaultPromptManager(BasePromptManager):
             "  \"visual_style\": [\"標籤1\", \"標籤2\"]\n"
             "}"
         )
+    
+    def get_timecoded_action_index_prompt(self) -> str:
+        return (
+            "你現在是專業的『AI 影片剪輯大腦』與動作分析師。\n"
+            "這支影片的左上角已經印上了『精確的秒數時間碼 (例如 12.345)』。\n\n"
+            "【你的任務】\n"
+            "1. 請全局觀看這支影片，理解敘事的起承轉合。\n"
+            "2. 請根據左上角的秒數，將影片拆解為數個『連續的動作區塊』。\n"
+            "3. 描述每個區塊的動作時，請專注於人物肢體、運鏡與動態，忽略背景與服裝。\n"
+            "4. 同時給出整支影片的『全局攝影評論』。\n\n"
+            "【嚴格格式要求】請直接輸出 JSON，不要包含 markdown 標記。時間請使用小數(float)。\n"
+            "{\n"
+            "  \"cinematic_critique\": \"整支影片的運鏡與情緒氛圍評論\",\n"
+            "  \"action_index\": [\n"
+            "    {\n"
+            "      \"start_time\": 0.0,\n"
+            "      \"end_time\": 4.5,\n"
+            "      \"caption\": \"人物開始牽手並向鏡頭靠近\"\n"
+            "    },\n"
+            "    {\n"
+            "      \"start_time\": 4.5,\n"
+            "      \"end_time\": 12.0,\n"
+            "      \"caption\": \"連續的旋轉舞步，動作流暢且充滿爆發力\"\n"
+            "    }\n"
+            "  ]\n"
+            "}"
+        )
