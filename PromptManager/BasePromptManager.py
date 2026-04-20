@@ -8,17 +8,10 @@ class BasePromptManager(ABC):
     
     @abstractmethod
     def get_media_analysis_prompt(self) -> str:
-        pass
-
-    @abstractmethod
-    def get_action_index_prompt(self) -> str:
-        pass
-
-    @abstractmethod
-    def get_cinematic_style_prompt(self) -> str:
+        """適用於靜態圖片或簡單影片的全局描述與評價"""
         pass
 
     @abstractmethod
     def get_timecoded_action_index_prompt(self) -> str:
-        """適用於 Omni 架構：要求模型讀取畫面左上角的時間碼並進行分段"""
+        """適用於 Omni 架構：要求模型讀取畫面左上角的時間碼並進行多模態分段"""
         pass

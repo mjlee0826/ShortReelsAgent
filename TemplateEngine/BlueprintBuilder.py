@@ -7,9 +7,10 @@ class BlueprintBuilder:
     def __init__(self):
         self._dna = {
             "template_info": {},
-            "visual_cuts": [],       # 最終合併後的剪輯點
+            "visual_cuts": [],       
             "audio_beats": {},
-            "cinematic_style": {},
+            # 依據架構簡化決策：拔除結構複雜的 cinematic_style，只留一句全局評論
+            "cinematic_critique": "", 
             "audio_transcript": {},
             "is_audio_essential": False
         }
@@ -26,16 +27,17 @@ class BlueprintBuilder:
         """
         核心邏輯：從 ComplexVideoProcessor 的輸出中萃取 DNA。
         """
-        # 1. 轉入語意風格與逐字稿
-        self._dna["cinematic_style"] = metadata.get("cinematic_style", {})
-        self._dna["audio_transcript"] = metadata.get("audio_transcript", {})
+        # 1. 轉入全局評論與逐字稿
+        self._dna["cinematic_critique"] = metadata.get("cinematic_critique", "")
         
-        # 2. 判斷聲音重要性 (如果有逐字稿或環境音描述很豐富，設為 True)
+        # 【致命 Bug 修正】必須使用 `or {}`，防止 Whisper 回傳 None 時導致 .get("text") 崩潰
+        self._dna["audio_transcript"] = metadata.get("audio_transcript") or {}
+        
+        # 2. 判斷聲音重要性 (如果有逐字稿，設為 True)
         transcript_text = self._dna["audio_transcript"].get("text", "")
         self._dna["is_audio_essential"] = len(transcript_text) > 5
         
-        # 3. 語意切點補足邏輯
-        # 如果物理切點 (visual_cuts) 為空，我們從 multimodal_event_index 提取 start_time
+        # 3. 語意切點補足邏輯 (拯救一鏡到底的影片)
         semantic_events = metadata.get("multimodal_event_index", [])
         if not self._dna["visual_cuts"] and semantic_events:
             print("[Builder] 偵測到一鏡到底，正在將語意事件轉換為剪輯切點...")
@@ -46,9 +48,6 @@ class BlueprintBuilder:
         return self
 
     def set_physical_cuts(self, physical_cuts: list):
-        """
-        如果有物理切點，則優先使用物理切點。
-        """
         if physical_cuts:
             self._dna["visual_cuts"] = physical_cuts
         return self
