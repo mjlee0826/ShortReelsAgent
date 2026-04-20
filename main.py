@@ -2,6 +2,21 @@ import os
 import json
 from MediaProcessor.MediaProcessorFactory import MediaProcessorFactory
 
+def get_video_strategy() -> str:
+    """
+    讓使用者選擇影片處理的全局策略。
+    """
+    print("\n請選擇影片處理策略：")
+    print("1. 全部視為「複雜/重要影片」 (使用 Gemini API 進行精確時間碼索引)")
+    print("2. 全部視為「一般影片」 (使用本地端 Qwen 進行全局分析)")
+    print("3. 每次遇到影片時，個別詢問")
+    
+    while True:
+        choice = input("請輸入選項 (1/2/3): ").strip()
+        if choice in ['1', '2', '3']:
+            return choice
+        print("無效的輸入，請輸入 1, 2 或 3。")
+
 def run_pipeline_test():
     """
     Stage 1 的單執行緒測試管線。
@@ -14,6 +29,9 @@ def run_pipeline_test():
     if not os.path.isdir(directory_path):
         print(f"錯誤：找不到指定的資料夾 '{directory_path}'，請確認路徑是否正確。")
         return
+
+    # 3. 詢問影片處理策略
+    video_strategy = get_video_strategy()
 
     print(f"\n開始掃描資料夾: {directory_path} ...")
     
@@ -29,17 +47,37 @@ def run_pipeline_test():
 
     print(f"共找到 {len(all_files)} 個檔案，開始逐一分析（單執行緒模式）...\n")
 
-    # 3. 遍歷檔案，交由 Factory 分發處理
+    # 4. 遍歷檔案，交由 Factory 分發處理
     for filename in all_files:
         file_path = os.path.join(directory_path, filename)
+        ext = os.path.splitext(filename)[1].lower()
         
         print(f"{'='*60}")
         print(f"正在分析: {filename}")
         print(f"{'='*60}")
 
+        # 決定當前檔案的 is_complex 狀態
+        is_complex = False
+        if ext in ['.mp4', '.mov']:
+            if video_strategy == '1':
+                is_complex = True
+            elif video_strategy == '2':
+                is_complex = False
+            elif video_strategy == '3':
+                # 策略 3：每次遇到影片都詢問一次
+                while True:
+                    ans = input(f"影片 '{filename}' 是否為複雜/重要影片？(y/n): ").strip().lower()
+                    if ans in ['y', 'yes']:
+                        is_complex = True
+                        break
+                    elif ans in ['n', 'no']:
+                        is_complex = False
+                        break
+                    print("請輸入 y 或 n。")
+
         try:
-            # 根據副檔名，工廠會自動回傳 ImageProcessor 或 VideoProcessor
-            processor = MediaProcessorFactory.create_processor(file_path)
+            # 將決定好的 is_complex 參數傳入 Factory
+            processor = MediaProcessorFactory.create_processor(file_path, is_complex=is_complex)
             
             # 執行分析策略
             result = processor.process(file_path)
