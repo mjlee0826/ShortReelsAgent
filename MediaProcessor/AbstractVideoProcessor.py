@@ -92,7 +92,7 @@ class AbstractVideoProcessor(MediaStrategy):
                 "ffmpeg", "-y", "-i", file_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", temp_audio_path
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            audio_transcript = None
+            audio_transcript = {}
             env_sounds = []
             if os.path.exists(temp_audio_path) and os.path.getsize(temp_audio_path) > 1000:
                 if self.vad_engine.has_speech(temp_audio_path):

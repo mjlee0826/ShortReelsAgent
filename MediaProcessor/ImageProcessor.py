@@ -28,7 +28,7 @@ class ImageProcessor(MediaStrategy):
         self.aes_engine = LaionModelManager()
 
     def _extract_exif_metadata(self, pil_image: Image.Image) -> dict:
-        metadata = {"datetime": None, "gps_info": None}
+        metadata = {"datetime": "", "gps_info": ""}
         try:
             exif = pil_image.getexif()
             if not exif:
@@ -101,8 +101,8 @@ class ImageProcessor(MediaStrategy):
                     "technical_score": round(tech_score, 2), # 畫質分數 (精準度至小數點後兩位)
                     "aesthetic_score": round(aes_score, 2),  # 美感分數
                     "subject_focus": subject_focus, 
-                    "creation_time": exif_data.get("datetime"),
-                    "location_gps": exif_data.get("gps_info")
+                    "creation_time": exif_data.get("datetime", ""),
+                    "location_gps": exif_data.get("gps_info", "")
                 }
             }
         except Exception as e:

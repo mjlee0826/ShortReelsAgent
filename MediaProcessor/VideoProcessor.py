@@ -47,7 +47,7 @@ class VideoProcessor(AbstractVideoProcessor):
 
         return {
             "caption": vlm_result.get("caption"),
-            "cinematic_critique": vlm_result.get("cinematic_critique"), 
+            "cinematic_critique": vlm_result.get("cinematic_critique", ""), 
             "technical_score": round(tech_score, 2),
             "aesthetic_score": round(aes_score, 2),
             "subject_focus": subject_focus

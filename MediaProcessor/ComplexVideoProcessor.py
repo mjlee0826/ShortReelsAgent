@@ -47,7 +47,7 @@ class ComplexVideoProcessor(AbstractVideoProcessor):
 
         return {
             "is_dense_indexed": True, 
-            "cinematic_critique": vlm_result.get("cinematic_critique"), 
+            "cinematic_critique": vlm_result.get("cinematic_critique", ""), 
             "multimodal_event_index": event_indices,
             # 複雜影片依靠事件區塊解析，不進行單一的技術/美學打分
             "technical_score": None,
