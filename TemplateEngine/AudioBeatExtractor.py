@@ -1,4 +1,5 @@
 import librosa
+import numpy as np
 
 class AudioBeatExtractor:
     """
@@ -16,8 +17,14 @@ class AudioBeatExtractor:
         onset_frames = librosa.onset.onset_detect(y=y, sr=sr)
         onset_times = librosa.frames_to_time(onset_frames, sr=sr)
 
+        # 【修正】處理 Librosa 新版 tempo 回傳 Numpy 陣列的問題
+        if isinstance(tempo, np.ndarray):
+            bpm_value = float(tempo[0]) if tempo.size > 0 else 0.0
+        else:
+            bpm_value = float(tempo)
+
         return {
-            "bpm": round(float(tempo), 1),
+            "bpm": round(bpm_value, 1),
             "beats": [round(float(t), 3) for t in beat_times],
             "onsets": [round(float(t), 3) for t in onset_times]
         }
