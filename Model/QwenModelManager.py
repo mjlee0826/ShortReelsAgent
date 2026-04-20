@@ -2,8 +2,7 @@ import torch
 import gc
 import re
 import json
-# 【核心修正】引入支援 2.5 代架構的 Qwen2_5_VLForConditionalGeneration
-from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor, BitsAndBytesConfig
+from transformers import Qwen3VLForConditionalGeneration, AutoProcessor, BitsAndBytesConfig
 from qwen_vl_utils import process_vision_info
 from PromptManager.BasePromptManager import BasePromptManager
 from PromptManager.DefaultPromptManager import DefaultPromptManager
@@ -28,13 +27,13 @@ class QwenModelManager:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         
         # 【核心修正】修正為官方正確的最新穩定版 Model ID
-        self.model_id = "Qwen/Qwen2.5-VL-7B-Instruct"
+        self.model_id = "Qwen/Qwen3-VL-8B-Instruct"
         self.prompt_manager = prompt_manager if prompt_manager else DefaultPromptManager()
         
         quantization_config = BitsAndBytesConfig(load_in_8bit=True)
         
         # 【核心修正】使用新一代的 Model Class 來載入權重
-        self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+        self.model = Qwen3VLForConditionalGeneration.from_pretrained(
             self.model_id, 
             quantization_config=quantization_config,
             device_map="auto",
