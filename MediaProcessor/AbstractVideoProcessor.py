@@ -11,20 +11,18 @@ from MediaProcessor.MediaStrategy import MediaStrategy
 class AbstractVideoProcessor(MediaStrategy):
     """
     樣板方法模式 (Template Method) + 延遲載入模式 (Lazy Initialization)：
-    定義了包含「時間碼燒錄」的影片流水線，並嚴格控管 VRAM 載入時機，防止 OOM。
+    定義了影片流水線，並根據子類別需求動態決定是否進行「時間碼燒錄」。
     """
     def __init__(self):
         super().__init__()
-        # 【重構】拔除 __init__ 中的直接實例化，改為 None
-        # 這是為了解決 OOM，確保模型「被用到時」才載入 GPU
         self._whisper_engine = None
         self._audio_env_engine = None
         self._vad_engine = None
         self._saliency_engine = None
+        
+        # 新增控制標籤：預設不燒錄時間碼，由子類別決定
+        self.requires_timecode = False
 
-    # ==========================================
-    # 延遲載入 (Lazy Initialization) 屬性區塊
-    # ==========================================
     @property
     def whisper_engine(self):
         if self._whisper_engine is None:
@@ -53,14 +51,10 @@ class AbstractVideoProcessor(MediaStrategy):
             self._saliency_engine = SaliencyModelManager()
         return self._saliency_engine
 
-    # ==========================================
-    # 核心流水線
-    # ==========================================
     def process(self, file_path: str) -> dict:
         temp_audio_path = None
         temp_tc_video_path = None
         
-        # 【防禦】執行前先清空可能的殘留 VRAM
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         gc.collect()
@@ -74,17 +68,20 @@ class AbstractVideoProcessor(MediaStrategy):
             duration = float(frame_count) / float(fps) if fps > 0 else 0.0
             cap.release()
 
-            # 1. 燒錄時間碼 (Timecode Burn-in) 產生給 VLM 看的專用影片
-            temp_tc_video = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
-            temp_tc_video_path = temp_tc_video.name
-            temp_tc_video.close()
-            
-            subprocess.run([
-                "ffmpeg", "-y", "-i", file_path, 
-                "-vf", "drawtext=text='%{pts\\:flt}': x=20: y=20: fontsize=h/15: fontcolor=white: box=1: boxcolor=black@0.6", 
-                "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "copy", 
-                temp_tc_video_path
-            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # 1. 燒錄時間碼 (僅在子類別設定 self.requires_timecode = True 時執行)
+            if self.requires_timecode:
+                temp_tc_video = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+                temp_tc_video_path = temp_tc_video.name
+                temp_tc_video.close()
+                
+                subprocess.run([
+                    "ffmpeg", "-y", "-i", file_path, 
+                    "-vf", "drawtext=text='%{pts\\:flt}': x=20: y=20: fontsize=h/15: fontcolor=white: box=1: boxcolor=black@0.6", 
+                    "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "copy", 
+                    temp_tc_video_path
+                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                temp_tc_video_path = file_path # 不需要燒錄時，tc_file_path 直接等同原檔
 
             # 2. 音訊分析 (抽出獨立音軌)
             temp_audio = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
@@ -98,12 +95,10 @@ class AbstractVideoProcessor(MediaStrategy):
             audio_transcript = None
             env_sounds = []
             if os.path.exists(temp_audio_path) and os.path.getsize(temp_audio_path) > 1000:
-                # 透過 property 呼叫，此時才會真正載入模型
                 if self.vad_engine.has_speech(temp_audio_path):
                     audio_transcript = self.whisper_engine.transcribe(temp_audio_path)
                 env_sounds = self.audio_env_engine.classify_environment(temp_audio_path)
 
-            # 【防禦】音訊處理完畢後，清理不需要的張量，騰出 VRAM 給視覺模組
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             gc.collect()
@@ -130,7 +125,7 @@ class AbstractVideoProcessor(MediaStrategy):
             if temp_audio_path and os.path.exists(temp_audio_path):
                 try: os.remove(temp_audio_path)
                 except OSError: pass
-            if temp_tc_video_path and os.path.exists(temp_tc_video_path):
+            if self.requires_timecode and temp_tc_video_path and temp_tc_video_path != file_path and os.path.exists(temp_tc_video_path):
                 try: os.remove(temp_tc_video_path)
                 except OSError: pass
 
@@ -153,6 +148,6 @@ class AbstractVideoProcessor(MediaStrategy):
                     cY = int(M["m01"] / M["m00"])
                     width, height = pil_image.size
                     return {"x_percent": round((cX / width) * 100, 1), "y_percent": round((cY / height) * 100, 1)}
-        except Exception as e:
+        except Exception:
             pass
         return {"x_percent": 50.0, "y_percent": 50.0}

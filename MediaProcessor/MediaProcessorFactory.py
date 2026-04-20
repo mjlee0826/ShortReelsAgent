@@ -2,29 +2,31 @@ import os
 import cv2
 from MediaProcessor.MediaStrategy import MediaStrategy
 from MediaProcessor.ImageProcessor import ImageProcessor
-from MediaProcessor.ShortVideoProcessor import ShortVideoProcessor
-from MediaProcessor.LongVideoProcessor import LongVideoProcessor
+from MediaProcessor.VideoProcessor import VideoProcessor
+from MediaProcessor.ComplexVideoProcessor import ComplexVideoProcessor
 
 class MediaProcessorFactory:
-    """動態路由：依據 15 秒閾值分發給 Qwen 或 Gemini"""
+    """
+    動態路由：
+    依據素材的『複雜度、是否仰賴時間軸、重要性』(is_complex) 來分發，
+    而不再單純以影片長度作為判斷標準。
+    """
     
     @staticmethod
-    def create_processor(file_path: str) -> MediaStrategy:
+    def create_processor(file_path: str, is_complex: bool = False) -> MediaStrategy:
         ext = os.path.splitext(file_path)[1].lower()
         
         if ext in ['.jpg', '.jpeg', '.png', '.heic', '.heif']:
             return ImageProcessor()
             
         elif ext in ['.mp4', '.mov']:
-            duration = MediaProcessorFactory._get_video_duration(file_path)
-            
-            # 動態路由：15 秒分水嶺
-            if duration > 15.0:
-                print(f"[Router] 長影片 ({duration:.1f}s) -> 路由至 LongVideoProcessor (Gemini API)")
-                return LongVideoProcessor()
+            # 動態路由：由 User/系統 決定的複雜度指標
+            if is_complex:
+                print(f"[Router] 複雜/重要影片 -> 路由至 LongVideoProcessor (Gemini API 影格索引)")
+                return ComplexVideoProcessor()
             else:
-                print(f"[Router] 短影片 ({duration:.1f}s) -> 路由至 ShortVideoProcessor (Local Qwen)")
-                return ShortVideoProcessor()
+                print(f"[Router] 一般影片 -> 路由至 ShortVideoProcessor (Local Qwen 全局分析)")
+                return VideoProcessor()
         else:
             raise ValueError(f"不支援的檔案格式: {ext}")
 
