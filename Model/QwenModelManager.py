@@ -28,7 +28,7 @@ class QwenModelManager:
 
     def _initialize(self, prompt_manager: BasePromptManager):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.model_id = "Qwen/Qwen2.5-VL-7B-Instruct"
+        self.model_id = "Qwen/Qwen3-VL-8B-Instruct"
         self.prompt_manager = prompt_manager if prompt_manager else DefaultPromptManager()
         
         # 8-bit 量化以節省 VRAM，適合與其它 Processor 同時運行
