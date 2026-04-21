@@ -1,12 +1,12 @@
 import os
 import cv2
 import tempfile
-import subprocess
 import gc
 import torch
 from PIL import Image
 from abc import abstractmethod
 from MediaProcessor.MediaStrategy import MediaStrategy
+# 【新增】匯入 FFmpegAdapter
 from MediaTools.FFmpegAdapter import FFmpegAdapter
 
 class AbstractVideoProcessor(MediaStrategy):
@@ -20,6 +20,9 @@ class AbstractVideoProcessor(MediaStrategy):
         self._audio_env_engine = None
         self._vad_engine = None
         self._saliency_engine = None
+        
+        # 【新增】實例化 FFmpegAdapter
+        self._ffmpeg = FFmpegAdapter()
         
         # 新增控制標籤：預設不燒錄時間碼，由子類別決定
         self.requires_timecode = False
@@ -69,18 +72,14 @@ class AbstractVideoProcessor(MediaStrategy):
             duration = float(frame_count) / float(fps) if fps > 0 else 0.0
             cap.release()
 
-            # 1. 燒錄時間碼 (僅在子類別設定 self.requires_timecode = True 時執行)
+            # 1. 燒錄時間碼
             if self.requires_timecode:
                 temp_tc_video = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
                 temp_tc_video_path = temp_tc_video.name
                 temp_tc_video.close()
                 
-                subprocess.run([
-                    "ffmpeg", "-y", "-i", file_path, 
-                    "-vf", "drawtext=text='%{pts\\:flt}': x=20: y=20: fontsize=h/15: fontcolor=white: box=1: boxcolor=black@0.6", 
-                    "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "copy", 
-                    temp_tc_video_path
-                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                # 【修改】使用 Adapter 處理時間碼燒錄
+                self._ffmpeg.burn_timecode(file_path, temp_tc_video_path)
             else:
                 temp_tc_video_path = file_path # 不需要燒錄時，tc_file_path 直接等同原檔
 
@@ -89,9 +88,8 @@ class AbstractVideoProcessor(MediaStrategy):
             temp_audio_path = temp_audio.name
             temp_audio.close()
             
-            subprocess.run([
-                "ffmpeg", "-y", "-i", file_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", temp_audio_path
-            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # 【修改】使用 Adapter 處理音軌分離
+            self._ffmpeg.extract_ai_audio(file_path, temp_audio_path)
 
             audio_transcript = {}
             env_sounds = []

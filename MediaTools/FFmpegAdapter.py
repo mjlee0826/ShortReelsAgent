@@ -26,10 +26,13 @@ class FFmpegAdapter:
     def burn_timecode(self, input_path: str, output_path: str):
         """在影片左上角燒錄視覺時間碼 (供 Gemini 深度索引使用)"""
         print(f"[FFmpeg] 正在燒錄視覺時間碼: {os.path.basename(output_path)}")
-        # 使用簡單的 drawtext 濾鏡
+        
+        # 【修改】使用原先 AbstractVideoProcessor 驗證過的指令
+        # 確保格式為 float (如 12.345)，並使用 ultrafast 解決 drawtext 造成的重新編碼耗時
         cmd = [
             "ffmpeg", "-y", "-i", input_path,
-            "-vf", "drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='%{pts\\:hms}':x=10:y=10:fontsize=24:fontcolor=white:box=1:boxcolor=black@0.5",
-            "-c:a", "copy", output_path
+            "-vf", "drawtext=text='%{pts\\:flt}': x=20: y=20: fontsize=h/15: fontcolor=white: box=1: boxcolor=black@0.6",
+            "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "copy", 
+            output_path
         ]
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

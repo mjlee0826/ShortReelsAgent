@@ -80,7 +80,7 @@ class GeminiModelManager:
             match = re.search(r'\{.*\}', text, re.DOTALL)
             if match:
                 return json.loads(match.group(0))
-            return {"action_index": []}
+            return {"multimodal_event_index": []}
         except Exception as e:
             print(f"[JSON Parse Error] 解析失敗: {e}")
-            return {"action_index": []}
+            return {"multimodal_event_index": []}
