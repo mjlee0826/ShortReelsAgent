@@ -1,9 +1,11 @@
-from TemplateEngine.MediaDownloader import MediaDownloader
-from TemplateEngine.MediaDemuxer import MediaDemuxer
-from TemplateEngine.SceneCutExtractor import SceneCutExtractor
-from TemplateEngine.AudioBeatExtractor import AudioBeatExtractor
-from TemplateEngine.BlueprintBuilder import BlueprintBuilder
+import os
+from MediaTools.MediaDownloader import MediaDownloader
+from MediaTools.FFmpegAdapter import FFmpegAdapter
+from MediaTools.AudioBeatExtractor import AudioBeatExtractor
 from MediaProcessor.ComplexVideoProcessor import ComplexVideoProcessor
+
+from TemplateEngine.SceneCutExtractor import SceneCutExtractor
+from TemplateEngine.BlueprintBuilder import BlueprintBuilder
 
 class TemplateAnalyzerFacade:
     """
@@ -12,7 +14,8 @@ class TemplateAnalyzerFacade:
     """
     def __init__(self):
         self.downloader = MediaDownloader()
-        self.demuxer = MediaDemuxer()
+        # 【修正】使用大一統的 FFmpegAdapter
+        self.ffmpeg = FFmpegAdapter()
         self.cut_extractor = SceneCutExtractor()
         self.beat_extractor = AudioBeatExtractor()
         self.complex_processor = ComplexVideoProcessor()
@@ -25,10 +28,15 @@ class TemplateAnalyzerFacade:
         # 1. 獲取與下載
         media_info = self.downloader.fetch_video(input_source)
         video_file = media_info["video_path"]
+        base_path = os.path.splitext(video_file)[0]
 
         # 2. 軌道剝離 (為了物理節拍分析)
-        # v_only 和 a_only 正好是我們需要的純畫面與純音軌路徑
-        v_only, a_only = self.demuxer.extract_tracks(video_file)
+        # 【修正】使用新 Adapter 分別處理畫面與音訊
+        v_only = f"{base_path}_v_only.mp4"
+        a_only = f"{base_path}_a_only.wav"
+        
+        self.ffmpeg.strip_audio_fast(video_file, v_only)
+        self.ffmpeg.extract_ai_audio(video_file, a_only)
 
         # 3. 物理層分析
         physical_cuts = self.cut_extractor.get_cuts(v_only)
@@ -41,7 +49,7 @@ class TemplateAnalyzerFacade:
         if complex_result.get("status") != "success":
             raise RuntimeError(f"Template 深度分析失敗: {complex_result.get('message')}")
 
-        # 5. 封裝藍圖 (把 local_assets 加進去)
+        # 5. 封裝藍圖 (把路徑資訊也帶進去)
         dna = self.builder \
             .set_info(media_info["music_metadata"], media_info["original_url"]) \
             .set_local_assets(original_video=video_file, video_only=v_only, audio_only=a_only) \

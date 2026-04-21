@@ -7,6 +7,7 @@ import torch
 from PIL import Image
 from abc import abstractmethod
 from MediaProcessor.MediaStrategy import MediaStrategy
+from MediaTools.FFmpegAdapter import FFmpegAdapter
 
 class AbstractVideoProcessor(MediaStrategy):
     """
