@@ -73,3 +73,42 @@ class MediaDownloader:
         except Exception as e:
             print(f"[Downloader Error] 下載失敗，可能是網址錯誤或被平台阻擋: {e}")
             raise ValueError(f"無法獲取影片素材: {input_source}")
+    
+    def search_and_download_audio(self, search_query: str) -> str:
+        """
+        [Phase 3 新增] 
+        功能：透過自然語言搜尋全網音樂，並下載為高品質音訊檔。
+        """
+        music_dir = os.path.join(self.download_dir, "music_cache")
+        if not os.path.exists(music_dir):
+            os.makedirs(music_dir)
+
+        # 設定 yt-dlp 參數：僅下載音訊，取搜尋結果的第一筆
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': f'{music_dir}/%(id)s.%(ext)s',
+            'quiet': True,
+            'no_warnings': True,
+            'default_search': 'ytsearch1', # 關鍵點：搜尋並取首選
+            'nocheckcertificate': True,
+        }
+
+        # 掛載 Cookie 以防被阻擋
+        if os.path.exists(self.cookies_path):
+            ydl_opts['cookiefile'] = self.cookies_path
+
+        print(f"[Downloader] 正在全網搜尋音樂: {search_query}")
+        
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(search_query, download=True)
+                
+                # 處理搜尋結果的資料結構
+                if 'entries' in info:
+                    info = info['entries'][0]
+                
+                downloaded_path = ydl.prepare_filename(info)
+                return downloaded_path
+        except Exception as e:
+            print(f"[Downloader Error] 搜尋下載失敗: {e}")
+            raise RuntimeError(f"無法獲取音樂資源: {search_query}")
