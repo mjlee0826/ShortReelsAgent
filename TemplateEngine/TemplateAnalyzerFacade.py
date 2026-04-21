@@ -3,7 +3,6 @@ from TemplateEngine.MediaDemuxer import MediaDemuxer
 from TemplateEngine.SceneCutExtractor import SceneCutExtractor
 from TemplateEngine.AudioBeatExtractor import AudioBeatExtractor
 from TemplateEngine.BlueprintBuilder import BlueprintBuilder
-# 直接引入 Phase 1 的核心處理器
 from MediaProcessor.ComplexVideoProcessor import ComplexVideoProcessor
 
 class TemplateAnalyzerFacade:
@@ -16,7 +15,6 @@ class TemplateAnalyzerFacade:
         self.demuxer = MediaDemuxer()
         self.cut_extractor = SceneCutExtractor()
         self.beat_extractor = AudioBeatExtractor()
-        # 直接使用 Phase 1 寫好的 Processor
         self.complex_processor = ComplexVideoProcessor()
         self.builder = BlueprintBuilder()
 
@@ -29,24 +27,24 @@ class TemplateAnalyzerFacade:
         video_file = media_info["video_path"]
 
         # 2. 軌道剝離 (為了物理節拍分析)
+        # v_only 和 a_only 正好是我們需要的純畫面與純音軌路徑
         v_only, a_only = self.demuxer.extract_tracks(video_file)
 
-        # 3. 物理層分析 (BPM 與 硬切點)
+        # 3. 物理層分析
         physical_cuts = self.cut_extractor.get_cuts(v_only)
         beats = self.beat_extractor.get_beats(a_only)
 
-        # 4. 🔥 重點：讓 Template 跑一次 Phase 1 的 Complex 流程
-        # 這會自動執行：燒錄時間碼、VAD 偵測、Gemini 多模態分析 (包含逐字稿)
+        # 4. 深度感知
         print(f"[Facade] 正在啟動 ComplexVideoProcessor 進行深度感知...")
         complex_result = self.complex_processor.process(video_file)
         
         if complex_result.get("status") != "success":
             raise RuntimeError(f"Template 深度分析失敗: {complex_result.get('message')}")
 
-        # 5. 封裝藍圖
-        # 這裡會將物理切點與 Gemini 抓到的語意時間軸進行對齊與補足
+        # 5. 封裝藍圖 (把 local_assets 加進去)
         dna = self.builder \
             .set_info(media_info["music_metadata"], media_info["original_url"]) \
+            .set_local_assets(original_video=video_file, video_only=v_only, audio_only=a_only) \
             .set_physical_cuts(physical_cuts) \
             .set_audio_features(beats) \
             .ingest_complex_metadata(complex_result.get("metadata", {})) \
