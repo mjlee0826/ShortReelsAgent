@@ -39,4 +39,4 @@ class DirectorFacade:
             state = state.run(context)
             
         print("✅ [Director Agent] 藍圖規劃完成！")
-        return context["final_timeline"]
+        return context["final_timeline"], context["audio_dna"]
