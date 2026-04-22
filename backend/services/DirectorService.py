@@ -114,5 +114,5 @@ class DirectorService:
         return {
             "blueprint": final_blueprint,
             "audio_dna": audio_dna,
-            "assets_root_url": f"http://localhost:8000/static/{folder_name}/" 
+            "assets_root_url": f"http://localhost:5174/static/{folder_name}/" 
         }
