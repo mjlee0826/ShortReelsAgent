@@ -22,10 +22,10 @@ class MediaProcessorFactory:
         elif ext in ['.mp4', '.mov']:
             # 動態路由：由 User/系統 決定的複雜度指標
             if is_complex:
-                print(f"[Router] 複雜/重要影片 -> 路由至 LongVideoProcessor (Gemini API 影格索引)")
+                print(f"[Router] 複雜/重要影片 -> 路由至 ComplexVideoProcessor (Gemini API 影格索引)")
                 return ComplexVideoProcessor()
             else:
-                print(f"[Router] 一般影片 -> 路由至 ShortVideoProcessor (Local Qwen 全局分析)")
+                print(f"[Router] 一般影片 -> 路由至 VideoProcessor (Local Qwen 全局分析)")
                 return VideoProcessor()
         else:
             raise ValueError(f"不支援的檔案格式: {ext}")

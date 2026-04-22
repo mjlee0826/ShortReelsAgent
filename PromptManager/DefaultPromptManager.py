@@ -69,6 +69,12 @@ class DefaultPromptManager(BasePromptManager):
             "3. Remotion 空間裁切 (Cropping)：預設輸出平台為 **Instagram Reels / TikTok (9:16 直式 1080x1920)**。\n"
             "   - 若素材的 `res` (長寬比) 不是 9:16，Remotion 會強制將其放大並裁切 (`object-fit: cover`)。\n"
             "   - 你必須參考素材的 `focus` (主體重心 x, y 比例)，在 JSON 中輸出 `object_position` 屬性 (例如 '50% 30%')，確保重要主體不會被裁出畫面外。\n\n"
+            "4. 嚴禁假剪輯 (No Fake Cuts)：相鄰的兩個片段，絕對不可以是同一個素材的「連續時間段」！如果上一個片段是 A 影片的 0~5秒，下一個片段絕對不能緊接著 A 影片的 5~10秒，這在視覺上等於沒有剪輯。請務必切換不同的素材，或至少跳躍到同一素材的不同時間點。"
+            "5. 動態裁切 (Dynamic Cropping)：你必須確實讀取素材的 focus 數據來計算 object_position。嚴禁無腦全部填寫 '50% 50%'，否則會被視為嚴重失職。"
+            "6. 嚴禁假剪輯與無意義碎切 (No Fake Cuts & Chopping)：\n"
+            "   - 如果你要從同一支影片中擷取一段『連續的畫面』，請直接將其合併為【一個】長片段輸出。\n"
+            "   - 絕對不要為了配合 Template 的多個切點，而把一段連續的畫面硬切成很多個小 JSON 物件！\n"
+            "7. 嚴禁突兀跳剪 (No Awkward Jump Cuts)：若相鄰的片段使用同一個 `clip_id`，它們的 `source` 時間必須是【完全連續】的。嚴禁在連續畫面中故意漏掉幾秒鐘再接續播放 (例如上一段到 13.4s，下一段從 14.4s 開始)，這會造成嚴重的畫面跳閃失誤。若要切換，請務必換另一個不同的 `clip_id`。\n\n"
         )
 
         # 4. 處理微調模式 (Refinement Mode)
