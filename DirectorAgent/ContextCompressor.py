@@ -1,3 +1,5 @@
+import os
+
 class ContextCompressor:
     """
     Strategy Pattern: 負責素材的特徵降維與防禦性過濾。
@@ -22,7 +24,7 @@ class ContextCompressor:
             # --- 2. 特徵降維 (Dimensionality Reduction) ---
             # 僅保留導演決策所需的精華資訊，移除路徑與冗餘資料
             base_info = {
-                "id": asset.get("file"), # 使用檔名作為唯一 ID
+                "id": os.path.basename(asset.get("file")), # 使用檔名作為唯一 ID
                 "type": asset.get("type"),
                 "res": {"w": metadata.get("width"), "h": metadata.get("height")},
                 "aes": metadata.get("aesthetic_score", 60.0),
