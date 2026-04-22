@@ -14,6 +14,9 @@ class GenerateRequest(BaseModel):
     enable_subtitles: bool = True
     enable_filters: bool = True
     previous_timeline: Optional[Dict] = None 
+    
+    # 【新增】影片處理策略 (預設為 2: 全部一般影片)
+    video_strategy: str = "2" 
 
 @router.post("/generate")
 async def generate_timeline(req: GenerateRequest):
@@ -24,7 +27,8 @@ async def generate_timeline(req: GenerateRequest):
             template=req.template_source,
             subtitles=req.enable_subtitles,
             filters=req.enable_filters,
-            old_timeline=req.previous_timeline
+            old_timeline=req.previous_timeline,
+            video_strategy=req.video_strategy  # 【新增】把參數往後傳
         )
         return result
     except Exception as e:

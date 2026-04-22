@@ -1,5 +1,4 @@
 import os
-import glob
 # 匯入你先前實作的 Phase 1-4 核心組件
 from MediaProcessor.MediaProcessorFactory import MediaProcessorFactory
 from TemplateEngine.TemplateAnalyzerFacade import TemplateAnalyzerFacade
@@ -16,27 +15,49 @@ class DirectorService:
         self.director = DirectorFacade()
 
     def run_workflow(self, prompt: str, folder_name: str, template: str = None, 
-                    subtitles: bool = True, filters: bool = True, old_timeline: dict = None):
+                    subtitles: bool = True, filters: bool = True, old_timeline: dict = None,
+                    video_strategy: str = "2"): # 預設為一般影片
         
-        # --- 1. 資料夾映射與素材掃描 ---
+        # --- 1. 資料夾映射與素材掃描 (復刻 phrase4.py) ---
         target_dir = os.path.join(self.base_assets_path, folder_name)
         if not os.path.isdir(target_dir):
             raise ValueError(f"找不到素材資料夾: {target_dir}")
 
-        # 搜尋資料夾下的所有影片與圖片 (可根據需求擴充副檔名)
-        extensions = ['*.mp4', '*.mov', '*.jpg', '*.png', '*.jpeg']
-        asset_files = []
-        for ext in extensions:
-            asset_files.extend(glob.glob(os.path.join(target_dir, ext)))
-
+        # 抓取資料夾內所有檔案 (忽略大小寫問題，比 glob 更穩)
+        all_files = [f for f in os.listdir(target_dir) if os.path.isfile(os.path.join(target_dir, f))]
+        
         # --- 2. Phase 1: 素材感知 (Media Ingestion) ---
-        print(f"[Service] 正在處理 {len(asset_files)} 個素材...")
+        print(f"[Service] 正在處理 {len(all_files)} 個素材...")
         raw_assets_metadata = []
-        for file_path in asset_files:
-            # 這裡暫時預設影片為一般影片 (is_complex=False)，可根據前端需求調整
-            processor = MediaProcessorFactory.create_processor(file_path, is_complex=False)
-            metadata = processor.process(file_path)
-            raw_assets_metadata.append(metadata)
+        
+        for filename in all_files:
+            file_path = os.path.join(target_dir, filename)
+            ext = os.path.splitext(filename)[1].lower()
+            
+            # 過濾不支援的檔案
+            if ext not in ['.mp4', '.mov', '.jpg', '.jpeg', '.png', '.heic', '.heif']:
+                print(f"   ⚠️ 跳過不支援的檔案: {filename}")
+                continue
+
+            # 根據策略決定當前檔案的 is_complex 狀態
+            is_complex = False
+            if ext in ['.mp4', '.mov']:
+                if video_strategy == '1':
+                    is_complex = True
+                elif video_strategy == '2':
+                    is_complex = False
+                # 注意：在 API 模式下，無法像 CLI 一樣中斷並詢問使用者 (策略 3)。
+            
+            try:
+                print(f"   ⏳ 正在分析: {filename} (Complex Mode: {is_complex})")
+                processor = MediaProcessorFactory.create_processor(file_path, is_complex=is_complex)
+                metadata = processor.process(file_path)
+                raw_assets_metadata.append(metadata)
+            except Exception as e:
+                print(f"   ⚠️ 分析失敗，跳過 {filename}: {str(e)}")
+
+        if not raw_assets_metadata:
+            raise ValueError("資料夾內沒有成功解析的有效素材！")
 
         # --- 3. Phase 2: 範本 DNA 提取 ---
         template_dna = None
@@ -45,7 +66,6 @@ class DirectorService:
             template_dna = self.template_analyzer.extract_dna(template)
 
         # --- 4. 處理勾選框邏輯 (Prompt 注入) ---
-        # 如果使用者取消勾選字幕或濾鏡，我們在 Prompt 後面加上強制的約束限制
         enhanced_prompt = prompt
         if not subtitles:
             enhanced_prompt += " (注意：本影片不需要任何字幕，請讓 overlay_text 保持為空)"
