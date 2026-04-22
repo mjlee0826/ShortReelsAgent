@@ -1,11 +1,14 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, Dict
 from backend.services.DirectorService import DirectorService
+from backend.services.RenderService import RenderService
 import traceback  # 【新增】用來印出詳細錯誤追蹤
 
 router = APIRouter()
 director_service = DirectorService()
+render_service = RenderService()
 
 class GenerateRequest(BaseModel):
     asset_folder_name: str 
@@ -34,5 +37,33 @@ async def generate_timeline(req: GenerateRequest):
     except Exception as e:
         # 【修改】把詳細錯誤印在終端機上，方便我們抓蟲
         print("\n❌ [後端發生錯誤] 詳細報錯資訊如下：")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    
+class RenderRequest(BaseModel):
+    blueprint: Dict
+    assets_root_url: str
+
+@router.post("/render_mp4")
+async def render_mp4(req: RenderRequest, background_tasks: BackgroundTasks):
+    """
+    SSR 算圖端點：接收 JSON，回傳 MP4，並在背景執行清理。
+    """
+    workspace = render_service.create_workspace()
+    try:
+        # 啟動算圖
+        output_mp4 = render_service.execute_render(workspace, req.blueprint, req.assets_root_url)
+        
+        # 註冊背景任務：當 FileResponse 將檔案傳送完畢後，立刻呼叫 cleanup 焚毀資料夾
+        background_tasks.add_task(workspace.cleanup)
+        
+        return FileResponse(
+            path=output_mp4, 
+            media_type="video/mp4", 
+            filename="AI_Director_Output.mp4"
+        )
+    except Exception as e:
+        workspace.cleanup() # 發生錯誤也要立刻清理
+        print("\\n❌ [SSR 算圖錯誤]")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
