@@ -33,6 +33,7 @@ class ContextCompressor:
             # 根據素材類型補強聲音或事件資訊
             if asset.get("type") == "video":
                 base_info["dur"] = metadata.get("duration", 0)
+                base_info["fps"] = metadata.get("fps", 30.0)
                 
                 # 若為一般影片，濃縮聲音描述
                 if not metadata.get("is_dense_indexed"):

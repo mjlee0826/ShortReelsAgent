@@ -113,6 +113,7 @@ class AbstractVideoProcessor(MediaStrategy):
                     "width": width,               
                     "height": height,             
                     "duration": duration,
+                    "fps": round(fps, 2),
                     "audio_transcript": audio_transcript, 
                     "environmental_sounds": env_sounds,
                     **visual_metadata

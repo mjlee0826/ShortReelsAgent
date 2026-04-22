@@ -37,6 +37,29 @@ class DirectorFacade:
         state = IntentState()
         while state is not None:
             state = state.run(context)
+
+        video_fps_list = [
+            asset.get("fps", 30.0) 
+            for asset in compressed_assets 
+            if asset.get("type") == "video"
+        ]
+        
+        # 找出最高的 FPS 數值
+        max_fps = max(video_fps_list) if video_fps_list else 30.0
+        
+        # 如果最高 FPS 達到或超過高幀標準 (例如 50 以上)，則全局設定為 60，否則為 30
+        target_fps = 60 if max_fps >= 50.0 else 30
+
+        final_blueprint = {
+            "global_settings": {
+                "fps": target_fps,
+                "aspect_ratio": "9:16"
+            },
+            "timeline": context["final_timeline"]
+        }
             
         print("✅ [Director Agent] 藍圖規劃完成！")
-        return context["final_timeline"], context["audio_dna"]
+        print(f"✅ [Director Agent] 藍圖規劃完成！(自動設定全局 FPS 為: {target_fps})")
+        
+        # 回傳封裝好的藍圖與音訊 DNA (配合 Phase 4 的測試腳本接收格式)
+        return final_blueprint, context.get("audio_dna", {})
