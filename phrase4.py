@@ -21,6 +21,21 @@ def save_json(data, filename):
         json.dump(data, f, indent=4, ensure_ascii=False)
     print(f"💾 成功儲存 JSON: {filepath}")
 
+def get_video_strategy() -> str:
+    """
+    讓使用者選擇影片處理的全局策略。
+    """
+    print("\n[2/4] 請選擇影片處理策略：")
+    print("1. 全部視為「複雜/重要影片」 (使用 Gemini API 進行精確時間碼索引)")
+    print("2. 全部視為「一般影片」 (使用本地端 Qwen 進行全局分析)")
+    print("3. 每次遇到影片時，個別詢問")
+    
+    while True:
+        choice = input("請輸入選項 (1/2/3): ").strip()
+        if choice in ['1', '2', '3']:
+            return choice
+        print("無效的輸入，請輸入 1, 2 或 3。")
+
 def run_integration_test():
     print("=" * 60)
     print("🎬 Short Reels Agent: Phase 1 ~ 4 深度整合測試")
@@ -29,13 +44,16 @@ def run_integration_test():
     # ---------------------------------------------------------
     # 準備階段：收集使用者輸入
     # ---------------------------------------------------------
-    asset_dir = input("\n[1/3] 請輸入素材資料夾路徑 (例如: ./assets): ").strip()
+    asset_dir = input("\n[1/4] 請輸入素材資料夾路徑 (例如: ./assets): ").strip()
     if not os.path.isdir(asset_dir):
         print(f"❌ 找不到資料夾 '{asset_dir}'，測試終止。")
         return
 
-    template_source = input("[2/3] 請輸入 Template 網址或檔案路徑 (若無請直接按 Enter 跳過): ").strip()
-    user_prompt = input("[3/3] 請輸入剪輯指令 (例如: 幫我剪一支熱血的 Vlog，配合快節奏音樂): ").strip()
+    # 詢問影片處理策略
+    video_strategy = get_video_strategy()
+
+    template_source = input("\n[3/4] 請輸入 Template 網址或檔案路徑 (若無請直接按 Enter 跳過): ").strip()
+    user_prompt = input("\n[4/4] 請輸入剪輯指令 (例如: 幫我剪一支熱血的 Vlog，配合快節奏音樂): ").strip()
 
     # ---------------------------------------------------------
     # Phase 1: 素材感知與特徵萃取
@@ -51,12 +69,27 @@ def run_integration_test():
         file_path = os.path.join(asset_dir, filename)
         ext = os.path.splitext(filename)[1].lower()
         
-        # 簡單判定：這裡為了測試流暢，影片預設視為一般影片 (is_complex=False)
-        # 你可以依據需求改為 True 或加入互動詢問
-        is_complex = False 
+        # 根據策略決定當前檔案的 is_complex 狀態
+        is_complex = False
+        if ext in ['.mp4', '.mov']:
+            if video_strategy == '1':
+                is_complex = True
+            elif video_strategy == '2':
+                is_complex = False
+            elif video_strategy == '3':
+                # 策略 3：每次遇到影片都詢問一次
+                while True:
+                    ans = input(f"   ❓ 影片 '{filename}' 是否為複雜/重要影片？(y/n): ").strip().lower()
+                    if ans in ['y', 'yes']:
+                        is_complex = True
+                        break
+                    elif ans in ['n', 'no']:
+                        is_complex = False
+                        break
+                    print("   請輸入 y 或 n。")
         
         try:
-            print(f"   ⏳ 正在分析: {filename}")
+            print(f"   ⏳ 正在分析: {filename} (Complex Mode: {is_complex})")
             processor = MediaProcessorFactory.create_processor(file_path, is_complex=is_complex)
             metadata = processor.process(file_path)
             raw_assets_metadata.append(metadata)
