@@ -55,12 +55,18 @@ class IntentState(BaseState):
             context["audio_dna"] = {} # 給一個空的 dict 避免下游當機
 
         elif music_action == "use_template":
-            # 【修復 JSON Key 錯誤】將 audio_features 修正為 BlueprintBuilder 實際產出的 audio_beats
             if template_dna and "audio_beats" in template_dna:
                 print("[Agent State] ⏩ 策略: 繼承範本配樂，跳過 Phase 3 搜尋。")
-                # 直接把範本的節拍資訊借過來當作 audio_dna
+                
+                # 【修正】從 BlueprintBuilder 正確提取 audio_only 的實體路徑
+                template_audio_path = template_dna.get("local_assets", {}).get("audio_only", "")
+                
+                # 【修正】對齊 MusicEngineFacade 的資料結構，使用 local_path 裝載
                 context["audio_dna"] = {
                     "source": "template",
+                    "local_path": {
+                        "standard": template_audio_path
+                    },
                     "analysis": template_dna.get("audio_beats", {})
                 }
             else:
