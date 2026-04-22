@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // 指向你的 FastAPI 後端
-const API_BASE_URL = 'http://localhost:8001/api';
+const API_BASE_URL = 'http://localhost:5174/api';
 
 class DirectorApiService {
   async generateTimeline(payload) {
