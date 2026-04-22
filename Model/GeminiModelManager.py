@@ -33,7 +33,8 @@ class GeminiModelManager:
         
         # 【重構】使用新版 Client 實例化寫法
         self.client = genai.Client(api_key=api_key)
-        self.model_id = 'gemini-2.5-flash'
+        self.default_model = 'gemini-2.5-flash'
+        self.strong_model = 'gemini-3.1-pro-preview'
         self.prompt_manager = prompt_manager if prompt_manager else DefaultPromptManager()
 
     def analyze_media(self, media_input: str, media_type="video", mode: TaskMode = TaskMode.TIMECODED_ACTION_INDEX) -> dict:
@@ -57,7 +58,7 @@ class GeminiModelManager:
             print("[Gemini API] 開始進行語意與時間碼推論...")
             # 【重構】新版生成內容 API (注意 contents 陣列的傳遞方式)
             response = self.client.models.generate_content(
-                model=self.model_id,
+                model=self.default_model,
                 contents=[video_file, prompt_text]
             )
             return self._parse_json_output(response.text)
@@ -73,6 +74,25 @@ class GeminiModelManager:
                     print(f"[Gemini API] 已清理雲端暫存檔: {video_file.name}")
                 except:
                     pass
+
+    def generate_director_plan(self, prompt: str, tools: list = None) -> str:
+        """
+        Agentic 核心：建立對話 Session 並處理 Tool Calling 迴圈。
+        """
+        # 建立具備工具能力的 Chat Session
+        # config 中註冊 tools (例如 Phase 3 的 MusicEngineFacade 方法)
+        chat = self.client.chats.create(
+            model=self.strong_model,
+            config={'tools': tools} if tools else None
+        )
+
+        response = chat.send_message(prompt)
+
+        # 進入 Agentic Loop: 處理模型產生的所有工具呼叫請求
+        # 備註：google.genai SDK 會自動處理簡單的 Function Call 對接，
+        # 但在複雜邏輯下我們可以在此攔截並執行本地邏輯。
+        
+        return response.text
 
     def _parse_json_output(self, text: str) -> dict:
         """強健的 JSON 解析器"""
