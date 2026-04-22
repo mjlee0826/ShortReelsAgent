@@ -74,13 +74,20 @@ class DefaultPromptManager(BasePromptManager):
             "4. 【視覺風格與字幕 (Aesthetics & Text)】：\n"
             "   - 根據氛圍設定 `filter` (如 'none', 'cinematic', 'grayscale', 'blur')。\n"
             "   - 若有重要對話 (參考 vocal) 或需要綜藝效果，請在 `overlay_text` 填寫要顯示的字幕。\n"
-            "5. 【混音策略 (Audio Ducking)】：\n"
-            "   - 若素材中有重要人聲或環境音，請調降該段落的配樂 (`bgm_volume`: 0.3) 並放大原音 (`clip_volume`: 1.0)。反之則配樂為主。\n"
-            "6. 【畫中畫疊加 (Picture-in-Picture)】：\n"
+            "5. 【畫中畫疊加 (Picture-in-Picture)】：\n"
             "   - 若使用者要求，或你想在主畫面旁補充視角，可使用 `pip_video` 屬性疊加另一個畫面。\n"
-            "7. 【嚴禁假剪輯與突兀跳剪 (No Chopping & Jump Cuts)】：\n"
+            "6. 【嚴禁假剪輯與突兀跳剪 (No Chopping & Jump Cuts)】：\n"
             "   - 絕對不可將同一支影片的連續畫面硬切成多個 JSON 物件！若要連續播放，請合併為『一個』長片段。\n"
             "   - 相鄰的兩個片段 `clip_id` 必須不同。嚴禁在連續畫面中故意漏掉幾秒鐘再接續播放，以免造成畫面跳閃。\n\n"
+        )
+
+        # 【新增】配樂與混音專屬守則
+        instruction += (
+            "# AUDIO & BGM GUIDELINES (配樂與原音混音守則)\n"
+            "1. 全局配樂 (bgm_track)：請從【配樂 DNA】或【範本 DNA】中挑選合適的音樂檔案作為全局 BGM，並設定其起始時間。\n"
+            "2. 智慧人聲保留邏輯：檢視素材的 `audio.vocal` (講話內容) 或 `events.audio_layer` (聲音事件)。\n"
+            "   - 若有人聲對話或重要口白：必須保留原音 (`clip_volume`: 1.0)，並將該片段的配樂降低以避讓 (`bgm_volume`: 0.2)。\n"
+            "   - 若只有無意義環境音或純風景：請靜音原片 (`clip_volume`: 0.0)，讓配樂成為主體 (`bgm_volume`: 1.0)。\n\n"
         )
 
         # 4. 處理模式 (Refinement / Template)
@@ -97,35 +104,45 @@ class DefaultPromptManager(BasePromptManager):
             )
 
         # 5. 輸出 Schema (Remotion Ready JSON)
+        # 【修改】外層改為 Object，支援 bgm_track 欄位
         instruction += (
             "# OUTPUT SCHEMA (Remotion 渲染專用 JSON 格式)\n"
-            "請直接輸出 JSON Array，不要包含 Markdown 標記。每個片段必須包含以下完整欄位：\n"
-            "[\n"
-            "  {\n"
-            "    \"clip_id\": \"檔案 ID\",\n"
-            "    \"start_at\": 0.0,             // 總時間軸上的開始秒數\n"
-            "    \"end_at\": 3.5,               // 總時間軸上的結束秒數\n"
-            "    \"source_start\": 5.0,         // 素材擷取起點(秒)\n"
-            "    \"source_end\": 8.5,           // 素材擷取終點(秒)\n"
-            "    \"playback_rate\": 1.0,        // 播放速度 (預設 1.0)\n"
-            "    \"object_position\": \"44% 77%\", // 裁切定位點 (依據 focus 計算)\n"
-            "    \"scale\": 1.0,                // 縮放比例 (1.0 不縮放，1.2 放大 20%)\n"
-            "    \"filter\": \"none\",            // CSS 濾鏡 (none, grayscale, cinematic, sepia, blur)\n"
-            "    \"transition_in\": \"none\",     // 進場轉場 (none, fade, wipe, slide)\n"
-            "    \"clip_volume\": 0.8,          // 原音音量 (0.0=靜音, 1.0=最大)\n"
-            "    \"bgm_volume\": 1.0,           // 此片段的配樂音量 (0.0~1.0)\n"
-            "    \"overlay_text\": \"\",          // 畫面上要疊加的字幕或花字 (無則留空)\n"
-            "    \"pip_video\": {               // (選填) 畫中畫設定，若無畫中畫需求請設為 null\n"
-            "       \"clip_id\": \"b_roll.mp4\",  // 子畫面的檔案 ID\n"
-            "       \"source_start\": 0.0,\n"
-            "       \"position\": \"top_right\" // 位置 (top_right, bottom_left 等)\n"
-            "    },\n"
-            "    \"reason\": \"請說明你的導演決策，包含轉場、變速或混音的考量\"\n"
-            "  }\n"
-            "]\n\n"
+            "請直接輸出 JSON Object，不要包含 Markdown 標記。格式必須嚴格如下：\n"
+            "{\n"
+            "  \"bgm_track\": {\n"
+            "    \"track_id\": \"配樂檔案的 ID (若不使用配樂請填 null)\",\n"
+            "    \"start_at\": 0.0,          // 整個影片時間軸上，音樂開始播放的秒數 (通常為 0.0)\n"
+            "    \"source_start\": 0.0,      // 從音樂檔案的第幾秒開始擷取\n"
+            "    \"volume\": 1.0             // 音樂基礎音量 (0.0~1.0)\n"
+            "  },\n"
+            "  \"timeline\": [\n"
+            "    {\n"
+            "      \"clip_id\": \"檔案 ID\",\n"
+            "      \"start_at\": 0.0,             // 總時間軸上的開始秒數\n"
+            "      \"end_at\": 3.5,               // 總時間軸上的結束秒數\n"
+            "      \"source_start\": 5.0,         // 素材擷取起點(秒)\n"
+            "      \"source_end\": 8.5,           // 素材擷取終點(秒)\n"
+            "      \"playback_rate\": 1.0,        // 播放速度 (預設 1.0)\n"
+            "      \"object_position\": \"44% 77%\", // 裁切定位點 (依據 focus 計算)\n"
+            "      \"scale\": 1.0,                // 縮放比例 (1.0 不縮放，1.2 放大 20%)\n"
+            "      \"filter\": \"none\",            // CSS 濾鏡 (none, grayscale, cinematic, blur)\n"
+            "      \"transition_in\": \"none\",     // 進場轉場 (none, fade, slide)\n"
+            "      \"clip_volume\": 0.8,          // 原音音量 (0.0=靜音, 1.0=最大)\n"
+            "      \"bgm_volume\": 1.0,           // 當播到此片段時，全局 BGM 的動態音量權重 (這就是 Audio Ducking)\n"
+            "      \"overlay_text\": \"\",          // 畫面上要疊加的字幕或花字 (無則留空)\n"
+            "      \"pip_video\": {               // (選填) 畫中畫設定，若無畫中畫需求請設為 null\n"
+            "         \"clip_id\": \"b_roll.mp4\",  // 子畫面的檔案 ID\n"
+            "         \"source_start\": 0.0,\n"
+            "         \"position\": \"top_right\" // 位置 (top_right, bottom_left 等)\n"
+            "      },\n"
+            "      \"reason\": \"請說明你的導演決策，包含轉場、變速或混音的考量\"\n"
+            "    }\n"
+            "  ]\n"
+            "}\n\n"
         )
 
         # 6. 注入數據 (Data Injection)
+        # ... (這裡維持原樣) ...
         prompt = (
             f"{instruction}"
             f"# INPUT DATA\n"

@@ -1,50 +1,73 @@
 import React from 'react';
-import { Video, Img, useVideoConfig } from 'remotion';
+import { Video, Img, useVideoConfig, useCurrentFrame, interpolate } from 'remotion';
 
-/**
- * ClipComponent: 負責渲染單一影片或圖片片段
- * 接收從 MainTimeline 傳來的一段 JSON 資料與素材根目錄
- */
 export default function ClipComponent({ clipData, assetsRootUrl }) {
   const { fps } = useVideoConfig();
+  const frame = useCurrentFrame();
 
-  // 1. 組合絕對路徑 (例如: http://localhost:8000/static/snowman/IMG_0279.MOV)
-  // 若 clip_id 本身帶有資料夾路徑，可依據後端結構做 replace 處理。
-  // 這裡假設 clipData.clip_id 就是檔名。
   const fileName = clipData.clip_id.split('/').pop(); 
   const fileUrl = `${assetsRootUrl}${fileName}`;
+  const isImage = /\.(jpg|jpeg|png|heic|heif)$/i.test(fileName);
 
-  // 2. 判斷是否為靜態圖片 (根據副檔名)
-  const isImage = /\.(jpg|jpeg|png|heic)$/i.test(fileName);
+  // 【轉場修正】實作 Fade 淡入動畫 (0~15 幀時透明度從 0 漸變為 1)
+  const opacity = clipData.transition_in === 'fade'
+    ? interpolate(frame, [0, 15], [0, 1], { extrapolateRight: 'clamp' })
+    : 1;
 
-  // 3. 處理 CSS 樣式 (空間裁切、變焦、濾鏡)
+  // 基礎樣式 (包含變焦 scale 與濾鏡)
   const dynamicStyle = {
-    width: '100%',
-    height: '100%',
-    objectFit: 'cover', // 確保畫面填滿 9:16
+    width: '100%', height: '100%',
+    objectFit: 'cover',
     objectPosition: clipData.object_position || '50% 50%',
     transform: `scale(${clipData.scale || 1.0})`,
     filter: clipData.filter && clipData.filter !== 'none' ? clipData.filter : 'none',
+    opacity: opacity,
   };
 
-  // 4. 渲染靜態圖片
-  if (isImage) {
-    return <Img src={fileUrl} style={dynamicStyle} />;
-  }
+  // 【進階功能】畫中畫 (PiP) 渲染邏輯
+  const renderPiP = () => {
+    if (!clipData.pip_video || !clipData.pip_video.clip_id) return null;
+    
+    const pipName = clipData.pip_video.clip_id.split('/').pop();
+    const pipUrl = `${assetsRootUrl}${pipName}`;
+    const pipStart = Math.round((clipData.pip_video.source_start || 0) * fps);
+    
+    // PiP 樣式與位置計算
+    const pos = clipData.pip_video.position || 'top_right';
+    const pipStyle = {
+      position: 'absolute',
+      width: '35%', height: 'auto',
+      borderRadius: '16px', border: '3px solid white',
+      boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
+      zIndex: 20,
+      ...(pos === 'top_right' ? { top: '3%', right: '3%' } : {}),
+      ...(pos === 'bottom_left' ? { bottom: '3%', left: '3%' } : {}),
+    };
 
-  // 5. 渲染動態影片 (處理時間裁切與變速)
-  // 將大腦給的 "秒數" 乘上 "fps" 轉換為 Remotion 的 "影格數"
+    return <Video src={pipUrl} startFrom={pipStart} style={pipStyle} muted />;
+  };
+
   const startFromFrame = Math.round((clipData.source_start || 0) * fps);
   const endAtFrame = clipData.source_end ? Math.round(clipData.source_end * fps) : undefined;
 
   return (
-    <Video
-      src={fileUrl}
-      startFrom={startFromFrame}
-      endAt={endAtFrame}
-      playbackRate={clipData.playback_rate || 1.0}
-      volume={clipData.clip_volume ?? 1.0}
-      style={dynamicStyle}
-    />
+    <>
+      {/* 主畫面 */}
+      {isImage ? (
+        <Img src={fileUrl} style={dynamicStyle} />
+      ) : (
+        <Video
+          src={fileUrl}
+          startFrom={startFromFrame}
+          endAt={endAtFrame}
+          playbackRate={clipData.playback_rate || 1.0}
+          volume={clipData.clip_volume ?? 1.0}
+          style={dynamicStyle}
+        />
+      )}
+      
+      {/* 畫中畫子畫面 (若有) */}
+      {renderPiP()}
+    </>
   );
 }

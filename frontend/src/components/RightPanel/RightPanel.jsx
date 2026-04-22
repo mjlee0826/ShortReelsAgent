@@ -7,7 +7,9 @@ export default function RightPanel() {
   const { errorMsg } = useBlueprintStore();
 
   return (
-    <div className="w-[400px] h-full flex flex-col bg-gray-900 border-l border-gray-800 shadow-2xl">
+    // 【修改這裡】加寬面板並使用 shrink-0 防止變形
+    <div className="w-[450px] xl:w-[500px] shrink-0 h-full flex flex-col bg-gray-900 border-l border-gray-800 shadow-2xl z-10">
+      
       {/* 頂部標題 */}
       <div className="p-6 border-b border-gray-800 bg-black">
         <h2 className="text-xl font-bold text-white tracking-wide">AI Director</h2>
