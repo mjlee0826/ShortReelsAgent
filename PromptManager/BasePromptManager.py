@@ -19,3 +19,8 @@ class BasePromptManager(ABC):
     @abstractmethod
     def get_director_prompt(self, user_prompt: str, assets: list, audio_dna: dict, template_dna: dict = None, previous_timeline: list = None, error_prompt: str = "") -> str:
         pass
+
+    @abstractmethod
+    def get_intent_translation_prompt(self, user_prompt: str) -> str:
+        """將使用者的自然語言指令轉譯為精準的音樂搜尋關鍵字"""
+        pass

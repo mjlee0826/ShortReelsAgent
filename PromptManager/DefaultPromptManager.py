@@ -125,3 +125,26 @@ class DefaultPromptManager(BasePromptManager):
             prompt += f"\n# 🚨 CRITIC ERROR LOG (系統驗證錯誤)\n請務必修正以下物理/邏輯錯誤並重新輸出：\n{error_prompt}"
 
         return prompt
+    
+    def get_intent_translation_prompt(self, user_prompt: str) -> str:
+        return (
+            "# ROLE\n"
+            "你是一個專業的電影配樂總監。\n\n"
+            "# TASK\n"
+            "請分析使用者的影片剪輯需求，並決定『背景音樂的處理策略』。\n\n"
+            "# RULES\n"
+            "請從以下三種策略 (music_action) 挑選一種：\n"
+            "1. `search`：使用者需要配樂 (指定歌曲或風格)。請在 search_query 填入能直接在【YouTube 搜尋引擎】上找到高質感音樂的關鍵字。\n"
+            "   - 若指定歌曲，直接填寫「歌手 歌名」。\n"
+            "   - 若只有風格，請轉換為 YouTube 創作者常用的無版權 BGM 搜尋詞 (例如：'Chill tropical house vlog bgm no copyright', 'Cinematic epic trailer music', 'Funny goofy background music')。\n"
+            "2. `use_template`：使用者明確要求「使用參考範本的音樂」或「跟範本一模一樣」。\n"
+            "3. `none`：使用者明確要求「無聲」、「不需要配樂」、「保留原音即可」。\n\n"
+            "# OUTPUT FORMAT\n"
+            "請直接輸出 JSON 格式，不可包含 markdown 標記：\n"
+            "{\n"
+            "  \"music_action\": \"search | use_template | none\",\n"
+            "  \"search_query\": \"若是 search 才需要填寫，否則留空\"\n"
+            "}\n\n"
+            f"# USER PROMPT\n"
+            f"使用者的需求：『{user_prompt}』\n"
+        )

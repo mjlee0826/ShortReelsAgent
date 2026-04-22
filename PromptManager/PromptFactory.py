@@ -9,11 +9,9 @@ class PromptFactory:
         prompt_map = {
             TaskMode.GLOBAL_ANALYSIS: manager.get_media_analysis_prompt,
             TaskMode.TIMECODED_ACTION_INDEX: manager.get_timecoded_action_index_prompt,
-            TaskMode.DIRECTOR_SCHEDULING: manager.get_director_prompt  # 【新增】路由至導演 Prompt
+            TaskMode.DIRECTOR_SCHEDULING: manager.get_director_prompt,
+            TaskMode.INTENT_TRANSLATION: manager.get_intent_translation_prompt # 【新增】路由至意圖轉譯 Prompt
         }
         
-        # 取得對應的生成函式
         generate_prompt_func = prompt_map.get(mode, manager.get_media_analysis_prompt)
-        
-        # 執行函式並將動態參數解包傳入
         return generate_prompt_func(**kwargs)

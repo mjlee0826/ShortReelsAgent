@@ -5,3 +5,4 @@ class TaskMode(Enum):
     GLOBAL_ANALYSIS = "global_analysis"               # 靜態圖片與簡單短影片的全局分析
     TIMECODED_ACTION_INDEX = "timecoded_action_index" # 複雜影片與 Template 的多模態時間軸解析
     DIRECTOR_SCHEDULING = "director_scheduling"       # 【新增】導演大腦排程草稿生成
+    INTENT_TRANSLATION = "intent_translation"         # 【新增】將使用者需求轉譯為音樂搜尋關鍵字
