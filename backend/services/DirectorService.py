@@ -1,6 +1,7 @@
 import os
 # 匯入你先前實作的 Phase 1-4 核心組件
 from MediaProcessor.MediaProcessorFactory import MediaProcessorFactory
+from MediaTools.MediaStandardizer import MediaStandardizer
 from TemplateEngine.TemplateAnalyzerFacade import TemplateAnalyzerFacade
 from DirectorAgent.DirectorFacade import DirectorFacade
 
@@ -11,6 +12,7 @@ class DirectorService:
     def __init__(self):
         # 取得 backend/assets 的絕對路徑
         self.base_assets_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
+        self.standardizer = MediaStandardizer()
         self.template_analyzer = TemplateAnalyzerFacade()
         self.director = DirectorFacade()
 
@@ -22,6 +24,8 @@ class DirectorService:
         target_dir = os.path.join(self.base_assets_path, folder_name)
         if not os.path.isdir(target_dir):
             raise ValueError(f"找不到素材資料夾: {target_dir}")
+        
+        self.standardizer.standardize_folder(target_dir)
 
         # 抓取資料夾內所有檔案 (忽略大小寫問題，比 glob 更穩)
         all_files = [f for f in os.listdir(target_dir) if os.path.isfile(os.path.join(target_dir, f))]
@@ -31,6 +35,12 @@ class DirectorService:
         raw_assets_metadata = []
         
         for filename in all_files:
+            if "_std." not in filename:
+                std_version = os.path.splitext(filename)[0] + "_std"
+                # 檢查目錄下是否有對應的標準化版本
+                if any(std_version in f for f in all_files):
+                    continue # 跳過非標素材，改用標素材
+
             file_path = os.path.join(target_dir, filename)
             ext = os.path.splitext(filename)[1].lower()
             
