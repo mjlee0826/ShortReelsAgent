@@ -1,4 +1,5 @@
 import os
+import json
 # 匯入你先前實作的 Phase 1-4 核心組件
 from MediaProcessor.MediaProcessorFactory import MediaProcessorFactory
 from MediaTools.MediaStandardizer import MediaStandardizer
@@ -15,6 +16,17 @@ class DirectorService:
         self.standardizer = MediaStandardizer()
         self.template_analyzer = TemplateAnalyzerFacade()
         self.director = DirectorFacade()
+
+    def _save_json_dump(self, data, filename):
+        """新增：輔助方法，將中間結果儲存為 JSON 以供偵錯"""
+        try:
+            os.makedirs("output", exist_ok=True)
+            filepath = os.path.join("output", filename)
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=4, ensure_ascii=False)
+            print(f"💾 [Dump] 成功儲存中間產物: {filepath}")
+        except Exception as e:
+            print(f"⚠️ [Dump] 儲存 {filename} 失敗: {str(e)}")
 
     def run_workflow(self, prompt: str, folder_name: str, template: str = None, 
                     subtitles: bool = True, filters: bool = True, old_timeline: dict = None,
@@ -69,11 +81,14 @@ class DirectorService:
         if not raw_assets_metadata:
             raise ValueError("資料夾內沒有成功解析的有效素材！")
 
+        self._save_json_dump(raw_assets_metadata, "phase1_assets.json")
+
         # --- 3. Phase 2: 範本 DNA 提取 ---
         template_dna = None
         if template:
             print(f"[Service] 正在提取範本 DNA: {template}")
             template_dna = self.template_analyzer.extract_dna(template)
+            self._save_json_dump(template_dna, "phase2_template.json")
 
         # --- 4. 處理勾選框邏輯 (Prompt 注入) ---
         enhanced_prompt = prompt
@@ -90,6 +105,9 @@ class DirectorService:
             template_dna=template_dna,
             previous_timeline=old_timeline
         )
+
+        self._save_json_dump(audio_dna, "phase3_audio_dna.json")
+        self._save_json_dump(final_blueprint, "phase4_timeline_blueprint.json")
 
         # 回傳最終給前端 Remotion 渲染的資料包
         return {
