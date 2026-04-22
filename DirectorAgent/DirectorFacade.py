@@ -55,11 +55,12 @@ class DirectorFacade:
                 "fps": target_fps,
                 "aspect_ratio": "9:16"
             },
+            "bgm_track": context.get("bgm_track", {"track_id": None}), # ⬅️ 新增這一行
             "timeline": context["final_timeline"]
         }
             
         print("✅ [Director Agent] 藍圖規劃完成！")
         print(f"✅ [Director Agent] 藍圖規劃完成！(自動設定全局 FPS 為: {target_fps})")
         
-        # 回傳封裝好的藍圖與音訊 DNA (配合 Phase 4 的測試腳本接收格式)
+        # 回傳封裝好的藍圖與音訊 DNA
         return final_blueprint, context.get("audio_dna", {})
