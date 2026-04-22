@@ -37,7 +37,7 @@ class DirectorService:
         if not os.path.isdir(target_dir):
             raise ValueError(f"找不到素材資料夾: {target_dir}")
         
-        self.standardizer.standardize_folder(target_dir)
+        # self.standardizer.standardize_folder(target_dir)
 
         # 抓取資料夾內所有檔案 (忽略大小寫問題，比 glob 更穩)
         all_files = [f for f in os.listdir(target_dir) if os.path.isfile(os.path.join(target_dir, f))]
