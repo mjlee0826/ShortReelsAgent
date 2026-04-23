@@ -9,3 +9,4 @@ cookies.txt
 temp_templates
 output
 backend/assets
+.env

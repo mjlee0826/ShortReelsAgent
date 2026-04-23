@@ -14,6 +14,7 @@ class DirectorService:
         self.standardizer = MediaStandardizer()
         self.template_analyzer = TemplateAnalyzerFacade()
         self.director = DirectorFacade()
+        self.backend_url = os.getenv("BACKEND_URL", "http://localhost:5174")
 
     def run_workflow(self, prompt: str, folder_name: str, template: str = None, 
                     subtitles: bool = True, filters: bool = True, old_timeline: dict = None,
@@ -98,7 +99,7 @@ class DirectorService:
                     rel_path = os.path.relpath(source_audio_path, cache_dir)
                     
                     # 組合出全域快取的 URL (使用 5174 Port)
-                    audio_url = f"http://localhost:5174/cache/{rel_path}".replace('\\', '/')
+                    audio_url = f"{self.backend_url}/cache/{rel_path}".replace('\\', '/')
                     
                     # 強制修正 JSON 藍圖，將 track_id 替換為完整 URL
                     if "bgm_track" in final_blueprint and isinstance(final_blueprint["bgm_track"], dict):
@@ -114,5 +115,5 @@ class DirectorService:
         return {
             "blueprint": final_blueprint,
             "audio_dna": audio_dna,
-            "assets_root_url": f"http://localhost:5174/static/{folder_name}/" 
+            "assets_root_url": f"{self.backend_url}/static/{folder_name}/" 
         }

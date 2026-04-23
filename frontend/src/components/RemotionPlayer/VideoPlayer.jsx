@@ -9,6 +9,8 @@ export default function VideoPlayer() {
   const { blueprint, assetsRootUrl } = useBlueprintStore();
   const [isRendering, setIsRendering] = useState(false);
 
+  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5174';
+
   // 1. 判斷藍圖是否為空 (嚴格條件)
   const isBlueprintEmpty = !blueprint || !blueprint.timeline || blueprint.timeline.length === 0;
 
@@ -29,7 +31,7 @@ export default function VideoPlayer() {
     setIsRendering(true);
 
     try {
-      const response = await fetch('http://localhost:5174/api/render_mp4', {
+      const response = await fetch(`${BACKEND_URL}/api/render_mp4`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
