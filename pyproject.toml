@@ -22,7 +22,8 @@ dependencies = [
     "pillow (==12.1.1)",
     "librosa (==0.11.0)",
     "accelerate (==1.13.0)",
-    "qwen-vl-utils (==0.0.14)"
+    "qwen-vl-utils (==0.0.14)",
+    "pillow-heif (==1.3.0)"
 ]
 
 [tool.poetry]
