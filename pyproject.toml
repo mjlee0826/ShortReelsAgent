@@ -17,7 +17,7 @@ dependencies = [
     "yt-dlp (==2026.3.17)",
     "pandas (==3.0.2)",
     "scikit-learn (==1.8.0)",
-    "rembg (==2.0.75)",
+    "rembg[gpu] (>=2.0.75,<3.0.0)",
     "pydantic (==2.13.2)",
     "pillow (==12.1.1)",
     "librosa (==0.11.0)",
