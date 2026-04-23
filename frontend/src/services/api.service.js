@@ -7,7 +7,7 @@ class DirectorApiService {
   async generateTimeline(payload) {
     try {
       // payload 包含 folder, prompt, template, toggles 等
-      const response = await axios.post(`${BACKEND_URL}/generate`, payload);
+      const response = await axios.post(`${BACKEND_URL}/api/generate`, payload);
       return response.data; 
     } catch (error) {
       console.error("[API Error] 劇本生成失敗:", error);
