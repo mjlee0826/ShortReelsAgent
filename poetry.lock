@@ -515,14 +515,14 @@ files = [
 
 [[package]]
 name = "click"
-version = "8.3.3"
+version = "8.2.1"
 description = "Composable command line interface toolkit"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "click-8.3.3-py3-none-any.whl", hash = "sha256:a2bf429bb3033c89fa4936ffb35d5cb471e3719e1f3c8a7c3fff0b8314305613"},
-    {file = "click-8.3.3.tar.gz", hash = "sha256:398329ad4837b2ff7cbe1dd166a4c0f8900c3ca3a218de04466f38f6497f18a2"},
+    {file = "click-8.2.1-py3-none-any.whl", hash = "sha256:61a3265b914e850b85317d0b3109c7f8cd35a670f963866005d6ef1d5175a12b"},
+    {file = "click-8.2.1.tar.gz", hash = "sha256:27c491cc05d968d271d5a1db13e3b5a184636d9d930f148c50b038f0d0646202"},
 ]
 
 [package.dependencies]
@@ -3979,6 +3979,30 @@ testingfree = ["huggingface-hub (>=0.12.1)", "hypothesis (>=6.70.2)", "pytest (>
 torch = ["packaging", "safetensors[numpy]", "torch (>=1.10)"]
 
 [[package]]
+name = "scenedetect"
+version = "0.6.7.1"
+description = "Video scene cut/shot detection program and Python library."
+optional = false
+python-versions = ">=3.7"
+groups = ["main"]
+files = [
+    {file = "scenedetect-0.6.7.1-py3-none-any.whl", hash = "sha256:3808ef4436ab0fc6fee8a155e95759b42e2446c925c45746a82ff119be4eb3e1"},
+    {file = "scenedetect-0.6.7.1.tar.gz", hash = "sha256:07833b0cb83a0106786a88136462580e9865e097f411f01501a688714c483a4e"},
+]
+
+[package.dependencies]
+click = ">=8.0,<8.3.0"
+numpy = "*"
+platformdirs = "*"
+tqdm = "*"
+
+[package.extras]
+moviepy = ["moviepy"]
+opencv = ["opencv-python"]
+opencv-headless = ["opencv-python-headless"]
+pyav = ["av (>=9.2)"]
+
+[[package]]
 name = "scikit-image"
 version = "0.26.0"
 description = "Image processing in Python"
@@ -5281,4 +5305,4 @@ test = ["pytest (>=8.1,<9.0)", "pytest-rerunfailures (>=14.0,<15.0)"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12, <3.14"
-content-hash = "60a94ca48ae100a9e356fe6817893dd11c25a2687633369832894a0c418115b1"
+content-hash = "9d867829c948299b24a532744471a4f323638470bebdda461ffa29bfdc7dc63b"
