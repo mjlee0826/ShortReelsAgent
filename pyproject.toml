@@ -23,7 +23,8 @@ dependencies = [
     "librosa (==0.11.0)",
     "accelerate (==1.13.0)",
     "qwen-vl-utils (==0.0.14)",
-    "pillow-heif (==1.3.0)"
+    "pillow-heif (==1.3.0)",
+    "pyiqa (==0.1.15.post2)"
 ]
 
 [tool.poetry]
