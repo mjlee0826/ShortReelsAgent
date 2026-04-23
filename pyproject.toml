@@ -27,7 +27,8 @@ dependencies = [
     "pyiqa (==0.1.15.post2)",
     "google-genai (==1.73.1)",
     "scenedetect (==0.6.7.1)",
-    "python-dotenv (>=1.2.2,<2.0.0)"
+    "python-dotenv (>=1.2.2,<2.0.0)",
+    "torchcodec (>=0.11.1,<0.12.0)"
 ]
 
 [tool.poetry]
