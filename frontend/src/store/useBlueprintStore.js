@@ -31,7 +31,7 @@ const useBlueprintStore = create((set, get) => ({
             enable_subtitles: state.enableSubtitles,
             enable_filters: state.enableFilters,
             video_strategy: state.videoStrategy, // 將前端選擇傳給後端
-            previous_timeline: isRefinement && state.blueprint ? state.blueprint.timeline : null
+            previous_timeline: isRefinement && state.blueprint ? state.blueprint : null
         };
 
         const result = await apiService.generateTimeline(payload);
