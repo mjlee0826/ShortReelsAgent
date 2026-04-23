@@ -5,7 +5,6 @@ description = ""
 authors = [
     {name = "mjlee",email = "yenchieh0826@gmail.com"}
 ]
-package-mode = false
 requires-python = ">=3.12, <3.14"
 dependencies = [
     "torch (==2.11.0+cu126)",
@@ -26,6 +25,8 @@ dependencies = [
     "qwen-vl-utils (==0.0.14)"
 ]
 
+[tool.poetry]
+package-mode = false
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
