@@ -14,13 +14,22 @@ export default function ClipComponent({ clipData, assetsRootUrl }) {
     ? interpolate(frame, [0, 15], [0, 1], { extrapolateRight: 'clamp' })
     : 1;
 
+  // LLM 輸出的語意濾鏡名稱 → 合法 CSS filter 值
+  const FILTER_MAP = {
+    cinematic: 'contrast(1.1) saturate(0.85) brightness(0.9)',
+    grayscale:  'grayscale(1)',
+    blur:       'blur(4px)',
+    none:       'none',
+  };
+  const cssFilter = FILTER_MAP[clipData.filter] ?? 'none';
+
   // 基礎樣式 (包含變焦 scale 與濾鏡)
   const dynamicStyle = {
     width: '100%', height: '100%',
     objectFit: 'cover',
     objectPosition: clipData.object_position || '50% 50%',
     transform: `scale(${clipData.scale || 1.0})`,
-    filter: clipData.filter && clipData.filter !== 'none' ? clipData.filter : 'none',
+    filter: cssFilter,
     opacity: opacity,
   };
 

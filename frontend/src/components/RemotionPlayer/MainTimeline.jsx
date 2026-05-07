@@ -48,7 +48,10 @@ export default function MainTimeline({ blueprint, assetsRootUrl }) {
         const fromFrame = Math.round(clip.start_at * fps);
         const durationInFrames = Math.round((clip.end_at - clip.start_at) * fps);
 
-        const hasNextTransition = index < blueprint.timeline.length - 1 && blueprint.timeline[index + 1].transition_in !== 'none';
+        const nextClip = index < blueprint.timeline.length - 1 ? blueprint.timeline[index + 1] : null;
+        // 只在相鄰片段（間距 < 0.1s）且下一段有轉場時才延伸，避免非相鄰片段出現殘影
+        const isAdjacent = nextClip && Math.abs((nextClip.start_at ?? 0) - (clip.end_at ?? 0)) < 0.1;
+        const hasNextTransition = isAdjacent && nextClip.transition_in && nextClip.transition_in !== 'none';
         const renderDuration = hasNextTransition ? durationInFrames + 15 : durationInFrames;
 
         if (renderDuration <= 0) return null;

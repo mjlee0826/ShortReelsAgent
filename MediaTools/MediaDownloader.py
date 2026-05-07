@@ -7,11 +7,11 @@ class MediaDownloader:
     統一介面，無縫支援 Instagram Reels, YouTube Shorts, TikTok 等平台。
     """
     def __init__(self, download_dir="temp_templates", cookies_path="cookies.txt"):
-        self.download_dir = download_dir
-        self.cookies_path = cookies_path
-        
-        if not os.path.exists(download_dir):
-            os.makedirs(download_dir)
+        self.download_dir = os.path.abspath(download_dir)
+        self.cookies_path = os.path.abspath(cookies_path)
+
+        if not os.path.exists(self.download_dir):
+            os.makedirs(self.download_dir)
 
     def fetch_video(self, input_source: str) -> dict:
         """

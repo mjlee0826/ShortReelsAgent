@@ -28,7 +28,7 @@ class DurationValidator(BaseValidator):
                 errors.append(f"Clip [{i}] ({clip_id}): 播放時長必須大於 0 (目前為 {target_duration}s)")
 
             # 3. 針對影片進行物理邊界檢查
-            if asset["type"] == "video":
+            if asset.get("type") == "video":
                 source_start = clip.get("source_start", 0)
                 source_end = clip.get("source_end", 0)
                 max_dur = asset.get("dur", 0)
@@ -41,6 +41,17 @@ class DurationValidator(BaseValidator):
                 
                 if (source_end - source_start) <= 0:
                     errors.append(f"Clip [{i}] ({clip_id}): 影片裁剪區間無效")
+
+                # playback_rate 一致性檢查：來源時長 / speed ≈ 時間軸時長
+                playback_rate = clip.get("playback_rate", 1.0) or 1.0
+                timeline_dur = clip.get("end_at", 0) - clip.get("start_at", 0)
+                expected_dur = (source_end - source_start) / playback_rate
+                if abs(expected_dur - timeline_dur) > 0.1:
+                    errors.append(
+                        f"Clip [{i}] ({clip_id}): playback_rate={playback_rate} 下，"
+                        f"來源時長 {source_end - source_start:.2f}s ÷ {playback_rate} = {expected_dur:.2f}s，"
+                        f"但時間軸時長為 {timeline_dur:.2f}s，兩者不符"
+                    )
 
         # 若還有下一關，繼續往下送審
         if self.next:

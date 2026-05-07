@@ -1,4 +1,5 @@
 import os
+import subprocess
 from MediaTools.FFmpegAdapter import FFmpegAdapter
 
 class MediaStandardizer:
@@ -48,13 +49,20 @@ class MediaStandardizer:
     def _convert_to_h264(self, input_path: str, output_path: str) -> bool:
         """呼叫 FFmpeg 進行標準 H.264/AAC 轉檔"""
         try:
-            # 命令參數：使用 libx264 編碼，確保快速且高度相容
-            # -pix_fmt yuv420p 是為了讓某些舊版播放器也能讀取
-            cmd = f'ffmpeg -i "{input_path}" -c:v libx264 -pix_fmt yuv420p -c:a aac -b:a 128k "{output_path}" -y'
-            os.system(cmd)
+            subprocess.run(
+                [
+                    "ffmpeg", "-y", "-i", input_path,
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", "-b:a", "128k",
+                    output_path
+                ],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE
+            )
             return True
-        except Exception as e:
-            print(f"   ❌ 影片轉檔失敗: {e}")
+        except subprocess.CalledProcessError as e:
+            print(f"   ❌ 影片轉檔失敗: {e.stderr.decode(errors='replace')}")
             return False
 
     def _convert_image_to_jpg(self, input_path: str, output_path: str) -> bool:

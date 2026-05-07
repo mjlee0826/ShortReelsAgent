@@ -67,9 +67,9 @@ class ImageProcessor(MediaStrategy):
             if M["m00"] != 0:
                 cx = int(M["m10"] / M["m00"])
                 cy = int(M["m01"] / M["m00"])
-                subject_focus = {"x": int(cx / width * 100), "y": int(cy / height * 100)}
+                subject_focus = {"x_percent": round(cx / width * 100, 1), "y_percent": round(cy / height * 100, 1)}
             else:
-                subject_focus = {"x": 50, "y": 50} 
+                subject_focus = {"x_percent": 50.0, "y_percent": 50.0}
 
             # 2. 【核心改動】雙重評分機制
             tech_score = self.tech_engine.get_technical_score(pil_image)

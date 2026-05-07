@@ -1,10 +1,11 @@
+import asyncio
+import traceback
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, Dict
 from backend.services.DirectorService import DirectorService
 from backend.services.RenderService import RenderService
-import traceback  # 【新增】用來印出詳細錯誤追蹤
 
 router = APIRouter()
 director_service = DirectorService()
@@ -24,14 +25,15 @@ class GenerateRequest(BaseModel):
 @router.post("/generate")
 async def generate_timeline(req: GenerateRequest):
     try:
-        result = director_service.run_workflow(
+        result = await asyncio.to_thread(
+            director_service.run_workflow,
             prompt=req.user_prompt,
             folder_name=req.asset_folder_name,
             template=req.template_source,
             subtitles=req.enable_subtitles,
             filters=req.enable_filters,
             old_timeline=req.previous_timeline,
-            video_strategy=req.video_strategy  # 【新增】把參數往後傳
+            video_strategy=req.video_strategy
         )
         return result
     except Exception as e:
@@ -51,8 +53,9 @@ async def render_mp4(req: RenderRequest, background_tasks: BackgroundTasks):
     """
     workspace = render_service.create_workspace()
     try:
-        # 啟動算圖
-        output_mp4 = render_service.execute_render(workspace, req.blueprint, req.assets_root_url)
+        output_mp4 = await asyncio.to_thread(
+            render_service.execute_render, workspace, req.blueprint, req.assets_root_url
+        )
         
         # 註冊背景任務：當 FileResponse 將檔案傳送完畢後，立刻呼叫 cleanup 焚毀資料夾
         background_tasks.add_task(workspace.cleanup)

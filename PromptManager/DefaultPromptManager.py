@@ -65,6 +65,8 @@ class DefaultPromptManager(BasePromptManager):
             "身為導演，你必須靈活運用以下 Remotion 渲染能力來提升影片張力：\n"
             "1. 【節奏與變速 (Speed Ramping)】：\n"
             "   - 善用 `playback_rate` 調整節奏 (0.5=慢動作, 2.0=快轉)。與其將連續動作切碎，不如利用變速來對齊音樂的重拍 (onsets)。\n"
+            "   - ⚠️ 重要約束：`(source_end - source_start) / playback_rate` 必須等於 `end_at - start_at`。\n"
+            "     例如：source 取 4 秒，playback_rate=2.0，則 end_at - start_at 必須為 2.0 秒。\n"
             "2. 【空間裁切與運鏡 (Crop & Zoom)】：\n"
             "   - 輸出平台為 9:16 直式。必須參考素材的 `focus` 數據計算 `object_position`，嚴禁無腦填寫 '50% 50%'。\n"
             "   - 靜態照片或慢節奏畫面，可使用 `scale` (例如 1.1 或 1.2) 搭配前端動畫營造緩慢推進 (Zoom-in) 的視覺張力。\n"
