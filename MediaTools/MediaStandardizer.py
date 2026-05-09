@@ -54,6 +54,7 @@ class MediaStandardizer:
                     "ffmpeg", "-y", "-i", input_path,
                     "-c:v", "libx264", "-pix_fmt", "yuv420p",
                     "-c:a", "aac", "-b:a", "128k",
+                    "-movflags", "+faststart",
                     output_path
                 ],
                 check=True,
