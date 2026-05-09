@@ -106,7 +106,7 @@ class MediaDownloader:
             'outtmpl': f'{music_dir}/%(id)s.%(ext)s',
             'quiet': True,
             'no_warnings': True,
-            'default_search': 'ytmsearch1', # 關鍵點：搜尋並取首選
+            'default_search': 'ytsearch1', # 關鍵點：搜尋並取首選
             'nocheckcertificate': True,
         }
 
