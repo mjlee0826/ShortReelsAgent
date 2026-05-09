@@ -32,8 +32,8 @@ class MediaDownloader:
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             # IG 的 title 通常是一大段貼文，當檔名會出錯，所以改用 id 作為檔名
             'outtmpl': f'{self.download_dir}/%(id)s.%(ext)s',
-            'quiet': False,
-            'no_warnings': False,
+            'quiet': True,
+            'no_warnings': True,
             # 偽裝成正常的 Windows Chrome 瀏覽器，降低被 IG 阻擋的機率
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -101,13 +101,25 @@ class MediaDownloader:
         self._cleanup_music_cache(music_dir, max_files=20)
 
         # 設定 yt-dlp 參數：僅下載音訊，取搜尋結果的第一筆
+        # 設定 yt-dlp 參數：強化客戶端偽裝與格式容錯
         ydl_opts = {
-            'format': 'bestaudio/best',
+            # 1. 放寬格式要求：優先找 m4a，沒有的話找任意最佳音訊，再沒有就隨便抓一個最好的格式
+            'format': 'bestaudio[ext=m4a]/bestaudio/best',
             'outtmpl': f'{music_dir}/%(id)s.%(ext)s',
-            'quiet': True,
-            'no_warnings': True,
-            'default_search': 'ytsearch1', # 關鍵點：搜尋並取首選
+            
+            # 2. 強烈建議在後端開發階段保持 False，這樣在 docker 或 tmux 的 log 裡才看得到真實的 HTTP 錯誤
+            'quiet': False,
+            'no_warnings': False,
+            'default_search': 'ytsearch1',
             'nocheckcertificate': True,
+            
+            # 3. 【核心破解】強制偽裝成 iOS 或 Android 客戶端，避開網頁版的嚴格 PO Token 驗證
+            'extractor_args': {
+                'youtube': [
+                    'client=ios,android,tv', 
+                    'player_client=ios,android,web'
+                ]
+            }
         }
 
         # 掛載 Cookie 以防被阻擋
