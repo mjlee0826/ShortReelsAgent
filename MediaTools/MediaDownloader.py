@@ -89,10 +89,28 @@ class MediaDownloader:
         except OSError:
             pass
 
+    # Chain of Responsibility 模式：依序嘗試多個音樂下載來源，第一個成功即停止。
+    # 順序：YouTube（品質好但易被 bot 偵測擋）→ SoundCloud（auth 阻擋少但容易抓到 cover/remix）。
+    # 對 YouTube 額外指定 player_client 走 tv_embedded / mweb 等較不嚴格的 endpoint，
+    # 試圖在無 cookies 的情況下繞過 "Sign in to confirm you're not a bot" 挑戰。
+    _DOWNLOAD_ENGINES = (
+        {
+            "name": "YouTube",
+            "default_search": "ytsearch1",
+            "extractor_args": {"youtube": {"player_client": ["tv_embedded", "mweb", "web"]}},
+        },
+        {
+            "name": "SoundCloud",
+            "default_search": "scsearch1",
+            "extractor_args": None,
+        },
+    )
+
     def search_and_download_audio(self, search_query: str) -> str:
         """
         [Phase 3 新增]
-        功能：透過自然語言搜尋全網音樂，並下載為高品質音訊檔。
+        透過自然語言搜尋全網音樂並下載為音訊檔。
+        依 _DOWNLOAD_ENGINES 順序嘗試多個來源，第一個成功即返回；全部失敗才拋例外。
         """
         music_dir = os.path.join(self.download_dir, "music_cache")
         if not os.path.exists(music_dir):
@@ -100,38 +118,42 @@ class MediaDownloader:
 
         self._cleanup_music_cache(music_dir, max_files=20)
 
-        # 設定 yt-dlp 參數：僅下載音訊，取搜尋結果的第一筆
+        # 一次性 cookie 檢查：兩個 engine 共用同一份 cookies.txt（若存在）
+        if os.path.exists(self.cookies_path):
+            print(f"[Downloader] 成功找到並掛載 Cookie: {self.cookies_path}")
+        else:
+            print(f"[Downloader] 警告：找不到 Cookie 檔案於 {self.cookies_path}")
+
+        last_error = None
+        for engine in self._DOWNLOAD_ENGINES:
+            try:
+                print(f"[Downloader] 嘗試從 {engine['name']} 搜尋: {search_query}")
+                return self._download_from_engine(search_query, music_dir, engine)
+            except Exception as e:
+                last_error = e
+                print(f"[Downloader] {engine['name']} 失敗 ({type(e).__name__})：切換至下一個來源")
+
+        print(f"[Downloader Error] 所有來源皆失敗，最後錯誤：{last_error}")
+        raise RuntimeError(f"無法獲取音樂資源: {search_query}")
+
+    def _download_from_engine(self, search_query: str, music_dir: str, engine: dict) -> str:
+        """從單一來源下載；失敗即拋例外，由 caller 決定是否 fallback。"""
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': f'{music_dir}/%(id)s.%(ext)s',
             'quiet': True,
             'no_warnings': True,
-            # 走 YouTube 第一名：對「Artist Song」這類查詢，YouTube 的官方／Topic 頻道
-            # 多半會排在第一順位（Sia、Taylor Swift 之流的 Vevo/Topic 是 YouTube 自動建的官方分支），
-            # 比 SoundCloud 的 scsearch1 更不容易抓到 cover/remix/slowed 版，下游 Whisper 轉錄品質也比較穩。
-            'default_search': 'ytsearch1',
+            'default_search': engine['default_search'],
             'nocheckcertificate': True,
         }
-
-        # 掛載 Cookie 以防被阻擋
+        if engine.get('extractor_args'):
+            ydl_opts['extractor_args'] = engine['extractor_args']
         if os.path.exists(self.cookies_path):
             ydl_opts['cookiefile'] = self.cookies_path
-            print(f"[Downloader] 成功找到並掛載 Cookie: {self.cookies_path}")
-        else:
-            print(f"[Downloader] 警告：找不到 Cookie 檔案於 {self.cookies_path}")
 
-        print(f"[Downloader] 正在全網搜尋音樂: {search_query}")
-        
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(search_query, download=True)
-                
-                # 處理搜尋結果的資料結構
-                if 'entries' in info:
-                    info = info['entries'][0]
-                
-                downloaded_path = ydl.prepare_filename(info)
-                return downloaded_path
-        except Exception as e:
-            print(f"[Downloader Error] 搜尋下載失敗: {e}")
-            raise RuntimeError(f"無法獲取音樂資源: {search_query}")
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(search_query, download=True)
+            # 處理搜尋結果的資料結構
+            if 'entries' in info:
+                info = info['entries'][0]
+            return ydl.prepare_filename(info)
