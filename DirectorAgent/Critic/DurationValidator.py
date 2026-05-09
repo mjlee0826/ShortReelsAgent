@@ -53,7 +53,4 @@ class DurationValidator(BaseValidator):
                         f"但時間軸時長為 {timeline_dur:.2f}s，兩者不符"
                     )
 
-        # 若還有下一關，繼續往下送審
-        if self.next:
-            return errors + self.next.validate(timeline, assets)
         return errors

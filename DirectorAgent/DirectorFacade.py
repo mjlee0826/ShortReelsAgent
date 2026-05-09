@@ -59,7 +59,6 @@ class DirectorFacade:
             "timeline": context["final_timeline"]
         }
             
-        print("✅ [Director Agent] 藍圖規劃完成！")
         print(f"✅ [Director Agent] 藍圖規劃完成！(自動設定全局 FPS 為: {target_fps})")
         
         # 回傳封裝好的藍圖與音訊 DNA

@@ -15,6 +15,4 @@ class OverlapValidator(BaseValidator):
             if next_start < curr_end:
                 errors.append(f"時間重疊：第 {i} 段結束於 {curr_end}，但第 {i+1} 段開始於 {next_start}")
         
-        if self.next:
-            return errors + self.next.validate(timeline, assets)
         return errors

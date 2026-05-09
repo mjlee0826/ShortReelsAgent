@@ -28,16 +28,19 @@ class RemotionAdapter:
 
         print(f"[RemotionAdapter] 啟動背景算圖指令: {' '.join(cmd)}")
         
-        # 執行指令並掛起等待 (capture_output 攔截日誌供除錯)
-        result = subprocess.run(
-            cmd, 
-            cwd=self.frontend_dir, 
-            capture_output=True, 
-            text=True
-        )
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=self.frontend_dir,
+                capture_output=True,
+                text=True,
+                timeout=600
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("Remotion 算圖超時（10 分鐘）：請檢查 Node.js 環境或縮短影片長度。")
 
         if result.returncode != 0:
-            print(f"❌ [RemotionAdapter] 算圖崩潰，Node.js 報錯:\\n{result.stderr}")
+            print(f"❌ [RemotionAdapter] 算圖崩潰，Node.js 報錯:\n{result.stderr}")
             raise RuntimeError(f"Remotion 算圖失敗: {result.stderr}")
         
         return True

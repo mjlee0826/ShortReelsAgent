@@ -1,24 +1,10 @@
 import numpy as np
 from PIL import Image
 from rembg import new_session, remove
+from Model.BaseModelManager import BaseModelManager
 
-class SaliencyModelManager:
-    """
-    單例模式 (Singleton): 顯著性偵測大腦。
-    使用 U²-Net 快速產生畫面主體的黑白遮罩 (Mask)，
-    用於計算「主體重心座標」與「精準模糊度」。
-    """
-    _instance = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(SaliencyModelManager, cls).__new__(cls)
-            try:
-                cls._instance._initialize()
-            except Exception as e:
-                cls._instance = None
-                raise e
-        return cls._instance
+class SaliencyModelManager(BaseModelManager):
+    """顯著性偵測大腦 (U²-Net)，計算主體重心座標與精準模糊度。"""
 
     def _initialize(self):
         # 載入 U2-Net 輕量級模型 session

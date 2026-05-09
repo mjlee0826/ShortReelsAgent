@@ -3,25 +3,10 @@ import gc
 from PIL import Image
 import torchvision.transforms as transforms
 import pyiqa
+from Model.BaseModelManager import BaseModelManager
 
-class MusiqModelManager:
-    """
-    單例模式 (Singleton): 技術畫質評估大腦。
-    【核心升級】將 MANIQA 替換為 MUSIQ (Multi-scale Image Quality Transformer)。
-    原因：解決傳統 IQA 模型將「攝影景深 (Bokeh)」誤判為「模糊」的致命缺陷。
-    MUSIQ 基於真實世界照片訓練，能精準放行唯美景深，並攔截真正的手震與失焦廢片。
-    """
-    _instance = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(MusiqModelManager, cls).__new__(cls)
-            try:
-                cls._instance._initialize()
-            except Exception as e:
-                cls._instance = None
-                raise e
-        return cls._instance
+class MusiqModelManager(BaseModelManager):
+    """技術畫質評估大腦 (MUSIQ)，精準辨別手震廢片與唯美景深。"""
 
     def _initialize(self):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

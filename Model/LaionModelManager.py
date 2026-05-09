@@ -5,6 +5,7 @@ import torch.nn as nn
 import gc
 from PIL import Image
 from transformers import CLIPProcessor, CLIPModel
+from Model.BaseModelManager import BaseModelManager
 
 class LAIONAestheticMLP(nn.Module):
     """
@@ -26,22 +27,8 @@ class LAIONAestheticMLP(nn.Module):
     def forward(self, x):
         return self.layers(x)
 
-class LaionModelManager:
-    """
-    單例模式 (Singleton): 美學打分大腦。
-    結合 CLIP 特徵提取與 LAION Aesthetic Predictor，專職評估畫面的美感與構圖。
-    """
-    _instance = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(LaionModelManager, cls).__new__(cls)
-            try:
-                cls._instance._initialize()
-            except Exception as e:
-                cls._instance = None
-                raise e
-        return cls._instance
+class LaionModelManager(BaseModelManager):
+    """美學打分大腦 (LAION Aesthetic Predictor + CLIP)，評估畫面美感與構圖。"""
 
     def _initialize(self):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -54,8 +41,8 @@ class LaionModelManager:
         # 2. 初始化 LAION MLP
         self.mlp = LAIONAestheticMLP(768).to(self.device).eval()
         
-        # 自動下載官方開源的評分器權重
-        weight_path = "sac+logos+ava1-l14-linearMSE.pth"
+        # 自動下載官方開源的評分器權重（固定存放在 Model/ 目錄旁，避免 cwd 差異）
+        weight_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sac+logos+ava1-l14-linearMSE.pth")
         if not os.path.exists(weight_path):
             print("正在下載 LAION Aesthetic 權重...")
             url = "https://github.com/christophschuhmann/improved-aesthetic-predictor/raw/main/sac+logos+ava1-l14-linearMSE.pth"

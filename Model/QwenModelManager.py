@@ -8,27 +8,17 @@ from PromptManager.BasePromptManager import BasePromptManager
 from PromptManager.DefaultPromptManager import DefaultPromptManager
 from PromptManager.TaskMode import TaskMode
 from PromptManager.PromptFactory import PromptFactory
+from Model.BaseModelManager import BaseModelManager
 
-class QwenModelManager:
-    """單例模式: 統一的視覺大腦"""
-    _instance = None
+class QwenModelManager(BaseModelManager):
+    """統一的本地視覺大腦 (Qwen3-VL)。"""
 
-    def __new__(cls, prompt_manager: BasePromptManager = None):
-        if cls._instance is None:
-            cls._instance = super(QwenModelManager, cls).__new__(cls)
-            try:
-                cls._instance._initialize(prompt_manager)
-            except Exception as e:
-                cls._instance = None
-                raise e
-        return cls._instance
-
-    def _initialize(self, prompt_manager: BasePromptManager):
+    def _initialize(self):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        
+
         # 【核心修正】修正為官方正確的最新穩定版 Model ID
         self.model_id = "Qwen/Qwen3-VL-8B-Instruct"
-        self.prompt_manager = prompt_manager if prompt_manager else DefaultPromptManager()
+        self.prompt_manager = DefaultPromptManager()
         
         quantization_config = BitsAndBytesConfig(load_in_8bit=True)
         
@@ -40,6 +30,9 @@ class QwenModelManager:
             torch_dtype=torch.float16
         )
         self.processor = AutoProcessor.from_pretrained(self.model_id)
+
+    def set_prompt_manager(self, prompt_manager: BasePromptManager):
+        self.prompt_manager = prompt_manager
 
     def analyze_media(self, media_input, media_type="image", mode: TaskMode = TaskMode.GLOBAL_ANALYSIS) -> dict:
         prompt_text = PromptFactory.create_prompt(mode, self.prompt_manager)

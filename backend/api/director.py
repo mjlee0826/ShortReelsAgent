@@ -67,6 +67,6 @@ async def render_mp4(req: RenderRequest, background_tasks: BackgroundTasks):
         )
     except Exception as e:
         workspace.cleanup() # 發生錯誤也要立刻清理
-        print("\\n❌ [SSR 算圖錯誤]")
+        print("\n❌ [SSR 算圖錯誤]")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

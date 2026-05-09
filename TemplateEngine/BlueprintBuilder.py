@@ -1,3 +1,4 @@
+import copy
 import json
 
 class BlueprintBuilder:
@@ -61,4 +62,4 @@ class BlueprintBuilder:
         return self
 
     def build(self) -> dict:
-        return self._dna
+        return copy.deepcopy(self._dna)

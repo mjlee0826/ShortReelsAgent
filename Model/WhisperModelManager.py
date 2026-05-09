@@ -1,22 +1,9 @@
 import torch
 from transformers import pipeline
+from Model.BaseModelManager import BaseModelManager
 
-class WhisperModelManager:
-    """
-    單例模式 (Singleton): 確保 Whisper 語音辨識模型只實例化一次。
-    本次升級：加入針對 Transformer 自迴歸死迴圈的防跳針過濾器。
-    """
-    _instance = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(WhisperModelManager, cls).__new__(cls)
-            try:
-                cls._instance._initialize()
-            except Exception as e:
-                cls._instance = None
-                raise e
-        return cls._instance
+class WhisperModelManager(BaseModelManager):
+    """Whisper 語音辨識大腦（含幻覺防跳針過濾器）。"""
 
     def _initialize(self):
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"

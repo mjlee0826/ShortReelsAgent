@@ -1,22 +1,8 @@
 import torch
+from Model.BaseModelManager import BaseModelManager
 
-class VadModelManager:
-    """
-    單例模式 (Singleton): 語音活動偵測大腦 (VAD)。
-    使用 Silero VAD 在 CPU 上極速判斷音檔中是否有「人類說話聲」，
-    從根源阻斷 Whisper 的靜音幻覺。
-    """
-    _instance = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(VadModelManager, cls).__new__(cls)
-            try:
-                cls._instance._initialize()
-            except Exception as e:
-                cls._instance = None
-                raise e
-        return cls._instance
+class VadModelManager(BaseModelManager):
+    """語音活動偵測大腦 (Silero VAD)，阻斷 Whisper 靜音幻覺。"""
 
     def _initialize(self):
         # 透過 Torch Hub 載入 Silero VAD (免安裝額外套件，自動下載)

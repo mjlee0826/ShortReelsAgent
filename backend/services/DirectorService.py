@@ -1,6 +1,7 @@
 import os
 import json
 from MediaProcessor.MediaProcessorFactory import MediaProcessorFactory
+from MediaProcessor.VideoStrategy import VideoStrategy
 from MediaTools.MediaStandardizer import MediaStandardizer
 from TemplateEngine.TemplateAnalyzerFacade import TemplateAnalyzerFacade
 from DirectorAgent.DirectorFacade import DirectorFacade
@@ -71,12 +72,15 @@ class DirectorService:
                 if ext not in ['.mp4', '.mov', '.jpg', '.jpeg', '.png', '.heic', '.heif']:
                     continue
 
-                is_complex = video_strategy == '1' if ext in ['.mp4', '.mov'] else False
-                
+                strategy = VideoStrategy.COMPLEX if (ext in ['.mp4', '.mov'] and video_strategy == '1') else VideoStrategy.SIMPLE
+
                 try:
-                    print(f"   ⏳ 正在分析: {filename} (Complex Mode: {is_complex})")
-                    processor = MediaProcessorFactory.create_processor(file_path, is_complex=is_complex)
+                    print(f"   ⏳ 正在分析: {filename} (Strategy: {strategy.value})")
+                    processor = MediaProcessorFactory.create_processor(file_path, strategy=strategy)
                     metadata = processor.process(file_path)
+                    if metadata.get("status") != "success":
+                        print(f"   ⚠️ 素材被過濾: {filename} ({metadata.get('reason') or metadata.get('message', '未知原因')})")
+                        continue
                     raw_assets_metadata.append(metadata)
                 except Exception as e:
                     print(f"   ⚠️ 分析失敗，跳過 {filename}: {str(e)}")

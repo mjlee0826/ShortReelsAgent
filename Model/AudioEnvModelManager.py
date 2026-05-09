@@ -2,28 +2,10 @@ import torch
 import librosa
 import gc
 from transformers import WhisperProcessor, WhisperForConditionalGeneration
+from Model.BaseModelManager import BaseModelManager
 
-class AudioEnvModelManager:
-    """
-    單例模式 (Singleton): 確保環境音效描述模型只實例化一次。
-    
-    技術核心：
-    將音訊感知從「選擇題」提升為「申論題 (Captioning)」。
-    採用 MU-NLPC/whisper-tiny-audio-captioning (約 39M 參數)，
-    這是基於 Whisper 架構但專門針對「環境音描述 (AudioCaps)」微調的版本。
-    推論速度極快，且完美支援 Hugging Face 原生 API，避免自訂模型的報錯。
-    """
-    _instance = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(AudioEnvModelManager, cls).__new__(cls)
-            try:
-                cls._instance._initialize()
-            except Exception as e:
-                cls._instance = None
-                raise e
-        return cls._instance
+class AudioEnvModelManager(BaseModelManager):
+    """環境音效描述大腦 (whisper-tiny-audio-captioning)。"""
 
     def _initialize(self):
         """

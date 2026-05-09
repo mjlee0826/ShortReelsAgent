@@ -8,34 +8,24 @@ from PromptManager.BasePromptManager import BasePromptManager
 from PromptManager.DefaultPromptManager import DefaultPromptManager
 from PromptManager.TaskMode import TaskMode
 from PromptManager.PromptFactory import PromptFactory
+from Model.BaseModelManager import BaseModelManager
 
-class GeminiModelManager:
-    """
-    單例模式 (Singleton): 統一的雲端大腦 (Gemini 1.5 Flash)。
-    【修復】已遷移至最新 google.genai 架構，解決棄用警告。
-    """
-    _instance = None
+class GeminiModelManager(BaseModelManager):
+    """統一的雲端大腦 (Gemini)。已遷移至最新 google.genai 架構。"""
 
-    def __new__(cls, prompt_manager: BasePromptManager = None):
-        if cls._instance is None:
-            cls._instance = super(GeminiModelManager, cls).__new__(cls)
-            try:
-                cls._instance._initialize(prompt_manager)
-            except Exception as e:
-                cls._instance = None
-                raise e
-        return cls._instance
-
-    def _initialize(self, prompt_manager: BasePromptManager):
+    def _initialize(self):
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
             raise ValueError("嚴重錯誤：找不到 GEMINI_API_KEY 環境變數！請設定後再執行。")
-        
+
         # 【重構】使用新版 Client 實例化寫法
         self.client = genai.Client(api_key=api_key)
         self.default_model = 'gemini-2.5-flash'
         self.strong_model = 'gemini-3.1-pro-preview'
-        self.prompt_manager = prompt_manager if prompt_manager else DefaultPromptManager()
+        self.prompt_manager = DefaultPromptManager()
+
+    def set_prompt_manager(self, prompt_manager: BasePromptManager):
+        self.prompt_manager = prompt_manager
 
     def analyze_media(self, media_input: str, media_type="video", mode: TaskMode = TaskMode.TIMECODED_ACTION_INDEX) -> dict:
         prompt_text = PromptFactory.create_prompt(mode, self.prompt_manager)
@@ -46,8 +36,12 @@ class GeminiModelManager:
             # 【重構】新版檔案上傳 API
             video_file = self.client.files.upload(file=media_input)
 
-            # 輪詢等待 Gemini 後台處理影片完成
+            # 輪詢等待 Gemini 後台處理影片完成 (最多 5 分鐘)
+            poll_count = 0
             while video_file.state.name == 'PROCESSING':
+                if poll_count >= 150:
+                    raise TimeoutError("Gemini 影片處理逾時（超過 5 分鐘），請稍後重試或換短影片。")
+                poll_count += 1
                 print("[Gemini API] 影片處理中，等待 2 秒...")
                 time.sleep(2)
                 video_file = self.client.files.get(name=video_file.name)
@@ -65,7 +59,7 @@ class GeminiModelManager:
 
         except Exception as e:
             print(f"[Gemini API Error] 推理失敗: {str(e)}")
-            return {"error": "Analysis failed", "caption": "Unknown action", "action_index": []}
+            return {"error": "Analysis failed", "caption": "Unknown action", "multimodal_event_index": []}
         finally:
             # 確保上傳的檔案會被刪除，保護隱私與配額
             if video_file:

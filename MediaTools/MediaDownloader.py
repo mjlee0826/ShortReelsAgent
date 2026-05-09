@@ -74,14 +74,31 @@ class MediaDownloader:
             print(f"[Downloader Error] 下載失敗，可能是網址錯誤或被平台阻擋: {e}")
             raise ValueError(f"無法獲取影片素材: {input_source}")
     
+    def _cleanup_music_cache(self, music_dir: str, max_files: int = 20):
+        """刪除最舊的快取檔案，防止 music_cache 無限膨脹。"""
+        try:
+            files = sorted(
+                [os.path.join(music_dir, f) for f in os.listdir(music_dir)
+                 if os.path.isfile(os.path.join(music_dir, f))],
+                key=os.path.getmtime
+            )
+            while len(files) > max_files:
+                oldest = files.pop(0)
+                os.remove(oldest)
+                print(f"[Downloader] 🗑 清理音樂快取: {os.path.basename(oldest)}")
+        except OSError:
+            pass
+
     def search_and_download_audio(self, search_query: str) -> str:
         """
-        [Phase 3 新增] 
+        [Phase 3 新增]
         功能：透過自然語言搜尋全網音樂，並下載為高品質音訊檔。
         """
         music_dir = os.path.join(self.download_dir, "music_cache")
         if not os.path.exists(music_dir):
             os.makedirs(music_dir)
+
+        self._cleanup_music_cache(music_dir, max_files=20)
 
         # 設定 yt-dlp 參數：僅下載音訊，取搜尋結果的第一筆
         ydl_opts = {

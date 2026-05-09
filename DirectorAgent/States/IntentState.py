@@ -52,33 +52,36 @@ class IntentState(BaseState):
         # ---------------------------------------------------------
         if music_action == "none":
             print("[Agent State] ⏩ 策略: 無配樂，跳過 Phase 3 搜尋。")
-            context["audio_dna"] = {} # 給一個空的 dict 避免下游當機
+            context["audio_dna"] = {}
 
         elif music_action == "use_template":
             if template_dna and "audio_beats" in template_dna:
                 print("[Agent State] ⏩ 策略: 繼承範本配樂，跳過 Phase 3 搜尋。")
-                
-                # 【修正】從 BlueprintBuilder 正確提取 audio_only 的實體路徑
+
                 template_audio_path = template_dna.get("local_assets", {}).get("audio_only", "")
-                
-                # 【修正】對齊 MusicEngineFacade 的資料結構，使用 local_path 裝載
                 context["audio_dna"] = {
                     "source": "template",
-                    "local_path": {
-                        "standard": template_audio_path
-                    },
+                    "local_path": {"standard": template_audio_path},
                     "analysis": template_dna.get("audio_beats", {})
                 }
             else:
                 print("⚠️ [Agent State] 找不到有效的範本音樂，強制退回搜尋策略！")
-                context["audio_dna"] = music_engine.fetch_and_analyze(query="Vlog BGM")
+                context["audio_dna"] = self._safe_fetch_music(music_engine, search_query)
 
-        else: # 預設就是 "search"
+        else:  # 預設就是 "search"
             print(f"[Agent State] 🔍 策略: 全網檢索，關鍵字為 '{search_query}'")
-            context["audio_dna"] = music_engine.fetch_and_analyze(query=search_query)
+            context["audio_dna"] = self._safe_fetch_music(music_engine, search_query)
         
         # ---------------------------------------------------------
         # 切換到排程狀態
         # ---------------------------------------------------------
         from DirectorAgent.States.SchedulingState import SchedulingState
         return SchedulingState()
+
+    def _safe_fetch_music(self, music_engine, query: str) -> dict:
+        """包裝 fetch_and_analyze，確保失敗時不會把 error dict 傳給 LLM。"""
+        result = music_engine.fetch_and_analyze(query=query)
+        if result.get("status") != "success":
+            print(f"⚠️ [MusicEngine] 音樂獲取失敗: {result.get('message', '未知錯誤')}，將使用空配樂繼續。")
+            return {}
+        return result
