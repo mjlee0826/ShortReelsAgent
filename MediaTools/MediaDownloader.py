@@ -32,8 +32,8 @@ class MediaDownloader:
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             # IG 的 title 通常是一大段貼文，當檔名會出錯，所以改用 id 作為檔名
             'outtmpl': f'{self.download_dir}/%(id)s.%(ext)s',
-            'quiet': True,
-            'no_warnings': True,
+            'quiet': False,
+            'no_warnings': False,
             # 偽裝成正常的 Windows Chrome 瀏覽器，降低被 IG 阻擋的機率
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
