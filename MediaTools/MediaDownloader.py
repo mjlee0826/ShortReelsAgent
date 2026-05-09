@@ -113,6 +113,9 @@ class MediaDownloader:
         # 掛載 Cookie 以防被阻擋
         if os.path.exists(self.cookies_path):
             ydl_opts['cookiefile'] = self.cookies_path
+            print(f"[Downloader] 成功找到並掛載 Cookie: {self.cookies_path}")
+        else:
+            print(f"[Downloader] 警告：找不到 Cookie 檔案於 {self.cookies_path}")
 
         print(f"[Downloader] 正在全網搜尋音樂: {search_query}")
         
