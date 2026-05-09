@@ -106,7 +106,10 @@ class MediaDownloader:
             'outtmpl': f'{music_dir}/%(id)s.%(ext)s',
             'quiet': True,
             'no_warnings': True,
-            'default_search': 'scsearch1', # 關鍵點：搜尋並取首選
+            # 走 YouTube 第一名：對「Artist Song」這類查詢，YouTube 的官方／Topic 頻道
+            # 多半會排在第一順位（Sia、Taylor Swift 之流的 Vevo/Topic 是 YouTube 自動建的官方分支），
+            # 比 SoundCloud 的 scsearch1 更不容易抓到 cover/remix/slowed 版，下游 Whisper 轉錄品質也比較穩。
+            'default_search': 'ytsearch1',
             'nocheckcertificate': True,
         }
 
