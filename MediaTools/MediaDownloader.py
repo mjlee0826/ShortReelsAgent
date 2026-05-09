@@ -93,15 +93,19 @@ class MediaDownloader:
     # 順序：YouTube（品質好但易被 bot 偵測擋）→ SoundCloud（auth 阻擋少但容易抓到 cover/remix）。
     # 對 YouTube 額外指定 player_client 走 tv_embedded / mweb 等較不嚴格的 endpoint，
     # 試圖在無 cookies 的情況下繞過 "Sign in to confirm you're not a bot" 挑戰。
+    # 每個 engine 都改取 5 名候選（ytsearch5 / scsearch5）：
+    # SoundCloud 的「第一名」常常是官方上傳的 30 秒預覽片段，搭配 _MIN_AUDIO_DURATION
+    # 門檻篩掉預覽，挑第一個長度合格的候選下載（fan upload 通常完整）。
+    _MIN_AUDIO_DURATION = 60  # 秒；低於此門檻視為 SoundCloud preview 等不堪用片段
     _DOWNLOAD_ENGINES = (
         {
             "name": "YouTube",
-            "default_search": "ytsearch1",
+            "default_search": "ytsearch5",
             "extractor_args": {"youtube": {"player_client": ["tv_embedded", "mweb", "web"]}},
         },
         {
             "name": "SoundCloud",
-            "default_search": "scsearch1",
+            "default_search": "scsearch5",
             "extractor_args": None,
         },
     )
@@ -136,14 +140,33 @@ class MediaDownloader:
         print(f"[Downloader Error] 所有來源皆失敗，最後錯誤：{last_error}")
         raise RuntimeError(f"無法獲取音樂資源: {search_query}")
 
+    def _make_first_match_filter(self):
+        """工廠方法：產生有狀態的 match_filter，只放行『第一個長度合格的候選』。
+        其餘候選（無論在合格者前或後）一律拒絕，yt-dlp 會跳過下載。"""
+        state = {"matched": False}
+
+        def _filter(info_dict, *, incomplete=False):
+            if state["matched"]:
+                return "已選中前者，跳過剩餘候選"
+            duration = info_dict.get("duration")
+            if duration is not None and duration < self._MIN_AUDIO_DURATION:
+                return f"片段過短 ({duration:.1f}s < {self._MIN_AUDIO_DURATION}s 門檻)"
+            state["matched"] = True
+            return None  # None 表示通過、可下載
+
+        return _filter
+
     def _download_from_engine(self, search_query: str, music_dir: str, engine: dict) -> str:
-        """從單一來源下載；失敗即拋例外，由 caller 決定是否 fallback。"""
+        """從單一來源下載；失敗即拋例外，由 caller 決定是否 fallback。
+        會以 search 取 N 個候選，透過 match_filter 跳過長度不足的預覽片段，
+        只下載第一個通過門檻者。所有候選都被刷掉時拋 RuntimeError。"""
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': f'{music_dir}/%(id)s.%(ext)s',
             'quiet': True,
             'no_warnings': True,
             'default_search': engine['default_search'],
+            'match_filter': self._make_first_match_filter(),
             'nocheckcertificate': True,
         }
         if engine.get('extractor_args'):
@@ -153,7 +176,13 @@ class MediaDownloader:
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(search_query, download=True)
-            # 處理搜尋結果的資料結構
+            # 處理搜尋結果的資料結構：playlist 模式下 entries 內被 filter 拒絕的會是 None
             if 'entries' in info:
-                info = info['entries'][0]
+                downloaded = [e for e in info['entries'] if e is not None]
+                if not downloaded:
+                    raise RuntimeError(
+                        f"{engine['name']} 取回的所有候選都未通過長度門檻 "
+                        f"({self._MIN_AUDIO_DURATION}s)"
+                    )
+                info = downloaded[0]
             return ydl.prepare_filename(info)
