@@ -52,7 +52,7 @@ class MediaStandardizer:
             subprocess.run(
                 [
                     "ffmpeg", "-y", "-i", input_path,
-                    # 色彩空間正規化：iPhone 12+ 預設拍 HEVC + HLG (BT.2020) 10-bit HDR，
+                    # 色彩空間正規化 + 解析度上限：iPhone 12+ 預設拍 HEVC + HLG (BT.2020) 10-bit HDR，
                     # 若只是 -pix_fmt yuv420p 把畫面降成 8-bit，輸出 mp4 的 color atom 仍會殘留 BT.2020/HLG，
                     # 配上 8-bit 像素就成矛盾組合，Chromium decoder 會直接拋 PIPELINE_ERROR_DISCONNECTED。
                     # zscale + tonemap 走真正的 HDR→SDR 路徑（依賴 libzimg；colorspace 濾鏡不支援 HLG transfer）：
@@ -61,9 +61,13 @@ class MediaStandardizer:
                     #   3. zscale p=bt709：色域從 BT.2020 換到 BT.709
                     #   4. tonemap=hable:desat=0：用 Hable 演算法把高光壓進 SDR 範圍，不自動降飽和
                     #   5. zscale t=bt709:m=bt709:r=tv：套 BT.709 transfer/matrix/TV-range
-                    #   6. format=yuv420p：最終降成 8-bit yuv420p
+                    #   6. scale=1920:1920:decrease:divisible_by=2：把長邊壓到 1920（4K→1080p box），
+                    #      順便讓 H.264 從 high@5.x 退回 4.2，避免 Remotion 在 4K@60 做頻繁 seek 時
+                    #      Chromium decoder 撐不住而觸發 PIPELINE_ERROR_DISCONNECTED；
+                    #      `decrease` 只縮不放，原本就 ≤ 1920 的素材保留原樣
+                    #   7. format=yuv420p：最終降成 8-bit yuv420p
                     # 對 SDR 來源也安全（BT.709→linear→back 近似 no-op）。
-                    "-vf", "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p",
+                    "-vf", "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,scale=1920:1920:force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p",
                     "-c:v", "libx264",
                     # CFR：把 iPhone 慣用的 VFR 拉成 CFR，避免 Remotion 因時序錯亂解碼失敗
                     # （沿用 source 平均 FPS，不硬寫數值，60 fps 慢動作素材也不會被砍掉一半畫面）
