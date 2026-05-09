@@ -5350,7 +5350,22 @@ secretstorage = ["cffi", "secretstorage"]
 static-analysis = ["autopep8 (>=2.0,<3.0)", "ruff (>=0.15.0,<0.16.0)"]
 test = ["pytest (>=8.1,<9.0)", "pytest-rerunfailures (>=14.0,<15.0)"]
 
+[[package]]
+name = "ytmusicapi"
+version = "1.12.0"
+description = "Unofficial API for YouTube Music"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "ytmusicapi-1.12.0-py3-none-any.whl", hash = "sha256:4130a3a7a0ab56eeeff33b343c8cf4a2f4ea14c206d96c221a7646ab0e61ebc8"},
+    {file = "ytmusicapi-1.12.0.tar.gz", hash = "sha256:9a466e633c43e90025b4c3dfa862f0f5677af4eacc8d2052ef9fc8f48cd65140"},
+]
+
+[package.dependencies]
+requests = ">=2.22"
+
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12, <3.14"
-content-hash = "760b4461e7afb0a0afac77bf2d0355fc444a5fba1696d87442939bc901153ea1"
+content-hash = "12f728cb8d29ab177bc370706c605ab8921c16aa8654418627ee7aa119d08eb1"
