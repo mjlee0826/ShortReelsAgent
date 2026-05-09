@@ -47,13 +47,18 @@ class MediaStandardizer:
         print(f"✅ [Standardizer] 標準化完成，處理了 {standardized_count} 個檔案。")
 
     def _convert_to_h264(self, input_path: str, output_path: str) -> bool:
-        """呼叫 FFmpeg 進行標準 H.264/AAC 轉檔"""
+        """呼叫 FFmpeg 進行標準 H.264/AAC 轉檔（Web-safe + Remotion 友善）"""
         try:
             subprocess.run(
                 [
                     "ffmpeg", "-y", "-i", input_path,
                     "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                    # CFR：把 iPhone 慣用的 VFR 拉成 CFR，避免 Remotion 因時序錯亂解碼失敗
+                    # （沿用 source 平均 FPS，不硬寫數值，60 fps 慢動作素材也不會被砍掉一半畫面）
+                    "-fps_mode", "cfr",
                     "-c:a", "aac", "-b:a", "128k",
+                    # +faststart：把 moov atom 移到檔頭，Remotion 透過 Chromium seek 中段時
+                    # 才不會因為先抓不到索引而觸發 PIPELINE_ERROR_DISCONNECTED
                     "-movflags", "+faststart",
                     output_path
                 ],
