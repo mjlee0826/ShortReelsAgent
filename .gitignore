@@ -11,3 +11,4 @@ output
 backend/assets
 .env
 CLAUDE.md
+cookies.txt
