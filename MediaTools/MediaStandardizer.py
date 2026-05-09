@@ -47,15 +47,22 @@ class MediaStandardizer:
         print(f"✅ [Standardizer] 標準化完成，處理了 {standardized_count} 個檔案。")
 
     def _convert_to_h264(self, input_path: str, output_path: str) -> bool:
-        """呼叫 FFmpeg 進行標準 H.264/AAC 轉檔（Web-safe + Remotion 友善）"""
+        """呼叫 FFmpeg 進行標準 H.264/AAC 轉檔（Web-safe + Remotion 友善 + HDR→SDR 正規化）"""
         try:
             subprocess.run(
                 [
                     "ffmpeg", "-y", "-i", input_path,
-                    "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                    # 色彩空間正規化：iPhone 12+ 預設拍 HEVC + HLG (BT.2020) 10-bit HDR，
+                    # 若只是 -pix_fmt yuv420p 把畫面降成 8-bit，輸出 mp4 的 color atom 仍會殘留 BT.2020/HLG，
+                    # 配上 8-bit 像素就成矛盾組合，Chromium decoder 會直接拋 PIPELINE_ERROR_DISCONNECTED。
+                    # colorspace 濾鏡做 BT.2020→BT.709 線性矩陣轉換（HLG 素材畫面會稍偏淡，但播放正常）。
+                    "-vf", "colorspace=all=bt709:fast=1,format=yuv420p",
+                    "-c:v", "libx264",
                     # CFR：把 iPhone 慣用的 VFR 拉成 CFR，避免 Remotion 因時序錯亂解碼失敗
                     # （沿用 source 平均 FPS，不硬寫數值，60 fps 慢動作素材也不會被砍掉一半畫面）
                     "-fps_mode", "cfr",
+                    # 強制輸出端 metadata 也標 BT.709，搭配上面的濾鏡，確保色彩空間從像素到 atom 完全一致
+                    "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709",
                     "-c:a", "aac", "-b:a", "128k",
                     # +faststart：把 moov atom 移到檔頭，Remotion 透過 Chromium seek 中段時
                     # 才不會因為先抓不到索引而觸發 PIPELINE_ERROR_DISCONNECTED
