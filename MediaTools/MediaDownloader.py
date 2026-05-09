@@ -1,6 +1,5 @@
 import os
 import yt_dlp
-from ytmusicapi import YTMusic
 
 class MediaDownloader:
     """
@@ -92,9 +91,8 @@ class MediaDownloader:
 
     def search_and_download_audio(self, search_query: str) -> str:
         """
-        [改版] 將搜尋與下載解耦
-        1. 使用 ytmusicapi 進行精準音樂搜尋取得 URL
-        2. 使用 yt-dlp 進行音訊下載
+        [Phase 3 新增]
+        功能：透過自然語言搜尋全網音樂，並下載為高品質音訊檔。
         """
         music_dir = os.path.join(self.download_dir, "music_cache")
         if not os.path.exists(music_dir):
@@ -102,48 +100,32 @@ class MediaDownloader:
 
         self._cleanup_music_cache(music_dir, max_files=20)
 
-        print(f"[Downloader] 正在透過 YTMusic API 搜尋音樂: {search_query}")
-        
-        # --- 階段一：精準搜尋取得 URL ---
-        try:
-            ytmusic = YTMusic()
-            # filter="songs" 確保找出來的是純音樂，而非有 MV 對白的影片
-            search_results = ytmusic.search(search_query, filter="songs")
-            
-            if not search_results:
-                raise ValueError("找不到相關的音樂結果")
-                
-            # 取得第一筆結果的 videoId
-            video_id = search_results[0]['videoId']
-            target_url = f"https://www.youtube.com/watch?v={video_id}"
-            print(f"[Downloader] 搜尋成功，目標網址: {target_url}")
-            
-        except Exception as e:
-            print(f"[Downloader Error] API 搜尋失敗: {e}")
-            raise RuntimeError(f"無法搜尋到音樂資源: {search_query}")
-
-        # --- 階段二：使用 yt-dlp 進行下載 ---
+        # 設定 yt-dlp 參數：僅下載音訊，取搜尋結果的第一筆
         ydl_opts = {
-            'format': 'bestaudio[ext=m4a]/bestaudio/best',
+            'format': 'bestaudio/best',
             'outtmpl': f'{music_dir}/%(id)s.%(ext)s',
-            'quiet': False,
-            'no_warnings': False,
+            'quiet': True,
+            'no_warnings': True,
+            'default_search': 'ytsearch1', # 關鍵點：搜尋並取首選
             'nocheckcertificate': True,
-            # 因為已經有了明確網址，不需要 default_search，也不需要 OAuth (暫時移除避免觸發報錯)
-            'extractor_args': {
-                # 偽裝成 Android 設備，通常能無須登入直接抓取官方音源
-                'youtube': ['client=android,tv'] 
-            }
         }
 
-        print(f"[Downloader] 正在下載音訊...")
+        # 掛載 Cookie 以防被阻擋
+        if os.path.exists(self.cookies_path):
+            ydl_opts['cookiefile'] = self.cookies_path
+
+        print(f"[Downloader] 正在全網搜尋音樂: {search_query}")
         
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(target_url, download=True)
+                info = ydl.extract_info(search_query, download=True)
+                
+                # 處理搜尋結果的資料結構
+                if 'entries' in info:
+                    info = info['entries'][0]
+                
                 downloaded_path = ydl.prepare_filename(info)
-                print(f"[Downloader] 音樂下載完成: {downloaded_path}")
                 return downloaded_path
         except Exception as e:
-            print(f"[Downloader Error] 下載失敗: {e}")
-            raise RuntimeError(f"無法獲取音樂資源: {target_url}")
+            print(f"[Downloader Error] 搜尋下載失敗: {e}")
+            raise RuntimeError(f"無法獲取音樂資源: {search_query}")
