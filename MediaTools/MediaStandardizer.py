@@ -49,7 +49,7 @@ class MediaStandardizer:
     def _convert_to_h264(self, input_path: str, output_path: str) -> bool:
         """呼叫 FFmpeg 進行標準 H.264/AAC 轉檔（Web-safe + Remotion 友善 + HDR→SDR 正規化）"""
         try:
-            subprocess.run(
+            subprocess.run( 
                 [
                     "ffmpeg", "-y", "-i", input_path,
                     # 色彩空間正規化 + 解析度上限：iPhone 12+ 預設拍 HEVC + HLG (BT.2020) 10-bit HDR，
