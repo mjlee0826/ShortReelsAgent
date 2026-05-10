@@ -101,11 +101,11 @@ class MediaDownloader:
         {
             "name": "YouTube",
             "default_search": "ytsearch5",
-            "extractor_args": {"youtube": {"player_client": ["tv_embedded", "mweb", "web"]}},
+            "extractor_args": {"youtube": {"player_client": ["ios", "android", "tv_embedded", "mweb"]}},
         },
         {
             "name": "SoundCloud",
-            "default_search": "scsearch5",
+            "default_search": "scsearch15",
             "extractor_args": None,
         },
     )
