@@ -24,8 +24,8 @@ class MediaDownloader:
         各公開方法在此基礎上用 ** 解包後再擴充，確保 cookies 等設定一致。
         """
         opts: dict = {
-            'quiet': True,
-            'no_warnings': True,
+            'quiet': False,
+            'no_warnings': False,
             'nocheckcertificate': True,
         }
         # 若專案根目錄有 cookies.txt，自動掛載以突破平台登入牆
@@ -108,7 +108,6 @@ class MediaDownloader:
             'format': 'bestaudio/best',
             'outtmpl': f'{music_dir}/%(id)s.%(ext)s',
             'default_search': 'ytsearch1',
-            'nocheckcertificate': True,
         }
 
         try:
