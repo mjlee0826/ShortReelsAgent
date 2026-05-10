@@ -33,21 +33,6 @@ class MediaDownloader:
             opts['cookiefile'] = self.cookies_path
         return opts
 
-    def _make_first_match_filter(self):
-        """
-        Factory Method Pattern：產生有狀態的 match_filter 閉包。
-        只放行搜尋結果中的第一個候選，其餘一律跳過，避免多餘下載。
-        """
-        state = {"matched": False}
-
-        def _filter(info_dict, *, incomplete=False):
-            if state["matched"]:
-                return "已選中前者，跳過剩餘候選"
-            state["matched"] = True
-            return None  # None 代表通過，yt-dlp 將執行下載
-
-        return _filter
-
     # ------------------------------------------------------------------ #
     # 公開介面                                                             #
     # ------------------------------------------------------------------ #
