@@ -1,5 +1,4 @@
 import os
-import tempfile
 from MediaTools.MediaDownloader import MediaDownloader
 from MediaTools.FFmpegAdapter import FFmpegAdapter
 from MediaTools.AudioBeatExtractor import AudioBeatExtractor
@@ -8,9 +7,11 @@ from MusicEngine.LyricsAdapter import LyricsAdapter
 class MusicEngineFacade:
     """
     Facade Pattern: Phase 3 音樂引擎指揮官。
-    負責將「搜尋關鍵字」轉化為包含節拍與歌詞的「Audio DNA」。
-    語意層（lyrics）走 Chain of Responsibility：先試 LRClib 歌詞 DB，
-    失敗才退到 VAD + Whisper transcribe，避免在已知商業曲上耗 GPU 跑可能失敗的轉錄。
+    統一對外提供三種音樂取得管道：
+      - fetch_and_analyze()：yt-dlp 搜尋下載（情境1，含版權）
+      - fetch_free_music()：JamendoAdapter 搜尋（情境3，無版權）
+      - use_local_audio()：直接使用用戶上傳的本地檔案（情境2 方案1）
+    歌詞走 Chain of Responsibility：LRClib → VAD + Whisper。
     """
     def __init__(self):
         self.downloader = MediaDownloader()
@@ -89,6 +90,99 @@ class MusicEngineFacade:
 
         except Exception as e:
             print(f"[MusicEngine Error] 流程中斷: {e}")
+            return {"status": "error", "message": str(e)}
+
+    def use_local_audio(self, file_path: str) -> dict:
+        """
+        直接使用本地音訊檔（用戶上傳），跳過下載步驟。
+        後續流程與 fetch_and_analyze() 相同：標準化 → beats → lyrics。
+        """
+        print(f"[MusicEngine] 使用本地音訊: {file_path}")
+
+        if not os.path.exists(file_path):
+            return {"status": "error", "message": f"找不到音訊檔案: {file_path}"}
+
+        base_name = os.path.splitext(os.path.basename(file_path))[0]
+        standard_wav_path = os.path.join(os.path.dirname(file_path), f"{base_name}_std.wav")
+
+        try:
+            self.ffmpeg.extract_ai_audio(file_path, standard_wav_path)
+            audio_beats = self.beat_extractor.get_beats(standard_wav_path)
+
+            # 以檔名作為歌詞查詢提示（鼓勵用戶命名為「歌手 歌名」格式）
+            query_hint = os.path.splitext(os.path.basename(file_path))[0]
+            lyrics_data = self._fetch_lyrics(query_hint, standard_wav_path)
+
+            print(f"[MusicEngine] 本地音訊處理完成！(BPM: {audio_beats.get('bpm')})")
+            return {
+                "status": "success",
+                "query": query_hint,
+                "source": "user_upload",
+                "local_path": {"raw": file_path, "standard": standard_wav_path},
+                "analysis": {
+                    "bpm": audio_beats.get("bpm"),
+                    "beats": audio_beats.get("beats"),
+                    "onsets": audio_beats.get("onsets"),
+                    "lyrics": lyrics_data.get("chunks", []),
+                    "full_lyrics_text": lyrics_data.get("text", ""),
+                    "lyrics_source": lyrics_data.get("source", "unknown"),
+                }
+            }
+        except Exception as e:
+            print(f"[MusicEngine Error] 本地音訊處理失敗: {e}")
+            return {"status": "error", "message": str(e)}
+
+    def fetch_free_music(self, query: str) -> dict:
+        """
+        取得無版權音樂（情境3）。
+        Chain of Responsibility：優先走 JamendoAdapter，失敗時 fallback 至 yt-dlp 無版權搜尋。
+        """
+        print(f"[MusicEngine] 開始搜尋免費音樂: {query}")
+
+        music_dir = os.path.join("temp_templates", "music_cache")
+        os.makedirs(music_dir, exist_ok=True)
+
+        source_tag = "jamendo"
+        try:
+            from MusicEngine.JamendoAdapter import JamendoAdapter
+            raw_audio_path = JamendoAdapter().search_and_download(query, music_dir)
+        except Exception as e:
+            print(f"[MusicEngine] Jamendo 失敗 ({e})，回退至 yt-dlp 無版權搜尋")
+            raw_audio_path = self.downloader.search_and_download_audio(
+                f"{query} no copyright free music"
+            )
+            source_tag = "yt_free"
+
+        base_name = os.path.splitext(os.path.basename(raw_audio_path))[0]
+        standard_wav_path = os.path.join(os.path.dirname(raw_audio_path), f"{base_name}_std.wav")
+
+        try:
+            self.ffmpeg.extract_ai_audio(raw_audio_path, standard_wav_path)
+            audio_beats = self.beat_extractor.get_beats(standard_wav_path)
+            lyrics_data = self._fetch_lyrics(query, standard_wav_path)
+
+            audio_dna = {
+                "status": "success",
+                "query": query,
+                "source": source_tag,
+                "local_path": {"raw": raw_audio_path, "standard": standard_wav_path},
+                "analysis": {
+                    "bpm": audio_beats.get("bpm"),
+                    "beats": audio_beats.get("beats"),
+                    "onsets": audio_beats.get("onsets"),
+                    "lyrics": lyrics_data.get("chunks", []),
+                    "full_lyrics_text": lyrics_data.get("text", ""),
+                    "lyrics_source": lyrics_data.get("source", "unknown"),
+                }
+            }
+            print(
+                f"[MusicEngine] 免費音樂取得完成！"
+                f"(來源: {source_tag}, BPM: {audio_dna['analysis']['bpm']})"
+            )
+            return audio_dna
+
+        except Exception as e:
+            print(f"[MusicEngine Error] 免費音樂處理失敗: {e}")
             return {"status": "error", "message": str(e)}
 
     def _fetch_lyrics(self, query: str, fallback_audio_path: str) -> dict:

@@ -9,25 +9,31 @@ class DirectorFacade:
     def __init__(self):
         self.compressor = ContextCompressor()
 
-    def generate_timeline(self, user_prompt: str, raw_assets: list, template_dna: dict = None, previous_timeline: list = None) -> dict:
+    def generate_timeline(self, user_prompt: str, raw_assets: list, template_dna: dict = None,
+                          previous_timeline: list = None, user_music_file: str = None,
+                          music_strategy: str = "search_copyright") -> dict:
         """
         一鍵生成或微調時間軸。
         :param user_prompt: 使用者指令
         :param raw_assets: Phase 1 產出的原始素材清單
         :param template_dna: (選填) Phase 2 產出的範本 DNA
         :param previous_timeline: (選填) 若使用者要求修改，傳入上一版的藍圖
+        :param user_music_file: (選填) 用戶上傳的本地音訊絕對路徑，優先於所有搜尋策略
+        :param music_strategy: 配樂策略 (search_copyright | search_free | none)，預設 search_copyright
         """
         print("\n🎬 [Director Agent] 導演大腦啟動...")
-        
+
         # 1. 預處理：資料降維 (排除 technical_score < 40 的素材)
         compressed_assets = self.compressor.compress(raw_assets)
-        
+
         # 2. 初始化 context，納入所有參考資訊
         context = {
             "user_prompt": user_prompt,
             "assets": compressed_assets,
-            "template_dna": template_dna,        # 範本資訊
-            "previous_timeline": previous_timeline, # 歷史藍圖
+            "template_dna": template_dna,           # 範本資訊
+            "previous_timeline": previous_timeline,  # 歷史藍圖
+            "user_music_file": user_music_file,      # 用戶上傳的本地音訊路徑（絕對路徑）
+            "music_strategy": music_strategy,         # 配樂策略：前端明確選擇
             "audio_dna": None,
             "timeline_draft": None,
             "final_timeline": None

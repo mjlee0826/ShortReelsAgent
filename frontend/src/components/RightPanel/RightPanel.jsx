@@ -5,7 +5,7 @@ import useBlueprintStore from '../../store/useBlueprintStore';
 import { FaSpinner } from 'react-icons/fa';
 
 export default function RightPanel() {
-  const { errorMsg, isProcessing } = useBlueprintStore();
+  const { errorMsg, isProcessing, musicStrategy } = useBlueprintStore();
   
   const [topHeight, setTopHeight] = useState(55);
   const isDragging = useRef(false);
@@ -68,6 +68,14 @@ export default function RightPanel() {
       {errorMsg && (
         <div className="bg-red-900 text-red-200 p-3 text-sm font-semibold shrink-0 shadow-inner">
           ⚠️ {errorMsg}
+        </div>
+      )}
+
+      {/* 版權風險提示：search_copyright 策略時顯示，前端直接判斷無需等 API */}
+      {musicStrategy === 'search_copyright' && (
+        <div className="bg-yellow-950/60 border-l-4 border-yellow-500 text-yellow-200 p-3 text-sm shrink-0">
+          ⚠️ 此配樂策略可能含有版權音樂，發布至 IG / TikTok 可能遭靜音或下架。
+          建議直接在發布平台套用官方音樂庫。
         </div>
       )}
 

@@ -17,9 +17,10 @@ class DirectorService:
         self.director = DirectorFacade()
         self.backend_url = os.getenv("BACKEND_URL", "http://localhost:5174")
 
-    def run_workflow(self, prompt: str, folder_name: str, template: str = None, 
+    def run_workflow(self, prompt: str, folder_name: str, template: str = None,
                     subtitles: bool = True, filters: bool = True, old_timeline: dict = None,
-                    video_strategy: str = "2"):
+                    video_strategy: str = "2", music_strategy: str = "search_copyright",
+                    user_music_file: str = None):
         
         target_dir = os.path.join(self.base_assets_path, folder_name)
         if not os.path.isdir(target_dir):
@@ -108,13 +109,19 @@ class DirectorService:
 
         # --- 5. Phase 4: 導演大腦 (Director Agent) ---
         print("[Service] 正在呼叫導演大腦生成藍圖...")
-        
-        # 【修改】接收大腦產出的 new_audio_dna
+
+        # 若用戶指定了自訂音樂檔案，轉換為完整絕對路徑，供 IntentState 直接存取
+        user_music_file_path = (
+            os.path.join(target_dir, user_music_file) if user_music_file else None
+        )
+
         final_blueprint, new_audio_dna = self.director.generate_timeline(
             user_prompt=enhanced_prompt,
             raw_assets=raw_assets_metadata,
             template_dna=template_dna,
-            previous_timeline=old_timeline
+            previous_timeline=old_timeline,
+            user_music_file=user_music_file_path,
+            music_strategy=music_strategy,
         )
 
         # 【新增】如果大腦有去抓新的音樂 (new_audio_dna 有值)，就覆寫舊的並 Dump 存檔
