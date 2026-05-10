@@ -122,7 +122,7 @@ class MediaDownloader:
             **self._base_ydl_opts(),
             'format': 'bestaudio/best',
             'outtmpl': f'{music_dir}/%(id)s.%(ext)s',
-            'default_search': 'ytsearch5',
+            'default_search': 'ytsearch1',
             'match_filter': self._make_first_match_filter(),
             # ios / android client 走不同 endpoint，可繞過 YouTube 的 bot 驗證頁面
             'extractor_args': {
@@ -144,5 +144,5 @@ class MediaDownloader:
                 return ydl.prepare_filename(info)
 
         except Exception as e:
-            print(f"[Downloader Error] YouTube 音訊下載失敗: {e}")
+            print(f"[Downloader Error] YouTube 搜尋或下載失敗: {e}")
             raise
