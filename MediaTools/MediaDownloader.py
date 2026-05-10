@@ -108,11 +108,7 @@ class MediaDownloader:
             'format': 'bestaudio/best',
             'outtmpl': f'{music_dir}/%(id)s.%(ext)s',
             'default_search': 'ytsearch1',
-            'match_filter': self._make_first_match_filter(),
-            # ios / android client 走不同 endpoint，可繞過 YouTube 的 bot 驗證頁面
-            'extractor_args': {
-                'youtube': {'player_client': ['ios', 'android', 'tv_embedded', 'mweb']},
-            },
+            'nocheckcertificate': True,
         }
 
         try:
