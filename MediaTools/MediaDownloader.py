@@ -9,9 +9,6 @@ class MediaDownloader:
     呼叫端無需了解 yt-dlp 的設定細節。
     """
 
-    # 低於此門檻（秒）視為預覽片段，搜尋時予以跳過
-    _MIN_AUDIO_DURATION = 60
-
     def __init__(self, download_dir: str = "temp_templates", cookies_path: str = "cookies.txt"):
         self.download_dir = os.path.abspath(download_dir)
         self.cookies_path = os.path.abspath(cookies_path)
@@ -39,18 +36,13 @@ class MediaDownloader:
     def _make_first_match_filter(self):
         """
         Factory Method Pattern：產生有狀態的 match_filter 閉包。
-        只放行第一個長度符合門檻的候選，其餘一律拒絕，避免多餘下載。
+        只放行搜尋結果中的第一個候選，其餘一律跳過，避免多餘下載。
         """
         state = {"matched": False}
 
         def _filter(info_dict, *, incomplete=False):
-            # 已選中合格候選，後續全部跳過
             if state["matched"]:
                 return "已選中前者，跳過剩餘候選"
-            duration = info_dict.get("duration")
-            # duration 為 None 時無法判斷長度，保守放行
-            if duration is not None and duration < self._MIN_AUDIO_DURATION:
-                return f"片段過短 ({duration:.1f}s < {self._MIN_AUDIO_DURATION}s 門檻)"
             state["matched"] = True
             return None  # None 代表通過，yt-dlp 將執行下載
 
@@ -146,10 +138,7 @@ class MediaDownloader:
                 if 'entries' in info:
                     valid = [e for e in info['entries'] if e is not None]
                     if not valid:
-                        raise RuntimeError(
-                            f"YouTube 搜尋無符合條件的結果"
-                            f"（門檻 {self._MIN_AUDIO_DURATION}s）: {search_query}"
-                        )
+                        raise RuntimeError(f"YouTube 搜尋無結果: {search_query}")
                     info = valid[0]
 
                 return ydl.prepare_filename(info)
