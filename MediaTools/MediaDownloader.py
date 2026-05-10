@@ -29,6 +29,7 @@ class MediaDownloader:
             'nocheckcertificate': True,
             'js_runtimes': {'node': {}},
             'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
+            'remote_components': ['ejs:github'],
         }
         # 若專案根目錄有 cookies.txt，自動掛載以突破平台登入牆
         if os.path.exists(self.cookies_path):
