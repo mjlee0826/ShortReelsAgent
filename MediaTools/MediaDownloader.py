@@ -27,7 +27,7 @@ class MediaDownloader:
             'quiet': False,
             'no_warnings': False,
             'nocheckcertificate': True,
-            'js_runtimes': {'nodejs': {}},
+            'js_runtimes': {'node': {}},
         }
         # 若專案根目錄有 cookies.txt，自動掛載以突破平台登入牆
         if os.path.exists(self.cookies_path):
