@@ -14,7 +14,8 @@ import EditorPage from './pages/EditorPage';
 function AuthGuard({ children }) {
   const { isAuthenticated, isLoading } = useLogto();
 
-  if (isLoading) {
+  // isLoading 也可能是 getAccessToken 代理觸發，不能用來卸載已認證的子元件
+  if (isLoading && !isAuthenticated) {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-black">
         <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
