@@ -100,16 +100,6 @@ class LogtoJWTVerifier:
                 issuer=_ISSUER,
             )
         except JWTError as e:
-            # 診斷：印出 token 的未驗證 claims，方便對比環境變數
-            try:
-                unverified = jwt.get_unverified_claims(token)
-                print(f"[LogtoJWT] ❌ 驗證失敗：{e}")
-                print(f"[LogtoJWT]   token.iss = {unverified.get('iss')}")
-                print(f"[LogtoJWT]   token.aud = {unverified.get('aud')}")
-                print(f"[LogtoJWT]   期望 iss   = {_ISSUER}")
-                print(f"[LogtoJWT]   期望 aud   = {_AUDIENCE}")
-            except Exception:
-                pass
             raise HTTPException(status_code=401, detail=f"令牌驗證失敗：{e}")
 
         user_id = payload.get("sub")

@@ -31,31 +31,54 @@ function AuthGuard({ children }) {
 }
 
 /**
- * AuthInterceptorSetup：在 React context 內取得 Logto access token，
- * 並注入 axios 攔截器，讓所有 API 請求自動攜帶 Bearer token。
+ * AuthInterceptorSetup：注入 axios request / response 攔截器。
+ *
+ * Strategy Pattern：
+ * - Request interceptor：有 token 就附上，沒有（未登入）則略過。
+ * - Response interceptor：收到 401 時自動換 token 重打；
+ *   refresh token 也失效時強制登出，導向 /login。
+ *
+ * 掛載時一次性註冊，不依賴 isAuthenticated，徹底消除 race condition。
  */
 function AuthInterceptorSetup({ children }) {
-  const { getAccessToken, isAuthenticated } = useLogto();
+  const { getAccessToken, signOut } = useLogto();
   const API_RESOURCE = import.meta.env.VITE_LOGTO_API_RESOURCE;
 
   useEffect(() => {
-    if (!isAuthenticated) return;
-
-    const interceptorId = apiClient.interceptors.request.use(async (config) => {
+    // 有 token 就附上，未登入時 getAccessToken 會拋出，略過即可
+    const reqId = apiClient.interceptors.request.use(async (config) => {
       try {
         const token = await getAccessToken(API_RESOURCE);
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`;
-        }
-      } catch (e) {
-        console.warn('[Auth] 無法取得 access token:', e);
+        if (token) config.headers.Authorization = `Bearer ${token}`;
+      } catch {
+        // 未登入或 token 尚未就緒，讓 request 照常送出
       }
       return config;
     });
 
-    // 清除攔截器，避免登出後仍嘗試附加 token
-    return () => apiClient.interceptors.request.eject(interceptorId);
-  }, [isAuthenticated, getAccessToken, API_RESOURCE]);
+    // 401 → 嘗試換新 token 重打；換不了 → refresh token 過期，強制登出
+    const resId = apiClient.interceptors.response.use(
+      res => res,
+      async (error) => {
+        if (error.response?.status === 401 && !error.config._retry) {
+          error.config._retry = true;
+          try {
+            const token = await getAccessToken(API_RESOURCE);
+            error.config.headers.Authorization = `Bearer ${token}`;
+            return apiClient(error.config);
+          } catch {
+            await signOut(`${window.location.origin}/login`);
+          }
+        }
+        return Promise.reject(error);
+      }
+    );
+
+    return () => {
+      apiClient.interceptors.request.eject(reqId);
+      apiClient.interceptors.response.eject(resId);
+    };
+  }, [getAccessToken, signOut, API_RESOURCE]);
 
   return children;
 }
