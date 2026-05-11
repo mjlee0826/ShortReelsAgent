@@ -1,19 +1,22 @@
 import React from 'react';
 import useBlueprintStore from '../../store/useBlueprintStore';
+import useProjectStore from '../../store/useProjectStore';
 import { FaFilm, FaLink, FaMagic, FaCheckSquare, FaRegSquare, FaBrain, FaMusic, FaSpinner, FaTimes } from 'react-icons/fa';
 
 export default function SidebarForm() {
   const {
-    assetFolderName, userPrompt, templateSource,
+    userPrompt, templateSource,
     enableSubtitles, enableFilters, videoStrategy,
     musicStrategy, uploadedMusicFile, isUploadingMusic,
     isProcessing, updateForm, submitPrompt, uploadMusic, clearUploadedMusic,
   } = useBlueprintStore();
 
+  const currentProject = useProjectStore((s) => s.currentProject);
+
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!assetFolderName || !userPrompt) {
-      alert('請填寫資料夾名稱與剪輯指令！');
+    if (!userPrompt) {
+      alert('請填寫剪輯指令！');
       return;
     }
     submitPrompt(false);
@@ -22,25 +25,22 @@ export default function SidebarForm() {
   const handleMusicUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    uploadMusic(assetFolderName, file);
-    // 清空 input 值，允許重複選同一個檔案
+    uploadMusic(currentProject?.name, file);
     e.target.value = '';
   };
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-5 p-6">
 
-      {/* 1. 素材資料夾 */}
+      {/* 1. 當前專案（唯讀標示） */}
       <div className="flex flex-col gap-1.5">
         <label className="text-sm font-medium text-gray-300 flex items-center gap-2">
-          <FaFilm className="text-blue-400" /> 素材資料夾名稱
+          <FaFilm className="text-blue-400" /> 當前專案
         </label>
-        <input
-          type="text"
-          value={assetFolderName}
-          onChange={(e) => updateForm('assetFolderName', e.target.value)}
-          className="bg-gray-800/80 text-white p-3 text-base rounded-lg border border-gray-700 focus:border-blue-500 focus:bg-gray-800 focus:outline-none transition-colors shadow-inner"
-        />
+        <div className="bg-gray-800/50 text-gray-300 p-3 text-base rounded-lg border border-gray-700/50 truncate select-none">
+          {currentProject?.display_name || '—'}
+          <span className="ml-2 text-xs text-gray-600 font-mono">{currentProject?.name}</span>
+        </div>
       </div>
 
       {/* 2. 影片處理策略 */}
@@ -90,14 +90,12 @@ export default function SidebarForm() {
           <option value="none">🔇 不加配樂（自行在發布平台套用）</option>
         </select>
 
-        {/* 自訂 BGM 上傳：strategy 為 none 時隱藏 */}
         {musicStrategy !== 'none' && (
           <div className="flex flex-col gap-1.5 mt-1">
             <label className="text-xs text-gray-400 px-1">
               📁 上傳自訂 BGM（選填，優先於搜尋策略）
             </label>
             {uploadedMusicFile ? (
-              /* 已上傳：顯示檔名與清除按鈕 */
               <div className="flex items-center gap-2 bg-green-900/30 border border-green-700/50 rounded-lg px-3 py-2">
                 <span className="text-green-400 text-sm flex-1 truncate">✓ {uploadedMusicFile}</span>
                 <button
@@ -110,7 +108,6 @@ export default function SidebarForm() {
                 </button>
               </div>
             ) : (
-              /* 未上傳：顯示上傳按鈕 */
               <label className={`flex items-center justify-center gap-2 p-2.5 rounded-lg border border-dashed border-gray-600 cursor-pointer transition-colors text-sm text-gray-400 ${isUploadingMusic ? 'opacity-50 cursor-not-allowed' : 'hover:border-blue-500 hover:text-blue-400'}`}>
                 {isUploadingMusic
                   ? <><FaSpinner className="animate-spin" /> 上傳中...</>

@@ -1,12 +1,13 @@
 import asyncio
 import os
 import traceback
-from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, Dict
 from backend.services.DirectorService import DirectorService
 from backend.services.RenderService import RenderService
+from backend.auth.LogtoJWTVerifier import verify_token
 
 router = APIRouter()
 director_service = DirectorService()
@@ -34,12 +35,13 @@ class GenerateRequest(BaseModel):
 
 
 @router.post("/generate")
-async def generate_timeline(req: GenerateRequest):
+async def generate_timeline(req: GenerateRequest, user_id: str = Depends(verify_token)):
     try:
         result = await asyncio.to_thread(
             director_service.run_workflow,
             prompt=req.user_prompt,
             folder_name=req.asset_folder_name,
+            user_id=user_id,
             template=req.template_source,
             subtitles=req.enable_subtitles,
             filters=req.enable_filters,
@@ -56,7 +58,7 @@ async def generate_timeline(req: GenerateRequest):
 
 
 @router.post("/upload_music/{folder_name}")
-async def upload_music(folder_name: str, file: UploadFile = File(...)):
+async def upload_music(folder_name: str, file: UploadFile = File(...), user_id: str = Depends(verify_token)):
     """
     接收用戶上傳的音訊檔，儲存至對應的素材資料夾。
     成功回傳檔名，供後續 generate 請求的 user_music_file 欄位使用。
@@ -69,8 +71,8 @@ async def upload_music(folder_name: str, file: UploadFile = File(...)):
             detail=f"不支援的音訊格式 '{ext}'，請上傳: {', '.join(_ALLOWED_AUDIO_EXTENSIONS)}"
         )
 
-    # 確認素材資料夾存在
-    folder_path = os.path.join(_ASSETS_BASE_PATH, folder_name)
+    # 確認素材資料夾存在（路徑含 user_id）
+    folder_path = os.path.join(_ASSETS_BASE_PATH, user_id, folder_name)
     if not os.path.isdir(folder_path):
         raise HTTPException(status_code=404, detail=f"找不到素材資料夾: {folder_name}")
 
@@ -89,7 +91,7 @@ class RenderRequest(BaseModel):
 
 
 @router.post("/render_mp4")
-async def render_mp4(req: RenderRequest, background_tasks: BackgroundTasks):
+async def render_mp4(req: RenderRequest, background_tasks: BackgroundTasks, user_id: str = Depends(verify_token)):
     """
     SSR 算圖端點：接收 JSON 藍圖，回傳 MP4，並在背景執行清理。
     """

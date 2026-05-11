@@ -1,80 +1,75 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import RightPanel from './components/RightPanel/RightPanel';
-import VideoPlayer from './components/RemotionPlayer/VideoPlayer';
+import React, { useEffect } from 'react';
+import { Routes, Route, Navigate } from 'react-router-dom';
+import { useLogto } from '@logto/react';
+import { apiClient } from './services/api.service';
+import LoginPage from './pages/LoginPage';
+import CallbackPage from './pages/CallbackPage';
+import ProjectDashboard from './pages/ProjectDashboard';
+import EditorPage from './pages/EditorPage';
 
-function App() {
-  // 【新增】管理右側面板的寬度，預設 500px
-  const [panelWidth, setPanelWidth] = useState(500);
-  const isDragging = useRef(false);
+/**
+ * AuthGuard：保護需要登入才能存取的路由。
+ * isLoading 期間顯示 loading indicator；未認證則重導向至 /login。
+ */
+function AuthGuard({ children }) {
+  const { isAuthenticated, isLoading } = useLogto();
 
-  // --- 左右拖曳分隔線邏輯 ---
-  const handleMouseDown = (e) => {
-    isDragging.current = true;
-    document.body.style.cursor = 'col-resize'; // 改變全域游標為左右調整
-    e.preventDefault(); // 防止拖曳時選取到文字或圖片
-  };
-
-  const handleMouseMove = useCallback((e) => {
-    if (!isDragging.current) return;
-    
-    // 計算新寬度：視窗總寬度 - 滑鼠目前的 X 座標
-    const newWidth = window.innerWidth - e.clientX;
-    
-    // 限制寬度範圍：最窄 350px，最寬 800px (保護左右兩側都不會消失)
-    if (newWidth >= 350 && newWidth <= 800) {
-      setPanelWidth(newWidth);
-    }
-  }, []);
-
-  const handleMouseUp = useCallback(() => {
-    if (isDragging.current) {
-      isDragging.current = false;
-      document.body.style.cursor = 'default';
-    }
-  }, []);
-
-  // 掛載全域事件監聽，確保滑鼠移動過快時不會脫離掌控
-  useEffect(() => {
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [handleMouseMove, handleMouseUp]);
-  // -------------------------
-
-  return (
-    <div className="flex h-screen w-full font-sans bg-black overflow-hidden">
-      
-      {/* 左側：影片預覽器 (flex-1 讓它自動填滿剩餘的空間) */}
-      <div className="flex-1 min-w-[300px] relative">
-        <VideoPlayer />
+  if (isLoading) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-black">
+        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
       </div>
+    );
+  }
 
-      {/* 【新增】垂直拖拉分隔線 */}
-      <div 
-        onMouseDown={handleMouseDown}
-        className="w-1.5 hover:w-2 bg-gray-900 border-x border-gray-800 cursor-col-resize hover:bg-blue-600 active:bg-blue-500 transition-colors flex flex-col items-center justify-center shrink-0 z-20 group"
-        title="左右拖曳調整控制台寬度"
-      >
-        {/* 增加一點視覺小細節：垂直防滑紋 */}
-        <div className="h-10 flex gap-[2px] opacity-30 group-hover:opacity-100">
-          <div className="w-[1px] bg-white h-full"></div>
-          <div className="w-[1px] bg-white h-full"></div>
-        </div>
-      </div>
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
 
-      {/* 右側：控制面板 (寬度由 panelWidth 動態決定) */}
-      <div 
-        style={{ width: `${panelWidth}px` }} 
-        className="shrink-0 h-full relative"
-      >
-        <RightPanel />
-      </div>
-      
-    </div>
-  );
+  return children;
 }
 
-export default App;
+/**
+ * AuthInterceptorSetup：在 React context 內取得 Logto access token，
+ * 並注入 axios 攔截器，讓所有 API 請求自動攜帶 Bearer token。
+ */
+function AuthInterceptorSetup({ children }) {
+  const { getAccessToken, isAuthenticated } = useLogto();
+  const API_RESOURCE = import.meta.env.VITE_LOGTO_API_RESOURCE;
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const interceptorId = apiClient.interceptors.request.use(async (config) => {
+      try {
+        const token = await getAccessToken(API_RESOURCE);
+        if (token) {
+          config.headers.Authorization = `Bearer ${token}`;
+        }
+      } catch (e) {
+        console.warn('[Auth] 無法取得 access token:', e);
+      }
+      return config;
+    });
+
+    // 清除攔截器，避免登出後仍嘗試附加 token
+    return () => apiClient.interceptors.request.eject(interceptorId);
+  }, [isAuthenticated, getAccessToken, API_RESOURCE]);
+
+  return children;
+}
+
+export default function App() {
+  return (
+    <AuthInterceptorSetup>
+      <Routes>
+        <Route path="/login"    element={<LoginPage />} />
+        <Route path="/callback" element={<CallbackPage />} />
+        <Route path="/"         element={<AuthGuard><ProjectDashboard /></AuthGuard>} />
+        <Route path="/editor"   element={<AuthGuard><EditorPage /></AuthGuard>} />
+        {/* 未知路徑一律導回首頁 */}
+        <Route path="*"         element={<Navigate to="/" replace />} />
+      </Routes>
+    </AuthInterceptorSetup>
+  );
+}

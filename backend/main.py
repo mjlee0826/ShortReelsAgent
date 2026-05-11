@@ -13,7 +13,8 @@ load_dotenv()
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from backend.api.director import router as director_router 
+from backend.api.director import router as director_router
+from backend.api.projects import router as projects_router
 
 app = FastAPI(title="Short Reels Agent API")
 
@@ -41,6 +42,7 @@ if not os.path.exists(CACHE_DIR):
 app.mount("/cache", StaticFiles(directory=CACHE_DIR), name="cache")
 
 app.include_router(director_router, prefix="/api")
+app.include_router(projects_router, prefix="/api")
 
 if __name__ == "__main__":
     import uvicorn

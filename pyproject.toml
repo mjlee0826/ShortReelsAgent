@@ -30,7 +30,8 @@ dependencies = [
     "python-dotenv (>=1.2.2,<2.0.0)",
     "torchcodec (>=0.11.1,<0.12.0)",
     "ytmusicapi (>=1.12.0,<2.0.0)",
-    "python-multipart (>=0.0.28,<0.0.29)"
+    "python-multipart (>=0.0.28,<0.0.29)",
+    "python-jose[cryptography] (>=3.5.0,<4.0.0)"
 ]
 
 [tool.poetry]

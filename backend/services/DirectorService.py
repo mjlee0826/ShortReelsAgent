@@ -1,10 +1,14 @@
 import os
 import json
+from datetime import datetime, timezone
 from MediaProcessor.MediaProcessorFactory import MediaProcessorFactory
 from MediaProcessor.VideoStrategy import VideoStrategy
 from MediaTools.MediaStandardizer import MediaStandardizer
 from TemplateEngine.TemplateAnalyzerFacade import TemplateAnalyzerFacade
 from DirectorAgent.DirectorFacade import DirectorFacade
+
+# 計算素材數量時認定的媒體副檔名
+_MEDIA_EXTENSIONS = {'.mp4', '.mov', '.jpg', '.jpeg', '.png', '.heic', '.heif', '.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg'}
 
 class DirectorService:
     """
@@ -17,12 +21,36 @@ class DirectorService:
         self.director = DirectorFacade()
         self.backend_url = os.getenv("BACKEND_URL", "http://localhost:5174")
 
-    def run_workflow(self, prompt: str, folder_name: str, template: str = None,
+    def _update_project_meta(self, project_dir: str, folder_name: str):
+        """生成完成後更新 project_meta.json 的最後修改時間、素材數量與藍圖狀態。"""
+        meta_path = os.path.join(project_dir, "project_meta.json")
+        if not os.path.exists(meta_path):
+            return
+        try:
+            with open(meta_path, 'r', encoding='utf-8') as f:
+                meta = json.load(f)
+            asset_count = sum(
+                1 for fname in os.listdir(project_dir)
+                if os.path.splitext(fname)[1].lower() in _MEDIA_EXTENSIONS
+            )
+            meta["last_modified"] = datetime.now(timezone.utc).isoformat()
+            meta["asset_count"] = asset_count
+            meta["has_blueprint"] = os.path.exists(os.path.join(project_dir, "phase4_blueprint.json"))
+            with open(meta_path, 'w', encoding='utf-8') as f:
+                json.dump(meta, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"⚠️ [Service] 更新專案 meta 失敗: {e}")
+
+    def run_workflow(self, prompt: str, folder_name: str, user_id: str = None,
+                    template: str = None,
                     subtitles: bool = True, filters: bool = True, old_timeline: dict = None,
                     video_strategy: str = "2", music_strategy: str = "search_copyright",
                     user_music_file: str = None):
-        
-        target_dir = os.path.join(self.base_assets_path, folder_name)
+        # 若有 user_id，素材路徑改為 assets/{user_id}/{folder_name}/，實現使用者資料隔離
+        if user_id:
+            target_dir = os.path.join(self.base_assets_path, user_id, folder_name)
+        else:
+            target_dir = os.path.join(self.base_assets_path, folder_name)
         if not os.path.isdir(target_dir):
             raise ValueError(f"找不到素材資料夾: {target_dir}")
         
@@ -155,8 +183,17 @@ class DirectorService:
             json.dump(final_blueprint, f, ensure_ascii=False, indent=2)
             print(f"💾 [Dump] 最終劇本藍圖已儲存至 {blueprint_dump_path}")
 
+        # 更新專案 meta（最後修改時間、素材數量、藍圖狀態）
+        self._update_project_meta(target_dir, folder_name)
+
+        # 回傳 assets_root_url 依 user_id 決定路徑層級
+        if user_id:
+            assets_root_url = f"{self.backend_url}/static/{user_id}/{folder_name}/"
+        else:
+            assets_root_url = f"{self.backend_url}/static/{folder_name}/"
+
         return {
             "blueprint": final_blueprint,
             "audio_dna": audio_dna,
-            "assets_root_url": f"{self.backend_url}/static/{folder_name}/" 
+            "assets_root_url": assets_root_url,
         }
