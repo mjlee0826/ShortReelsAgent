@@ -88,11 +88,14 @@ class LogtoJWTVerifier:
         if key_data is None:
             raise HTTPException(status_code=401, detail=f"無法找到對應的公鑰 (kid={kid})")
 
+        # Logto 預設使用 ES384；保留 RS256 相容性
+        alg = unverified_header.get("alg", "RS256")
+
         try:
             payload = jwt.decode(
                 token,
                 key_data,
-                algorithms=["RS256"],
+                algorithms=[alg],
                 audience=_AUDIENCE,
                 issuer=_ISSUER,
             )
