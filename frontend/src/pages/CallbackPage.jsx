@@ -1,21 +1,14 @@
-import React, { useEffect } from 'react';
-import { useLogto } from '@logto/react';
+import React from 'react';
+import { useHandleSignInCallback } from '@logto/react';
 import { useNavigate } from 'react-router-dom';
 
 export default function CallbackPage() {
-  const { handleSignInCallback, isAuthenticated, error } = useLogto();
   const navigate = useNavigate();
 
-  useEffect(() => {
-    // 處理 Logto 回調：交換 code 取得 token
-    handleSignInCallback(window.location.href).catch(console.error);
-  }, [handleSignInCallback]);
-
-  useEffect(() => {
-    if (isAuthenticated) {
-      navigate('/', { replace: true });
-    }
-  }, [isAuthenticated, navigate]);
+  // 使用 Logto v4 專用的回調 hook，完成後自動導向首頁
+  const { isLoading, error } = useHandleSignInCallback(() => {
+    navigate('/', { replace: true });
+  });
 
   if (error) {
     return (
