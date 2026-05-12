@@ -1,4 +1,4 @@
-from MediaTools.MediaDownloader import MediaDownloader
+from media_tools.media_downloader import MediaDownloader
 
 downloader = MediaDownloader()
 # 隨便搜尋一首歌來觸發 yt-dlp 的驗證機制

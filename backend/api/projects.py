@@ -12,7 +12,7 @@ import shutil
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from backend.auth.LogtoJWTVerifier import verify_token
+from backend.auth.logto_jwt_verifier import verify_token
 
 router = APIRouter()
 

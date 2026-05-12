@@ -5,9 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFi
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, Dict
-from backend.services.DirectorService import DirectorService
-from backend.services.RenderService import RenderService
-from backend.auth.LogtoJWTVerifier import verify_token
+from backend.services.director_service import DirectorService
+from backend.services.render_service import RenderService
+from backend.auth.logto_jwt_verifier import verify_token
 
 router = APIRouter()
 director_service = DirectorService()
