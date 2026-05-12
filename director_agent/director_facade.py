@@ -1,5 +1,5 @@
 from director_agent.context_compressor import ContextCompressor
-from director_agent.States.intent_state import IntentState
+from director_agent.states.intent_state import IntentState
 
 class DirectorFacade:
     """

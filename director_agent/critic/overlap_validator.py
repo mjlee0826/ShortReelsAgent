@@ -1,4 +1,4 @@
-from director_agent.Critic.base_validator import BaseValidator
+from director_agent.critic.base_validator import BaseValidator
 
 class OverlapValidator(BaseValidator):
     def validate(self, timeline, assets):

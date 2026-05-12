@@ -1,5 +1,5 @@
-from director_agent.Critic.overlap_validator import OverlapValidator
-from director_agent.Critic.duration_validator import DurationValidator
+from director_agent.critic.overlap_validator import OverlapValidator
+from director_agent.critic.duration_validator import DurationValidator
 
 class CriticManager:
     """

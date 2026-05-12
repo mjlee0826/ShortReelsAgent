@@ -1,6 +1,6 @@
 import json
 import re
-from director_agent.States.base_state import BaseState
+from director_agent.states.base_state import BaseState
 from model.gemini_model_manager import GeminiModelManager
 from music_engine.music_engine_facade import MusicEngineFacade
 from prompt_manager.prompt_factory import PromptFactory
@@ -107,5 +107,5 @@ class IntentState(BaseState):
 
     def _next_state(self):
         """統一的狀態切換出口，轉至排程階段。"""
-        from director_agent.States.scheduling_state import SchedulingState
+        from director_agent.states.scheduling_state import SchedulingState
         return SchedulingState()

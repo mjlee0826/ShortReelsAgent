@@ -1,6 +1,6 @@
 import json
 import re
-from director_agent.States.base_state import BaseState
+from director_agent.states.base_state import BaseState
 from model.gemini_model_manager import GeminiModelManager
 from prompt_manager.prompt_factory import PromptFactory
 from prompt_manager.task_mode import TaskMode
@@ -42,7 +42,7 @@ class SchedulingState(BaseState):
             context["timeline_draft"] = []
             context["bgm_track"] = {"track_id": None}
         
-        from director_agent.States.reflection_state import ReflectionState
+        from director_agent.states.reflection_state import ReflectionState
         return ReflectionState()
 
     # 【修改點 3】升級正則表達式，優先抓取大括號 {} Object

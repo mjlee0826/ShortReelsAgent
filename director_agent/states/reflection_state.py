@@ -1,5 +1,5 @@
-from director_agent.States.base_state import BaseState
-from director_agent.Critic.critic_manager import CriticManager
+from director_agent.states.base_state import BaseState
+from director_agent.critic.critic_manager import CriticManager
 
 class ReflectionState(BaseState):
     """
@@ -52,5 +52,5 @@ class ReflectionState(BaseState):
         context["error_prompt"] = "\n".join([f"- {err}" for err in errors])
         
         # 狀態切換：打回重構！
-        from director_agent.States.scheduling_state import SchedulingState
+        from director_agent.states.scheduling_state import SchedulingState
         return SchedulingState()
