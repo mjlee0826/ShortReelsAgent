@@ -1,21 +1,26 @@
 import torch
 from transformers import pipeline
-from model.base_model_manager import BaseModelManager
+from model.base_model_manager import BaseModelManager, synchronized_inference
+from config.model_config import (
+    WHISPER_MODEL_ID,
+    WHISPER_CHUNK_LENGTH_SEC,
+    WHISPER_HALLUCINATION_THRESHOLD,
+)
+
 
 class WhisperModelManager(BaseModelManager):
     """Whisper 語音辨識大腦（含幻覺防跳針過濾器）。"""
 
-    def _initialize(self):
-        self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
-        self.model_id = "openai/whisper-large-v3"
-        
+    def _initialize(self, device_id: int = 0):
+        """載入 Whisper pipeline，使用 FP16 加速並啟用時間戳記。"""
+        self.device = self.get_device_str(device_id)
         self.transcriber = pipeline(
             "automatic-speech-recognition",
-            model=self.model_id,
+            model=WHISPER_MODEL_ID,
             device=self.device,
-            chunk_length_s=30,
+            chunk_length_s=WHISPER_CHUNK_LENGTH_SEC,
             return_timestamps=True,
-            dtype=torch.float16 
+            dtype=torch.float16
         )
 
     def _filter_hallucination(self, raw_result: dict) -> dict:
@@ -25,14 +30,11 @@ class WhisperModelManager(BaseModelManager):
         """
         raw_chunks = raw_result.get("chunks", [])
         cleaned_chunks = []
-        
         consecutive_count = 1
         last_text = ""
 
         for chunk in raw_chunks:
-            # 轉小寫並去除前後空白，避免因標點或空格導致誤判
             current_text = chunk["text"].strip().lower()
-            
             if not current_text:
                 continue
 
@@ -42,41 +44,30 @@ class WhisperModelManager(BaseModelManager):
                 consecutive_count = 1
                 last_text = current_text
 
-            # 如果同一個句子連續跨越了 3 個時間 Chunk，判定為 Attention 鎖死
-            if consecutive_count >= 3:
-                # 把前面已經收錄的兩次「幻覺開頭」也一併刪除，確保資料乾淨
-                if len(cleaned_chunks) >= 2:
-                    cleaned_chunks = cleaned_chunks[:-2]
-                
-                # 終止後續的解析，因為模型一旦進入迴圈，後面的輸出通常也全是垃圾
-                break 
+            if consecutive_count >= WHISPER_HALLUCINATION_THRESHOLD:
+                # 把前面已收錄的幻覺開頭也一併刪除
+                trim_count = WHISPER_HALLUCINATION_THRESHOLD - 1
+                if len(cleaned_chunks) >= trim_count:
+                    cleaned_chunks = cleaned_chunks[:-trim_count]
+                # 模型一旦進入迴圈，後面輸出通常也全是垃圾，終止解析
+                break
             else:
                 cleaned_chunks.append(chunk)
 
-        # 將過濾後的乾淨 Chunk 重新組合回完整的純文字
         final_text = " ".join([c["text"].strip() for c in cleaned_chunks])
-        
-        return {
-            "text": final_text,
-            "chunks": cleaned_chunks
-        }
+        return {"text": final_text, "chunks": cleaned_chunks}
 
+    @synchronized_inference
     def transcribe(self, audio_path: str) -> dict:
-        """
-        輸入音檔路徑，回傳乾淨且無幻覺的逐字稿。
-        """
+        """輸入音檔路徑，回傳乾淨且無幻覺的逐字稿。"""
         try:
-            # 1. 取得原始推論結果
             raw_result = self.transcriber(
-                audio_path, 
+                audio_path,
                 generate_kwargs={
                     "task": "transcribe",
                     "condition_on_prev_tokens": False
                 }
             )
-            
-            # 2. 經過防跳針過濾器後回傳
             return self._filter_hallucination(raw_result)
-            
         except Exception as e:
             return {"text": "", "error": str(e)}

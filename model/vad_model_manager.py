@@ -1,28 +1,30 @@
 import torch
-from model.base_model_manager import BaseModelManager
+from model.base_model_manager import BaseModelManager, synchronized_inference
+from config.model_config import VAD_REPO, VAD_SAMPLING_RATE
+
 
 class VadModelManager(BaseModelManager):
     """語音活動偵測大腦 (Silero VAD)，阻斷 Whisper 靜音幻覺。"""
 
-    def _initialize(self):
-        # 透過 Torch Hub 載入 Silero VAD (免安裝額外套件，自動下載)
+    def _initialize(self, device_id: int = 0):
+        """
+        透過 Torch Hub 載入 Silero VAD，免安裝額外套件。
+        Silero VAD 內部自行管理 device，device_id 保留以維持簽名一致性。
+        """
         self.model, utils = torch.hub.load(
-            repo_or_dir='snakers4/silero-vad', 
-            model='silero_vad', 
+            repo_or_dir=VAD_REPO,
+            model='silero_vad',
             force_reload=False
         )
         # 解構官方提供的輔助函式
         self.get_speech_timestamps, _, self.read_audio, _, _ = utils
 
+    @synchronized_inference
     def has_speech(self, audio_path: str) -> bool:
-        """
-        判斷音檔是否包含人聲。
-        """
+        """判斷音檔是否包含人聲。"""
         try:
-            wav = self.read_audio(audio_path, sampling_rate=16000)
-            # 取得人聲發生的時間戳記片段
-            speech_timestamps = self.get_speech_timestamps(wav, self.model, sampling_rate=16000)
-            # 如果陣列有長度，代表有人講話
+            wav = self.read_audio(audio_path, sampling_rate=VAD_SAMPLING_RATE)
+            speech_timestamps = self.get_speech_timestamps(wav, self.model, sampling_rate=VAD_SAMPLING_RATE)
             return len(speech_timestamps) > 0
         except Exception as e:
             print(f"[VAD Error] 語音偵測失敗: {e}")

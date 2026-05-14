@@ -1,56 +1,61 @@
 import os
-import re
-import json
 import time
-# 【重構】使用全新官方支援的 google.genai SDK
 from google import genai
 from prompt_manager.base_prompt_manager import BasePromptManager
 from prompt_manager.default_prompt_manager import DefaultPromptManager
 from prompt_manager.task_mode import TaskMode
 from prompt_manager.prompt_factory import PromptFactory
-from model.base_model_manager import BaseModelManager
+from model.base_model_manager import BaseModelManager, synchronized_inference
+from config.model_config import (
+    GEMINI_DEFAULT_MODEL,
+    GEMINI_STRONG_MODEL,
+    GEMINI_POLL_MAX_COUNT,
+    GEMINI_POLL_INTERVAL_SEC,
+)
+
 
 class GeminiModelManager(BaseModelManager):
     """統一的雲端大腦 (Gemini)。已遷移至最新 google.genai 架構。"""
 
-    def _initialize(self):
+    def _initialize(self, device_id: int = 0):
+        """初始化 Gemini Client。device_id 對雲端 API 無效，保留簽名一致性。"""
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
             raise ValueError("嚴重錯誤：找不到 GEMINI_API_KEY 環境變數！請設定後再執行。")
 
-        # 【重構】使用新版 Client 實例化寫法
         self.client = genai.Client(api_key=api_key)
-        self.default_model = 'gemini-2.5-flash'
-        self.strong_model = 'gemini-3.1-pro-preview'
+        self.default_model = GEMINI_DEFAULT_MODEL
+        self.strong_model = GEMINI_STRONG_MODEL
         self.prompt_manager = DefaultPromptManager()
 
     def set_prompt_manager(self, prompt_manager: BasePromptManager):
+        """替換 Prompt Manager（Strategy Pattern）。"""
         self.prompt_manager = prompt_manager
 
-    def analyze_media(self, media_input: str, media_type="video", mode: TaskMode = TaskMode.TIMECODED_ACTION_INDEX) -> dict:
+    @synchronized_inference
+    def analyze_media(self, media_input: str, media_type: str = "video", mode: TaskMode = TaskMode.TIMECODED_ACTION_INDEX) -> dict:
+        """上傳媒體至 Gemini 並取得語意推論結果。"""
         prompt_text = PromptFactory.create_prompt(mode, self.prompt_manager)
         video_file = None
 
         try:
             print(f"[Gemini API] 正在上傳影片至雲端: {media_input}")
-            # 【重構】新版檔案上傳 API
             video_file = self.client.files.upload(file=media_input)
 
-            # 輪詢等待 Gemini 後台處理影片完成 (最多 5 分鐘)
+            # 輪詢等待 Gemini 後台處理影片完成
             poll_count = 0
             while video_file.state.name == 'PROCESSING':
-                if poll_count >= 150:
+                if poll_count >= GEMINI_POLL_MAX_COUNT:
                     raise TimeoutError("Gemini 影片處理逾時（超過 5 分鐘），請稍後重試或換短影片。")
                 poll_count += 1
                 print("[Gemini API] 影片處理中，等待 2 秒...")
-                time.sleep(2)
+                time.sleep(GEMINI_POLL_INTERVAL_SEC)
                 video_file = self.client.files.get(name=video_file.name)
 
             if video_file.state.name == 'FAILED':
                 raise ValueError("Gemini 影片處理失敗。")
 
             print("[Gemini API] 開始進行語意與時間碼推論...")
-            # 【重構】新版生成內容 API (注意 contents 陣列的傳遞方式)
             response = self.client.models.generate_content(
                 model=self.default_model,
                 contents=[video_file, prompt_text]
@@ -66,35 +71,15 @@ class GeminiModelManager(BaseModelManager):
                 try:
                     self.client.files.delete(name=video_file.name)
                     print(f"[Gemini API] 已清理雲端暫存檔: {video_file.name}")
-                except:
-                    pass
+                except Exception as e:
+                    print(f"[Gemini API] 無法刪除雲端暫存檔: {e}")
 
+    @synchronized_inference
     def generate_director_plan(self, prompt: str, tools: list = None) -> str:
-        """
-        Agentic 核心：建立對話 Session 並處理 Tool Calling 迴圈。
-        """
-        # 建立具備工具能力的 Chat Session
-        # config 中註冊 tools (例如 Phase 3 的 MusicEngineFacade 方法)
+        """Agentic 核心：建立對話 Session 並傳送指令。"""
         chat = self.client.chats.create(
             model=self.strong_model,
             config={'tools': tools} if tools else None
         )
-
         response = chat.send_message(prompt)
-
-        # 進入 Agentic Loop: 處理模型產生的所有工具呼叫請求
-        # 備註：google.genai SDK 會自動處理簡單的 Function Call 對接，
-        # 但在複雜邏輯下我們可以在此攔截並執行本地邏輯。
-        
         return response.text
-
-    def _parse_json_output(self, text: str) -> dict:
-        """強健的 JSON 解析器"""
-        try:
-            match = re.search(r'\{.*\}', text, re.DOTALL)
-            if match:
-                return json.loads(match.group(0))
-            return {"multimodal_event_index": []}
-        except Exception as e:
-            print(f"[JSON Parse Error] 解析失敗: {e}")
-            return {"multimodal_event_index": []}

@@ -1,40 +1,50 @@
 import torch
 import gc
-import re
-import json
 from transformers import Qwen3VLForConditionalGeneration, AutoProcessor, BitsAndBytesConfig
 from qwen_vl_utils import process_vision_info
 from prompt_manager.base_prompt_manager import BasePromptManager
 from prompt_manager.default_prompt_manager import DefaultPromptManager
 from prompt_manager.task_mode import TaskMode
 from prompt_manager.prompt_factory import PromptFactory
-from model.base_model_manager import BaseModelManager
+from model.base_model_manager import BaseModelManager, synchronized_inference
+from config.model_config import (
+    QWEN_MODEL_ID,
+    QWEN_MAX_NEW_TOKENS,
+    QWEN_MAX_PIXELS,
+    QWEN_FPS_TIMECODED,
+    QWEN_FPS_DEFAULT,
+)
+
 
 class QwenModelManager(BaseModelManager):
     """統一的本地視覺大腦 (Qwen3-VL)。"""
 
-    def _initialize(self):
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-
-        # 【核心修正】修正為官方正確的最新穩定版 Model ID
-        self.model_id = "Qwen/Qwen3-VL-8B-Instruct"
+    def _initialize(self, device_id: int = 0):
+        """
+        以 8-bit 量化載入 Qwen3-VL。
+        device_map="auto" 讓 transformers 自動跨 GPU 分配權重；
+        若需強制鎖定特定 GPU，可改為 device_map={"": f"cuda:{device_id}"}。
+        """
+        self.device = self.get_device_str(device_id)
         self.prompt_manager = DefaultPromptManager()
-        
+
         quantization_config = BitsAndBytesConfig(load_in_8bit=True)
-        
-        # 【核心修正】使用新一代的 Model Class 來載入權重
+
         self.model = Qwen3VLForConditionalGeneration.from_pretrained(
-            self.model_id, 
+            QWEN_MODEL_ID,
             quantization_config=quantization_config,
             device_map="auto",
             torch_dtype=torch.float16
         )
-        self.processor = AutoProcessor.from_pretrained(self.model_id)
+        self.processor = AutoProcessor.from_pretrained(QWEN_MODEL_ID)
 
     def set_prompt_manager(self, prompt_manager: BasePromptManager):
+        """替換 Prompt Manager（Strategy Pattern）。"""
         self.prompt_manager = prompt_manager
 
-    def analyze_media(self, media_input, media_type="image", mode: TaskMode = TaskMode.GLOBAL_ANALYSIS) -> dict:
+    @synchronized_inference
+    def analyze_media(self, media_input, media_type: str = "image", mode: TaskMode = TaskMode.GLOBAL_ANALYSIS) -> dict:
+        """輸入圖片或影片路徑，回傳模型推論的 JSON 結果。"""
         prompt_text = PromptFactory.create_prompt(mode, self.prompt_manager)
 
         if media_type == "image":
@@ -43,10 +53,9 @@ class QwenModelManager(BaseModelManager):
                 {"type": "text", "text": prompt_text}
             ]
         else:
-            target_fps = 2.0 if mode == TaskMode.TIMECODED_ACTION_INDEX else 1.0
-            
+            target_fps = QWEN_FPS_TIMECODED if mode == TaskMode.TIMECODED_ACTION_INDEX else QWEN_FPS_DEFAULT
             content = [
-                {"type": "video", "video": media_input, "max_pixels": 100352, "fps": target_fps},
+                {"type": "video", "video": media_input, "max_pixels": QWEN_MAX_PIXELS, "fps": target_fps},
                 {"type": "text", "text": prompt_text}
             ]
 
@@ -55,13 +64,13 @@ class QwenModelManager(BaseModelManager):
         try:
             text_prompt = self.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
             image_inputs, video_inputs = process_vision_info(messages)
-            
+
             inputs = self.processor(
                 text=[text_prompt], images=image_inputs, videos=video_inputs,
                 padding=True, return_tensors="pt"
             ).to(self.device)
 
-            generated_ids = self.model.generate(**inputs, max_new_tokens=512)
+            generated_ids = self.model.generate(**inputs, max_new_tokens=QWEN_MAX_NEW_TOKENS)
             generated_ids_trimmed = [
                 out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
             ]
@@ -70,7 +79,7 @@ class QwenModelManager(BaseModelManager):
             )[0]
 
             return self._parse_json_output(output_text)
-            
+
         except Exception as e:
             print(f"[Qwen VLM Error] 推理失敗: {str(e)}")
             return {"error": "Analysis failed", "raw_output": str(e)}
@@ -78,20 +87,3 @@ class QwenModelManager(BaseModelManager):
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             gc.collect()
-
-    def _parse_json_output(self, text: str) -> dict:
-        try:
-            cleaned_text = text.strip()
-            if "```json" in cleaned_text:
-                cleaned_text = cleaned_text.split("```json")[-1].split("```")[0].strip()
-            elif "```" in cleaned_text:
-                cleaned_text = cleaned_text.split("```")[-1].split("```")[0].strip()
-            
-            match = re.search(r'\{.*\}', cleaned_text, re.DOTALL)
-            if match:
-                return json.loads(match.group(0))
-            
-            return {"caption": cleaned_text.strip()}
-        except Exception as e:
-            print(f"[JSON Parse Error] 解析失敗，錯誤: {e}")
-            return {"caption": "Unknown action"}
