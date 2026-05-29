@@ -1,55 +1,83 @@
+"""複雜影片處理器，使用 Gemini API 進行精確的多模態事件索引。"""
+
 from media_processor.abstract_video_processor import AbstractVideoProcessor
 from model.gemini_model_manager import GeminiModelManager
 from prompt_manager.task_mode import TaskMode
 
+
 class ComplexVideoProcessor(AbstractVideoProcessor):
     """
-    複雜/重要影片處理策略：
-    全感知索引器 (Multimodal Event Indexer)。
-    強制燒錄時間碼，並交由原生多模態的 Gemini 進行『視聽同步』分析，
-    精確抓取動作與聲音的雙重高潮點。
+    具體策略 (Concrete Strategy)：複雜/重要影片的全感知索引器。
+    強制燒錄視覺時間碼，將影片完整上傳至 Gemini，進行「視聽同步」精確分析，
+    產出以時間區段為單位的 multimodal_event_index，精準抓取動作與聲音的雙重高潮點。
+    適用於主要表演片段、重要訪談、或需要精細剪輯點的素材。
     """
+
     def __init__(self):
         super().__init__()
-        # 使用強大的雲端多模態大腦 (Gemini 2.5 Flash)
+        # 使用雲端多模態大腦（Gemini Flash）進行視聽同步分析
         self.vision_engine = GeminiModelManager()
-        
-        # 複雜影片需要開啟時間碼燒錄以防時間軸幻覺
+        # 必須燒錄時間碼，防止 Gemini 產生時間軸幻覺
         self.requires_timecode = True
 
-    def analyze_visual_semantics(self, raw_file_path: str, tc_file_path: str, duration: float) -> dict:
-        
-        # 將「燒好時間碼」的長影片完整丟給 Gemini，Gemini 會同時處理畫面與音軌
+    def analyze_visual_semantics(
+        self,
+        raw_file_path: str,
+        tc_file_path: str,
+        duration: float,
+        video_meta: dict,
+    ) -> dict:
+        """
+        視覺語意分析（Hook Method 實作）。
+        將燒有時間碼的影片送入 Gemini，解析出多模態事件清單與全局語意標籤，
+        再對每個事件的視聽高潮點呼叫 U2-Net + MediaPipe 計算精準畫面 bbox。
+        """
+        # 燒好時間碼的影片完整送入 Gemini，同時處理畫面與音軌
         vlm_result = self.vision_engine.analyze_media(
-            media_input=tc_file_path,            
-            media_type="video",               
-            mode=TaskMode.TIMECODED_ACTION_INDEX     
+            media_input=tc_file_path,
+            media_type="video",
+            mode=TaskMode.TIMECODED_ACTION_INDEX,
         )
 
-        # 後處理：針對 Gemini 拆解出來的「多模態事件」，結合聲音與畫面決定最佳的物理重心
+        # 後處理：為每個多模態事件計算最佳畫面 bbox
         event_indices = vlm_result.get("multimodal_event_index", [])
         for event in event_indices:
             start_t = float(event.get("start_time", 0.0))
             end_t = float(event.get("end_time", duration))
-            
-            # 優先使用模型依據「聲音或動作高潮」指派的精確秒數 (key_timestamp)
+
+            # 優先採用模型依據「聲音或動作高潮」指定的精確秒數
             key_t = event.get("key_timestamp")
-            
-            # 防呆機制：若模型沒給，或給的時間超出了這個區段，則退回使用區間中點
             if key_t is None or not (start_t <= float(key_t) <= end_t):
+                # 防呆：模型未提供或超出區段範圍，退回使用區間中點
                 key_t = start_t + (end_t - start_t) / 2.0
             else:
                 key_t = float(key_t)
-            
-            # 在該視聽高潮秒數，呼叫 U2-Net 進行精準的畫面重心抓取
-            # 這樣能保證 9:16 裁切時，不會漏掉說話的人或發生巨響的主體
-            event["subject_focus"] = self._get_saliency_at_time(raw_file_path, key_t)
 
+            # 在視聽高潮秒數呼叫 U2-Net + MediaPipe，確保 9:16 裁切時主體不被截切
+            bbox = self._get_saliency_at_time(raw_file_path, key_t)
+            event["subject_bbox"] = bbox.model_dump()
+
+        # 從中間幀計算全局視覺特徵（一次 VideoCapture）
+        brightness, color_temperature, dominant_colors = 0.0, "", []
+        face_info = None
+        pil_mid = self._extract_middle_frame_pil(raw_file_path, duration)
+        if pil_mid is not None:
+            brightness, color_temperature, dominant_colors, face_info = (
+                self._compute_frame_features(pil_mid)
+            )
+
+        # 複雜影片以事件區塊為單位，不進行整體畫質/美學打分
         return {
-            "is_dense_indexed": True, 
-            "cinematic_critique": vlm_result.get("cinematic_critique", ""), 
+            "is_dense_indexed": True,
+            "cinematic_critique": vlm_result.get("cinematic_critique", ""),
+            "mood": vlm_result.get("mood", ""),
+            "scene_tags": vlm_result.get("scene_tags", []),
+            "camera_angle": vlm_result.get("camera_angle", ""),
+            "action_tags": vlm_result.get("action_tags", []),
+            "time_of_day": vlm_result.get("time_of_day", ""),
+            "brightness": brightness,
+            "color_temperature": color_temperature,
+            "dominant_colors": dominant_colors,
+            "faces": face_info,
             "multimodal_event_index": event_indices,
-            # 複雜影片依靠事件區塊解析，不進行單一的技術/美學打分
-            "technical_score": None,
-            "aesthetic_score": None
         }

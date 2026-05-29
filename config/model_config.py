@@ -1,15 +1,17 @@
 """
 模型層設定集中管理 (Configuration Object Pattern)。
 model/ 底下所有 manager 的常數統一在此定義，對外是唯一的 import 來源。
-constants.py 中已有的 model 相關常數，在此處 re-export，
-讓 model 層只需 import model_config，不需知道值的實際出處。
 """
-from config.constants import (
-    GEMINI_VIDEO_PROCESSING_MAX_POLL as GEMINI_POLL_MAX_COUNT,
-    GEMINI_VIDEO_POLL_INTERVAL_SEC   as GEMINI_POLL_INTERVAL_SEC,
-    HALLUCINATION_REPEAT_THRESHOLD   as WHISPER_HALLUCINATION_THRESHOLD,
-    MUSIQ_MAX_INPUT_SIZE             as MUSIQ_MAX_SHORT_SIDE,
-)
+from config.media_processor_config import MUSIQ_MAX_INPUT_SIZE as MUSIQ_MAX_SHORT_SIDE
+
+# ── Gemini 影片上傳輪詢 ───────────────────────────────────────────────────────
+# 影片上傳後台處理的最大輪詢次數（150 * 2s = 5 分鐘）
+GEMINI_POLL_MAX_COUNT   = 150
+GEMINI_POLL_INTERVAL_SEC = 2
+
+# ── Whisper 幻覺防跳針 ────────────────────────────────────────────────────────
+# 連續「停滯型重複」達到此次數，判定為 attention 鎖死並截斷後續輸出
+WHISPER_HALLUCINATION_THRESHOLD = 3
 
 # ── 確保 re-export 的名稱可被 from model_config import * 取用 ──────────────
 __all__ = [
@@ -31,10 +33,12 @@ __all__ = [
     "WHISPER_MODEL_ID",
     "WHISPER_CHUNK_LENGTH_SEC",
     # Audio Env
-    "AUDIO_ENV_MODEL_ID",
-    "AUDIO_ENV_MAX_NEW_TOKENS",
-    "AUDIO_ENV_NUM_BEAMS",
+    "AUDIO_ENV_TOP_K",
     "AUDIO_SAMPLING_RATE",
+    "AUDIO_ENV_MIN_SCORE",
+    # MediaPipe
+    "MEDIAPIPE_MODEL_SELECTION",
+    "MEDIAPIPE_MIN_DETECTION_CONFIDENCE",
     # LAION
     "LAION_CLIP_MODEL_ID",
     "LAION_MLP_INPUT_SIZE",
@@ -72,13 +76,17 @@ QWEN_FPS_DEFAULT    = 1.0
 WHISPER_MODEL_ID        = "openai/whisper-large-v3"
 WHISPER_CHUNK_LENGTH_SEC = 30
 
-# ── Audio Env (Whisper-tiny audio captioning) ─────────────────────────────────
-AUDIO_ENV_MODEL_ID      = "MU-NLPC/whisper-tiny-audio-captioning"
-# 環境音描述通常很短，限制長度以加速推論
-AUDIO_ENV_MAX_NEW_TOKENS = 64
-AUDIO_ENV_NUM_BEAMS      = 3
-# Whisper 架構嚴格要求 16000Hz 採樣率
-AUDIO_SAMPLING_RATE      = 16000
+# ── Audio Env (PANNs CNN6) ────────────────────────────────────────────────────
+# 回傳信心分數前 K 高的分類標籤（AudioSet 527 類）
+AUDIO_ENV_TOP_K     = 5
+# Whisper / VAD / PANNs 共同要求 16000Hz 採樣率
+AUDIO_SAMPLING_RATE = 16000
+# 低於此信心分數的分類視為無意義，過濾掉
+AUDIO_ENV_MIN_SCORE = 0.01
+
+# ── MediaPipe Face Detection ──────────────────────────────────────────────────
+MEDIAPIPE_MODEL_SELECTION          = 0    # 0=short-range（2m 內），1=full-range
+MEDIAPIPE_MIN_DETECTION_CONFIDENCE = 0.5
 
 # ── LAION Aesthetic Predictor ─────────────────────────────────────────────────
 LAION_CLIP_MODEL_ID  = "openai/clip-vit-large-patch14"

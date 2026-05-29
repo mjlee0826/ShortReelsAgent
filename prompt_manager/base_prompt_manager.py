@@ -8,7 +8,12 @@ class BasePromptManager(ABC):
     
     @abstractmethod
     def get_media_analysis_prompt(self) -> str:
-        """適用於靜態圖片或簡單影片的全局描述與評價"""
+        """適用於靜態圖片或簡單影片的全局描述與評價（Qwen 本地）"""
+        pass
+
+    @abstractmethod
+    def get_complex_image_analysis_prompt(self) -> str:
+        """適用於靜態圖片的深度語意分析（Gemini 雲端，付費方案）"""
         pass
 
     @abstractmethod
