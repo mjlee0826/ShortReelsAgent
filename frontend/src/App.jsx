@@ -1,7 +1,7 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useLogto } from '@logto/react';
-import { apiClient } from './services/api.service';
+import { setAuthBridge } from './services/api.service';
 import LoginPage from './pages/LoginPage';
 import CallbackPage from './pages/CallbackPage';
 import ProjectDashboard from './pages/ProjectDashboard';
@@ -31,55 +31,19 @@ function AuthGuard({ children }) {
 }
 
 /**
- * AuthInterceptorSetup：注入 axios request / response 攔截器。
+ * AuthInterceptorSetup：把 Logto 的 getAccessToken / signOut 注入 Auth Bridge。
  *
- * Strategy Pattern：
- * - Request interceptor：有 token 就附上，沒有（未登入）則略過。
- * - Response interceptor：收到 401 時自動換 token 重打；
- *   refresh token 也失效時強制登出，導向 /login。
+ * interceptor 本身已在 api.service 模組載入時註冊（杜絕競態），此處只負責
+ * 在「render 階段」把最新的 Logto 方法餵給 bridge。
  *
- * 掛載時一次性註冊，不依賴 isAuthenticated，徹底消除 race condition。
+ * 為何在 render 階段而非 useEffect：React 的 effect 執行順序為「子先父後」，
+ * 若在 effect 注入，ProjectDashboard 的 fetchProjects effect 會早一步觸發、
+ * 此時 bridge 尚未就緒。改在 render 階段注入，因父元件 render 必早於子元件
+ * render 與 effect，故 bridge 必定先就緒。此處僅為冪等賦值，重複 render 無副作用。
  */
 function AuthInterceptorSetup({ children }) {
   const { getAccessToken, signOut } = useLogto();
-  const API_RESOURCE = import.meta.env.VITE_LOGTO_API_RESOURCE;
-
-  useEffect(() => {
-    // 有 token 就附上，未登入時 getAccessToken 會拋出，略過即可
-    const reqId = apiClient.interceptors.request.use(async (config) => {
-      try {
-        const token = await getAccessToken(API_RESOURCE);
-        if (token) config.headers.Authorization = `Bearer ${token}`;
-      } catch {
-        // 未登入或 token 尚未就緒，讓 request 照常送出
-      }
-      return config;
-    });
-
-    // 401 → 嘗試換新 token 重打；換不了 → refresh token 過期，強制登出
-    const resId = apiClient.interceptors.response.use(
-      res => res,
-      async (error) => {
-        if (error.response?.status === 401 && !error.config._retry) {
-          error.config._retry = true;
-          try {
-            const token = await getAccessToken(API_RESOURCE);
-            error.config.headers.Authorization = `Bearer ${token}`;
-            return apiClient(error.config);
-          } catch {
-            await signOut(`${window.location.origin}/login`);
-          }
-        }
-        return Promise.reject(error);
-      }
-    );
-
-    return () => {
-      apiClient.interceptors.request.eject(reqId);
-      apiClient.interceptors.response.eject(resId);
-    };
-  }, [getAccessToken, signOut, API_RESOURCE]);
-
+  setAuthBridge({ getAccessToken, signOut });
   return children;
 }
 
