@@ -1,4 +1,4 @@
-"""環境音分類引擎，使用 PANNs CNN6 對 AudioSet 527 類進行推論。"""
+"""環境音分類引擎，使用 PANNs CNN14 對 AudioSet 527 類進行推論。"""
 
 import torch
 import librosa
@@ -10,14 +10,14 @@ from config.model_config import AUDIO_ENV_TOP_K, AUDIO_SAMPLING_RATE, AUDIO_ENV_
 
 class AudioEnvModelManager(BaseModelManager):
     """
-    配接器模式 (Adapter Pattern)：封裝 PANNs CNN6 環境音分類器。
+    配接器模式 (Adapter Pattern)：封裝 PANNs CNN14 環境音分類器。
     PANNs（Pretrained Audio Neural Networks）以 AudioSet 527 類訓練，
     專為環境音設計，比 Whisper 架構更適合非語音聲音的分類任務。
     輸出 top-k 分類標籤與信心分數，結構化且易於下游 LLM 理解。
     """
 
     def _initialize(self, device_id: int = 0):
-        """載入 PANNs CNN6 模型（panns_inference 套件）。"""
+        """載入 PANNs CNN14 模型（panns_inference 套件）。"""
         from panns_inference import AudioTagging
         self.device = self.get_device_str(device_id)
         # AudioTagging 內部自動處理 GPU/CPU 分配
@@ -36,7 +36,10 @@ class AudioEnvModelManager(BaseModelManager):
             audio_tensor = audio_array[np.newaxis, :]
 
             with torch.no_grad():
-                _, clipwise_output = self._tagger.inference(audio_tensor)
+                # panns_inference 的 inference() 回傳順序為 (clipwise_output, embedding)，
+                # 第一個元素才是 527 類分數；舊寫法誤取第二個 embedding（CNN14 為 2048 維），
+                # 使 argsort 出來的索引超出 labels 的 527 範圍，觸發 list index out of range。
+                clipwise_output, _ = self._tagger.inference(audio_tensor)
 
             # clipwise_output shape: (1, 527)
             scores = clipwise_output[0]
