@@ -5542,34 +5542,37 @@ reference = "pytorch"
 
 [[package]]
 name = "torchaudio"
-version = "2.11.0+cu126"
+version = "2.10.0+cu126"
 description = "An audio package for PyTorch"
 optional = false
 python-versions = "*"
 groups = ["main"]
 files = [
-    {file = "torchaudio-2.11.0+cu126-cp310-cp310-manylinux_2_28_aarch64.whl", hash = "sha256:60898c30cf8a7c4837aecae9522e5e4a0e942fd9a37a4ea7c40726b78cc8ddec"},
-    {file = "torchaudio-2.11.0+cu126-cp310-cp310-manylinux_2_28_x86_64.whl", hash = "sha256:8352b8d541ebb4abe2bbb9b4523c6ba10c9736a702d265dff54a3bfe2f29265d"},
-    {file = "torchaudio-2.11.0+cu126-cp310-cp310-win_amd64.whl", hash = "sha256:a3a4d763f582bccda1e1b44ccc2cf059040f5dcbdd897ef673644e812668594b"},
-    {file = "torchaudio-2.11.0+cu126-cp311-cp311-manylinux_2_28_aarch64.whl", hash = "sha256:8a35d88d4a96edc2d7e5038b359a637026ba7441fa6011fd217453f0f8698149"},
-    {file = "torchaudio-2.11.0+cu126-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:233dca0d0048bc86ca0505c57fee08ff7c019d11dd14db397050d15d8fa94520"},
-    {file = "torchaudio-2.11.0+cu126-cp311-cp311-win_amd64.whl", hash = "sha256:bb5f58154b78c618006716d1eebbe38a161149e6b46f88a0b1b12ce6ede0acd3"},
-    {file = "torchaudio-2.11.0+cu126-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:2ccbbe4555d17c6a7d9bddf76a9c608d6e4ed9b9ecb63cc02f4c4bcf4ae8f05b"},
-    {file = "torchaudio-2.11.0+cu126-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:fe8ba48c690cacc58087603c4d853580006e3d1c0ebe22c0d75f99a004bc981a"},
-    {file = "torchaudio-2.11.0+cu126-cp312-cp312-win_amd64.whl", hash = "sha256:ca5b7815c6952c79c65dce9a78eb96be8b73a8b291f82ca473812a910cdc9fbc"},
-    {file = "torchaudio-2.11.0+cu126-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:6899f8f5f2e4cb046417da52ef0fa10f19551327d8ba4b5f874ad64883860be5"},
-    {file = "torchaudio-2.11.0+cu126-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:641f84f2dd1aebf7f1cc6043a70ebae51182b216b5a7a251c6d51949cee762b5"},
-    {file = "torchaudio-2.11.0+cu126-cp313-cp313-win_amd64.whl", hash = "sha256:bb5d55842b8b52ab7a67a6bd0ec23b56dfca4f163e8d2e053d6a24a8192f46c0"},
-    {file = "torchaudio-2.11.0+cu126-cp313-cp313t-manylinux_2_28_aarch64.whl", hash = "sha256:aa117dcaab59e3dd295a54b6423430d0bfba4011b80e4cff65fb03086abc0a15"},
-    {file = "torchaudio-2.11.0+cu126-cp313-cp313t-manylinux_2_28_x86_64.whl", hash = "sha256:67e8f380d0d2c5861e5fc135780c2939c9f40b02431ebcb61d996562d8f57682"},
-    {file = "torchaudio-2.11.0+cu126-cp313-cp313t-win_amd64.whl", hash = "sha256:7ab11a044dd5cdf72e9ed90be1874fa31460dfd120cfb475addc8a92abc50c4b"},
-    {file = "torchaudio-2.11.0+cu126-cp314-cp314-manylinux_2_28_aarch64.whl", hash = "sha256:218948655e79cd5cbdba4d6763d29465405401b95e52aee2edb56b05b0428c93"},
-    {file = "torchaudio-2.11.0+cu126-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:08800408b1ab0a1992aea704b788103285703d009e232228886f9efa3cbc6a1b"},
-    {file = "torchaudio-2.11.0+cu126-cp314-cp314-win_amd64.whl", hash = "sha256:6c13443d27de1297ebbf37b84c2b6a1f0cfe36459fc7740fe28cced68264b1ee"},
-    {file = "torchaudio-2.11.0+cu126-cp314-cp314t-manylinux_2_28_aarch64.whl", hash = "sha256:8aa73ae00e0e0bbf901015089141c25e4080216f56bb9b33367ac209890af7d3"},
-    {file = "torchaudio-2.11.0+cu126-cp314-cp314t-manylinux_2_28_x86_64.whl", hash = "sha256:7fb725b644927fff30b0b23cbd2de155016b759382efd7b02a33ec77372072f5"},
-    {file = "torchaudio-2.11.0+cu126-cp314-cp314t-win_amd64.whl", hash = "sha256:589a66aacbb183db71b64ed05c46f08b3ce3b15ceefd51e3935ffab16905ef11"},
+    {file = "torchaudio-2.10.0+cu126-cp310-cp310-manylinux_2_28_aarch64.whl", hash = "sha256:0e9b597659ea9ef5085a3e21223c86f87e4d2aea093e908c3881e199e5c5b0f3"},
+    {file = "torchaudio-2.10.0+cu126-cp310-cp310-manylinux_2_28_x86_64.whl", hash = "sha256:139824128d8a1116c054b253a22ca7b6118f5332c62db892f030c6c4a5bfe6ea"},
+    {file = "torchaudio-2.10.0+cu126-cp310-cp310-win_amd64.whl", hash = "sha256:1dbdd950f0a46adff88c022935171aca1397a50976a7a7f28fca706d9aeebc19"},
+    {file = "torchaudio-2.10.0+cu126-cp311-cp311-manylinux_2_28_aarch64.whl", hash = "sha256:8c00808970e3270893092d6712c2377f17fff95923b53be17a5a570b83bf44ae"},
+    {file = "torchaudio-2.10.0+cu126-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:74e7a11f8f4bf2d13c32d99d277f79b68fd0f9ed6add64ed5ba5a19e9d28159a"},
+    {file = "torchaudio-2.10.0+cu126-cp311-cp311-win_amd64.whl", hash = "sha256:d56484cdf67a6edd7b2c9d3411a0239207d467b9ebe1660c43c21597125b3dd1"},
+    {file = "torchaudio-2.10.0+cu126-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:073ab28904d0b623717f4ff22df2122bb09cb764983c67375a2aa43bc16188f2"},
+    {file = "torchaudio-2.10.0+cu126-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:2e376d2daece155023279b5baa625c74caf5b013f098e0970284c1f31c5d7651"},
+    {file = "torchaudio-2.10.0+cu126-cp312-cp312-win_amd64.whl", hash = "sha256:65bc0759c3154ab49282a91b5cec2cd3d9cd2335b19a213cfed2e00fbee9036a"},
+    {file = "torchaudio-2.10.0+cu126-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:97822f5fa877c901e025a6e005f51d7096dd9bb15d73e6949add54691c7fb393"},
+    {file = "torchaudio-2.10.0+cu126-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:204b42ed9fed2cf98141ed7b13147d130dc5e27a53c100ed4ee7a3cd110d8378"},
+    {file = "torchaudio-2.10.0+cu126-cp313-cp313-win_amd64.whl", hash = "sha256:c8f3847fbfbd63f32295c1095030aecf8db15c492fbc13fb2a33502710b85b96"},
+    {file = "torchaudio-2.10.0+cu126-cp313-cp313t-manylinux_2_28_aarch64.whl", hash = "sha256:494f1a38cbc4890933dd858e28dd6d9b6209cdeab6ac507ab55798634994def3"},
+    {file = "torchaudio-2.10.0+cu126-cp313-cp313t-manylinux_2_28_x86_64.whl", hash = "sha256:68806c759ed114fa2bfd12b0f8014e838d5720d1e97f599e678deb61090a72db"},
+    {file = "torchaudio-2.10.0+cu126-cp313-cp313t-win_amd64.whl", hash = "sha256:b812522931a62a793537120f90f7ef76a8999c6f0f9005b29178286609a0d80f"},
+    {file = "torchaudio-2.10.0+cu126-cp314-cp314-manylinux_2_28_aarch64.whl", hash = "sha256:3ef1e8c8c971f5750484d1be4c0e2452b057f8a8794a79bab2f2e33720fb5b69"},
+    {file = "torchaudio-2.10.0+cu126-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:844242e8d98d0321e7fc938e1b7e24bbb6c68008744cd71a6694500b04210976"},
+    {file = "torchaudio-2.10.0+cu126-cp314-cp314-win_amd64.whl", hash = "sha256:4b7ae03ac4e0bbbbcec65e1a81af44b633609be95ca870487e7ead2c5ccc3446"},
+    {file = "torchaudio-2.10.0+cu126-cp314-cp314t-manylinux_2_28_aarch64.whl", hash = "sha256:96d9a17a5d738cd5a4045cebd95c08c99758e70120334cec47fd872d90760b26"},
+    {file = "torchaudio-2.10.0+cu126-cp314-cp314t-manylinux_2_28_x86_64.whl", hash = "sha256:5495e909549413e20b30120cb8c97e84354e10ff41104d062252c6340cc8127c"},
+    {file = "torchaudio-2.10.0+cu126-cp314-cp314t-win_amd64.whl", hash = "sha256:83a6a80850de4bff98d0f332f942050608baa1e7b375eff8748357d2a75f3d36"},
 ]
+
+[package.dependencies]
+torch = "2.10.0"
 
 [package.source]
 type = "legacy"
@@ -6444,4 +6447,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12, <3.14"
-content-hash = "a4c1237644b3359f21578ba82a63cca17a2b3a071bb06091e54aabf12f1b1c22"
+content-hash = "b9f8e202aedac48441846bcd9ec0c3fdc552e1917b15b77e25bc6b8d4b40a938"
