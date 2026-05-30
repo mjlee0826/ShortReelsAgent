@@ -59,10 +59,12 @@ class QwenModelManager(BaseModelManager):
 
     def _load_model_with_attention_fallback(self) -> Qwen3VLForConditionalGeneration:
         """
-        嘗試以 Flash Attention 2 載入，失敗時 fallback 到 sdpa（Chain of Responsibility）。
+        嘗試以 Flash Attention 2 載入，僅在 FA2「不可用」時 fallback 到 sdpa。
 
-        Flash Attn 通常因「未安裝 flash-attn 套件」或「硬體不支援」失敗，
-        此時印 warning 並改用 PyTorch 內建 sdpa；不會打斷後端啟動。
+        fallback 條件刻意只限於 ``ImportError``（flash-attn 未安裝）與
+        ``ValueError``（模型 / 環境不支援該 attn_implementation）。
+        **CUDA OOM 等資源錯誤一律往上拋**，不被偽裝成「FA2 失敗」，
+        以免在共用 GPU 環境誤導除錯方向（OOM 與 attention 實作無關）。
         """
         load_kwargs = self._build_base_load_kwargs()
 
@@ -74,12 +76,12 @@ class QwenModelManager(BaseModelManager):
                     attn_implementation=_ATTN_PRIMARY,
                     **load_kwargs,
                 )
-            except (ImportError, ValueError, RuntimeError) as exc:
+            except (ImportError, ValueError) as exc:
                 # ImportError：flash-attn 未安裝
-                # ValueError：模型不支援該 attn_implementation
-                # RuntimeError：硬體不支援（例如 Compute Capability 不足）
+                # ValueError：模型 / transformers 版本不支援該 attn_implementation
+                # 這兩類才是「FA2 不可用」，OOM 等 RuntimeError 不在此列、會自然往上拋
                 print(
-                    f"[Qwen FA2 Warning] Flash Attention 2 啟用失敗，"
+                    f"[Qwen FA2 Warning] Flash Attention 2 不可用，"
                     f"fallback 至 {_ATTN_FALLBACK}：{exc}"
                 )
 
@@ -90,19 +92,21 @@ class QwenModelManager(BaseModelManager):
             **load_kwargs,
         )
 
-    @staticmethod
-    def _build_base_load_kwargs() -> dict:
+    def _build_base_load_kwargs(self) -> dict:
         """
         建構 ``from_pretrained`` 的共用參數。
 
+        - **device_map 鎖定 self.device**：每個 Manager 實例對應一張指定 GPU
+          （由 ``device_id`` 決定），避免 ``device_map="auto"`` 在共用 GPU 環境
+          抓到別人佔用的卡，也讓 Week 3b 多 GPU Pool 的「一卡一實例」成立。
         - AWQ 模型自帶 4-bit 量化權重，**不可** 再傳 ``BitsAndBytesConfig``；
           AWQ 內部不同層使用不同精度（I32 / BF16），用 ``dtype="auto"`` 讓 loader
           依模型自帶的 quantization_config 自動決定。
         - Legacy 路徑沿用 8-bit BitsAndBytes 量化以維持品質回歸路徑與原行為一致。
         """
-        # device_map="auto" 讓 transformers 自動跨 GPU 分配權重，
-        # 在多 GPU 環境下不浪費單卡 VRAM
-        load_kwargs: dict = {"device_map": "auto"}
+        # device_map={"": self.device} 將整個模型固定在指定 GPU，
+        # 不做跨卡切分，符合 BaseModelManager 以 device_id 區分實例的設計
+        load_kwargs: dict = {"device_map": {"": self.device}}
         if QWEN_USE_AWQ:
             # AWQ 路徑：dtype="auto" 對應 cyankiwi 模型卡建議寫法
             load_kwargs["dtype"] = "auto"
