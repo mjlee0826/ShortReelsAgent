@@ -32,11 +32,11 @@ dependencies = [
     "ytmusicapi (>=1.12.0,<2.0.0)",
     "python-multipart (>=0.0.28,<0.0.29)",
     "python-jose[cryptography] (>=3.5.0,<4.0.0)",
-    "mediapipe (>=0.10.35,<0.11.0)",
     "panns-inference (>=0.1.1,<0.2.0)",
     "autoawq (>=0.2.9,<0.3.0)",
     "flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.1/flash_attn-2.8.1+cu12torch2.10cxx11abiTRUE-cp312-cp312-linux_x86_64.whl",
     "compressed-tensors (>=0.16.0,<0.17.0)",
+    "mediapipe (>=0.10.35,<0.11.0)",
 ]
 
 [tool.poetry]
