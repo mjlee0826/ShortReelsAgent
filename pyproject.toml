@@ -7,8 +7,8 @@ authors = [
 ]
 requires-python = ">=3.12, <3.14"
 dependencies = [
-    "torch (==2.11.0+cu126)",
-    "torchvision (==0.26.0+cu126)",
+    "torch (>=2.9.0,<2.10.0)",
+    "torchvision (>=0.24.0,<0.25.0)",
     "torchaudio (==2.11.0+cu126)",
     "fastapi (==0.136.0)",
     "uvicorn (==0.45.0)",
@@ -34,7 +34,8 @@ dependencies = [
     "python-jose[cryptography] (>=3.5.0,<4.0.0)",
     "mediapipe (>=0.10.35,<0.11.0)",
     "panns-inference (>=0.1.1,<0.2.0)",
-    "autoawq (>=0.2.9,<0.3.0)"
+    "autoawq (>=0.2.9,<0.3.0)",
+    "flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.9cxx11abiTRUE-cp312-cp312-linux_x86_64.whl"
 ]
 
 [tool.poetry]
