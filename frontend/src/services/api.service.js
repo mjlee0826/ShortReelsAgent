@@ -37,6 +37,33 @@ export function setAuthBridge({ getAccessToken, signOut }) {
   _authBridge.signOut = signOut;
 }
 
+/**
+ * 強制重新登入：refresh token 失效時清除登入狀態並導回 /login。
+ *
+ * 以 module-level flag 防止多個並發請求重複觸發 signOut。
+ * **刻意放在模組層而非 React component / useEffect** —— 先前在 AuthGuard 內以
+ * useEffect 依賴 Logto 方法（每次 render 都是新 reference）導致無限 render +
+ * 狂送請求；模組層 interceptor 沒有 render cycle，從根本上杜絕該迴圈。
+ */
+let _reLoginInFlight = false;
+
+async function forceReLogin() {
+  if (_reLoginInFlight) return;
+  _reLoginInFlight = true;
+  console.warn('[Auth] 登入已失效，清除狀態並導回登入頁');
+  try {
+    if (_authBridge.signOut) {
+      // signOut 會清掉 localStorage 內殘留的 token 並導向 /login
+      await _authBridge.signOut(`${window.location.origin}/login`);
+    } else {
+      window.location.assign('/login');
+    }
+  } catch {
+    // signOut 端點失敗（離線 / refresh token 已撤銷）也要保證離開受保護頁面
+    window.location.assign('/login');
+  }
+}
+
 // ── Request interceptor：有 token 就附上 ──────────────────────────────────────
 apiClient.interceptors.request.use(async (config) => {
   // Bridge 尚未注入（極早期請求 / 未登入）：照常送出，交由後端決定
@@ -52,27 +79,28 @@ apiClient.interceptors.request.use(async (config) => {
   return config;
 });
 
-// ── Response interceptor：401 換新 token 重打，refresh 也失效則登出 ───────────
+// ── Response interceptor：換新 token 重打一次，refresh 失效則強制重登 ─────────
 apiClient.interceptors.response.use(
   (res) => res,
   async (error) => {
-    const canRetry =
-      error.response?.status === 401 &&
-      !error.config?._retry &&
-      _authBridge.getAccessToken;
+    const status = error.response?.status;
+    // 401：送出的 token 無效/過期（被 verify_token 拒）
+    // 403：完全沒帶 token，被 FastAPI HTTPBearer 擋下（getAccessToken 先前已拋錯）
+    // 本後端僅在「未認證」時回這兩碼，故都視為認證失敗、嘗試補救
+    const isAuthError = status === 401 || status === 403;
 
-    if (canRetry) {
+    if (isAuthError && !error.config?._retry && _authBridge.getAccessToken) {
       error.config._retry = true;
       try {
+        // 再換一次 token 重打：可化解「access token 剛好過期」「早期競態」等暫時性失敗
         const token = await _authBridge.getAccessToken(API_RESOURCE);
+        if (!token) throw new Error('getAccessToken 回傳空值');
         error.config.headers.Authorization = `Bearer ${token}`;
         return apiClient(error.config);
       } catch (err) {
-        // refresh token 過期：強制登出並導向登入頁，避免使用者卡在持續 401
-        console.warn('[Auth] refresh token 失效，將登出並導向登入頁：', err?.message || err);
-        if (_authBridge.signOut) {
-          await _authBridge.signOut(`${window.location.origin}/login`);
-        }
+        // 重換仍失敗 → refresh token 確實失效 → 強制重新登入（清狀態 + 導向 /login）
+        console.warn('[Auth] refresh token 失效：', err?.message || err);
+        await forceReLogin();
       }
     }
     return Promise.reject(error);
