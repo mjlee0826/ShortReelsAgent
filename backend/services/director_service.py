@@ -10,6 +10,9 @@ from director_agent.director_facade import DirectorFacade
 # 計算素材數量時認定的媒體副檔名
 _MEDIA_EXTENSIONS = {'.mp4', '.mov', '.jpg', '.jpeg', '.png', '.heic', '.heif', '.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg'}
 
+# 前端影片品質選項：'1' 代表高品質（Gemini 深度索引），其餘為快速本地 Qwen 分析
+_COMPLEX_VIDEO_OPTION = "1"
+
 class DirectorService:
     """
     Service Pattern: 負責協調整個 AI 剪輯流水線 (Pipeline)
@@ -89,6 +92,14 @@ class DirectorService:
             all_files = [f for f in os.listdir(target_dir) if os.path.isfile(os.path.join(target_dir, f))]
             
             print(f"[Service] 正在處理 {len(all_files)} 個素材...")
+
+            # 前端傳入的影片品質選項轉為策略列舉；工廠會依副檔名路由，
+            # 故圖片一律走預設 SIMPLE，僅影片會套用此處的 video_strategy
+            video_strategy_enum = (
+                VideoStrategy.COMPLEX if video_strategy == _COMPLEX_VIDEO_OPTION
+                else VideoStrategy.SIMPLE
+            )
+
             for filename in all_files:
                 if "_std." not in filename:
                     std_version = os.path.splitext(filename)[0] + "_std"
@@ -101,11 +112,11 @@ class DirectorService:
                 if ext not in ['.mp4', '.mov', '.jpg', '.jpeg', '.png', '.heic', '.heif']:
                     continue
 
-                strategy = VideoStrategy.COMPLEX if (ext in ['.mp4', '.mov'] and video_strategy == '1') else VideoStrategy.SIMPLE
-
                 try:
-                    print(f"   ⏳ 正在分析: {filename} (Strategy: {strategy.value})")
-                    processor = MediaProcessorFactory.create_processor(file_path, strategy=strategy)
+                    print(f"   ⏳ 正在分析: {filename}")
+                    processor = MediaProcessorFactory.create_processor(
+                        file_path, video_strategy=video_strategy_enum
+                    )
                     metadata = processor.process(file_path)
                     if metadata.get("status") != "success":
                         print(f"   ⚠️ 素材被過濾: {filename} ({metadata.get('reason') or metadata.get('message', '未知原因')})")
