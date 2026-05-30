@@ -1,3 +1,17 @@
+"""
+QwenModelManager：本地視覺大腦 (Qwen3-VL)，提供圖片與影片的 caption / mood / scene_tags 等推論。
+
+Week 1 變動
+-----------
+- 新增 4-bit **AWQ** 載入路徑（主路徑，預設啟用）：模型 id ``Qwen3-VL-8B-Instruct-AWQ``。
+- 新增 **Flash Attention 2** 啟用 + sdpa fallback（Strategy + try/except 隔離）。
+- 舊版 8-bit 量化路徑透過 env var ``QWEN_USE_AWQ=false`` 保留，供品質回歸 A/B。
+
+設計模式
+--------
+- **Strategy**：``_LoadStrategy`` 內部介面，依 ``QWEN_USE_AWQ`` 切兩條載入路徑。
+- **Chain of Responsibility (簡化版)**：Attention 實作優先序 FA2 → sdpa，遇錯自動 fallback。
+"""
 import torch
 import gc
 from transformers import Qwen3VLForConditionalGeneration, AutoProcessor, BitsAndBytesConfig
@@ -9,6 +23,11 @@ from prompt_manager.prompt_factory import PromptFactory
 from model.base_model_manager import BaseModelManager, synchronized_inference
 from config.model_config import (
     QWEN_MODEL_ID,
+    QWEN_PROCESSOR_ID,
+    QWEN_AWQ_MODEL_ID,
+    QWEN_LEGACY_MODEL_ID,
+    QWEN_USE_AWQ,
+    QWEN_USE_FLASH_ATTN,
     QWEN_MAX_NEW_TOKENS,
     QWEN_MAX_PIXELS,
     QWEN_FPS_TIMECODED,
@@ -16,27 +35,82 @@ from config.model_config import (
 )
 
 
+# Attention 實作優先序：FA2 為主，環境不允許時 fallback 到 sdpa（PyTorch 內建）
+_ATTN_PRIMARY  = "flash_attention_2"
+_ATTN_FALLBACK = "sdpa"
+
+
 class QwenModelManager(BaseModelManager):
-    """統一的本地視覺大腦 (Qwen3-VL)。"""
+    """統一的本地視覺大腦 (Qwen3-VL)，AWQ 為主路徑、legacy 8-bit 為回歸路徑。"""
 
     def _initialize(self, device_id: int = 0):
         """
-        以 8-bit 量化載入 Qwen3-VL。
-        device_map="auto" 讓 transformers 自動跨 GPU 分配權重；
-        若需強制鎖定特定 GPU，可改為 device_map={"": f"cuda:{device_id}"}。
+        依 ``QWEN_USE_AWQ`` 旗標選擇模型載入路徑，並嘗試啟用 Flash Attention 2。
+
+        Flash Attn 安裝失敗或硬體不支援時，自動 fallback 到 sdpa 而不中斷流程。
         """
         self.device = self.get_device_str(device_id)
         self.prompt_manager = DefaultPromptManager()
 
-        quantization_config = BitsAndBytesConfig(load_in_8bit=True)
+        # 依旗標決定走哪條載入策略（Strategy Pattern）
+        self.model = self._load_model_with_attention_fallback()
+        # Processor 永遠從官方 base model 載入，避免社群 AWQ repo 缺 processor 設定
+        self.processor = AutoProcessor.from_pretrained(QWEN_PROCESSOR_ID)
 
-        self.model = Qwen3VLForConditionalGeneration.from_pretrained(
+    def _load_model_with_attention_fallback(self) -> Qwen3VLForConditionalGeneration:
+        """
+        嘗試以 Flash Attention 2 載入，失敗時 fallback 到 sdpa（Chain of Responsibility）。
+
+        Flash Attn 通常因「未安裝 flash-attn 套件」或「硬體不支援」失敗，
+        此時印 warning 並改用 PyTorch 內建 sdpa；不會打斷後端啟動。
+        """
+        load_kwargs = self._build_base_load_kwargs()
+
+        # 第一順位：使用者明示啟用 FA2 才嘗試，省去無謂 import 開銷
+        if QWEN_USE_FLASH_ATTN:
+            try:
+                return Qwen3VLForConditionalGeneration.from_pretrained(
+                    QWEN_MODEL_ID,
+                    attn_implementation=_ATTN_PRIMARY,
+                    **load_kwargs,
+                )
+            except (ImportError, ValueError, RuntimeError) as exc:
+                # ImportError：flash-attn 未安裝
+                # ValueError：模型不支援該 attn_implementation
+                # RuntimeError：硬體不支援（例如 Compute Capability 不足）
+                print(
+                    f"[Qwen FA2 Warning] Flash Attention 2 啟用失敗，"
+                    f"fallback 至 {_ATTN_FALLBACK}：{exc}"
+                )
+
+        # 後備順位：sdpa 為 PyTorch 內建，幾乎所有環境皆可用
+        return Qwen3VLForConditionalGeneration.from_pretrained(
             QWEN_MODEL_ID,
-            quantization_config=quantization_config,
-            device_map="auto",
-            torch_dtype=torch.float16
+            attn_implementation=_ATTN_FALLBACK,
+            **load_kwargs,
         )
-        self.processor = AutoProcessor.from_pretrained(QWEN_MODEL_ID)
+
+    @staticmethod
+    def _build_base_load_kwargs() -> dict:
+        """
+        建構 ``from_pretrained`` 的共用參數。
+
+        - AWQ 模型自帶 4-bit 量化權重，**不可** 再傳 ``BitsAndBytesConfig``；
+          AWQ 內部不同層使用不同精度（I32 / BF16），用 ``dtype="auto"`` 讓 loader
+          依模型自帶的 quantization_config 自動決定。
+        - Legacy 路徑沿用 8-bit BitsAndBytes 量化以維持品質回歸路徑與原行為一致。
+        """
+        # device_map="auto" 讓 transformers 自動跨 GPU 分配權重，
+        # 在多 GPU 環境下不浪費單卡 VRAM
+        load_kwargs: dict = {"device_map": "auto"}
+        if QWEN_USE_AWQ:
+            # AWQ 路徑：dtype="auto" 對應 cyankiwi 模型卡建議寫法
+            load_kwargs["dtype"] = "auto"
+        else:
+            # Legacy 路徑：補上 8-bit 量化設定，行為與 Week 1 之前一致
+            load_kwargs["torch_dtype"] = torch.float16
+            load_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
+        return load_kwargs
 
     def set_prompt_manager(self, prompt_manager: BasePromptManager):
         """替換 Prompt Manager（Strategy Pattern）。"""

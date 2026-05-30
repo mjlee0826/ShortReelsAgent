@@ -2,7 +2,11 @@
 模型層設定集中管理 (Configuration Object Pattern)。
 model/ 底下所有 manager 的常數統一在此定義，對外是唯一的 import 來源。
 """
-from config.media_processor_config import MUSIQ_MAX_INPUT_SIZE as MUSIQ_MAX_SHORT_SIDE
+import os
+from config.media_processor_config import (
+    MUSIQ_MAX_INPUT_SIZE as MUSIQ_MAX_SHORT_SIDE,
+    QWEN_USE_AWQ_DEFAULT,
+)
 
 # ── Gemini 影片上傳輪詢 ───────────────────────────────────────────────────────
 # 影片上傳後台處理的最大輪詢次數（150 * 2s = 5 分鐘）
@@ -25,6 +29,11 @@ __all__ = [
     "GEMINI_STRONG_MODEL",
     # Qwen
     "QWEN_MODEL_ID",
+    "QWEN_PROCESSOR_ID",
+    "QWEN_AWQ_MODEL_ID",
+    "QWEN_LEGACY_MODEL_ID",
+    "QWEN_USE_AWQ",
+    "QWEN_USE_FLASH_ATTN",
     "QWEN_MAX_NEW_TOKENS",
     "QWEN_MAX_PIXELS",
     "QWEN_FPS_TIMECODED",
@@ -64,7 +73,30 @@ GEMINI_DEFAULT_MODEL = 'gemini-2.5-flash'
 GEMINI_STRONG_MODEL  = 'gemini-3.1-pro-preview'
 
 # ── Qwen3-VL ─────────────────────────────────────────────────────────────────
-QWEN_MODEL_ID       = "Qwen/Qwen3-VL-8B-Instruct"
+# 兩條模型路徑：AWQ 為主路徑，legacy 8-bit 作為品質回歸 A/B 後備
+# Qwen 官方未釋出 AWQ 變體，採社群重量化版本（cyankiwi，月下載 124k，Apache-2.0）
+QWEN_AWQ_MODEL_ID    = "cyankiwi/Qwen3-VL-8B-Instruct-AWQ-4bit"
+QWEN_LEGACY_MODEL_ID = "Qwen/Qwen3-VL-8B-Instruct"
+# Processor (tokenizer + image preprocessor) 永遠從官方 base model 載入
+# AWQ 重量化的 repo 不一定附 processor 設定，且 processor 不需量化
+QWEN_PROCESSOR_ID    = QWEN_LEGACY_MODEL_ID
+
+
+def _read_bool_env(env_name: str, default: bool) -> bool:
+    """讀取 env var 並轉為 bool，接受 true/1/yes/on 等常見字串。"""
+    raw = os.environ.get(env_name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"true", "1", "yes", "on"}
+
+
+# 啟動時決定走哪條 Qwen 路徑（Feature Toggle）；rollback 時設 false
+QWEN_USE_AWQ        = _read_bool_env("QWEN_USE_AWQ", QWEN_USE_AWQ_DEFAULT)
+# Flash Attention 2 開關，安裝失敗時 QwenModelManager 內部會 fallback 到 sdpa
+QWEN_USE_FLASH_ATTN = _read_bool_env("QWEN_USE_FLASH_ATTN", True)
+# 對外 import 名稱：依旗標動態指向實際模型 id，呼叫端不需改
+QWEN_MODEL_ID       = QWEN_AWQ_MODEL_ID if QWEN_USE_AWQ else QWEN_LEGACY_MODEL_ID
+
 QWEN_MAX_NEW_TOKENS = 512
 # 限制影像解析度以節省 VRAM（pixel 數上限）
 QWEN_MAX_PIXELS     = 100352
