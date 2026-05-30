@@ -36,7 +36,7 @@ dependencies = [
     "autoawq (>=0.2.9,<0.3.0)",
     "flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.1/flash_attn-2.8.1+cu12torch2.10cxx11abiTRUE-cp312-cp312-linux_x86_64.whl",
     "compressed-tensors (>=0.16.0,<0.17.0)",
-    "mediapipe (>=0.10.35,<0.11.0)",
+    "mediapipe (==0.10.30)",
 ]
 
 [tool.poetry]
