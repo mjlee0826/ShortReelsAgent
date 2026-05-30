@@ -117,5 +117,13 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(_bearer_sch
     """
     FastAPI Dependency：從 Authorization Bearer header 提取並驗證 JWT，
     回傳 user_id 供端點直接使用。
+
+    （診斷用）驗證失敗時把確切原因印到後端 console，方便定位 401 成因；
+    問題釐清後可移除此 try/except，直接 return _verifier.verify(...)。
     """
-    return _verifier.verify(credentials.credentials)
+    try:
+        return _verifier.verify(credentials.credentials)
+    except HTTPException as exc:
+        # 印出後端認定的拒絕原因（aud/iss/exp 不符、kid 找不到、格式錯誤等）
+        print(f"[LogtoJWT] ❌ 401 拒絕原因：{exc.detail}")
+        raise
