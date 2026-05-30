@@ -132,34 +132,46 @@ Week 4b  ─ Layer 5(前端 Asset Management UI)            ~600 行 ─┘
 
 ---
 
-## 3. Week 1:Layer 1 模型層獨立優化
+## 3. Week 1:Layer 1 模型層獨立優化 ✅ 已完成(2026-05-30)
+
+> **狀態:已完成並實機驗證**。程式碼在 commit `51ef717`(主體)+ `43a8d10`(device 鎖定修正)。
+> Lock 機制完整設計另見 `docs/lock_design.md`。
 
 ### 範圍
-純模型層改動,**完全不動現有 pipeline 架構**,只把模型本身換掉與加 GPU Semaphore。
+純模型層改動,**完全不動現有 pipeline 架構**,只把模型本身換掉與加 GPU Gate。
 
-### 主要產出
-- Qwen 換成 `Qwen3-VL-8B-Instruct-AWQ`,Flash Attention 2 啟用
-- `BaseModelManager` 加 `GPU_SEMAPHORES` 層,鎖順序改為「GPU Semaphore → model lock」
-- 新增 `MUSIQ.score_batch()` / `LAION.score_batch()` / `Whisper.transcribe_batch()` 方法(保留舊單張介面)
-- 新增 `media_processor/pipeline/progress.py` 只定義 `ProgressObserver` / `ProgressTracker` / `ProgressEvent` 三個介面(無 WebSocket,只有 print observer)
-- 修改 `media_processor_config.py` 加入 batch size 與 GPU safety buffer 常數
+### 主要產出(實際完成)
+- ✅ Qwen 換成 **`cyankiwi/Qwen3-VL-8B-Instruct-AWQ-4bit`**(官方未釋出 AWQ,改用社群 4-bit 版),Flash Attention 2 啟用、失敗 fallback 到 sdpa
+  - env var `QWEN_USE_AWQ`(預設 true)可一行切回 8-bit legacy 供品質回歸
+  - **Processor 仍從官方 base `Qwen/Qwen3-VL-8B-Instruct` 載**(AWQ repo 不附 processor)
+  - device_map 改 `{"": self.device}` **鎖定指定 GPU**(原 `"auto"` 在共用 GPU 會亂抓滿的卡,也破壞 Week 3b 多卡 Pool)
+- ✅ `BaseModelManager` 加 **`GpuGate`(Strategy Pattern)層**,取代原規劃的裸 `GPU_SEMAPHORES`:
+  - Week 1 預設 `BinaryGate`(= Semaphore(1));Week 3b 由 Capacity Manager 用 `register_gate_factory()` 一行換成 `BudgetGate`
+  - 鎖序「L2 GpuGate → L3 model lock」,CPU/API 模型依 `self.device` 自動跳過 L2
+  - Singleton key 從 `device_id` 改 **`(device_id, slot_id)` tuple**(為 Week 3b 同卡多 instance 鋪路,既有 caller 100% 相容)
+- ✅ `ModelPool` 新增 **`slots`(`GpuSlot`)介面**,保留 `gpu_ids` 為 backward-compat alias
+- ✅ 新增 `MUSIQ.score_batch()` / `LAION.score_batch()` / `Whisper.transcribe_batch()`(保留舊單張介面,尚未接入)
+- ✅ 新增 `media_processor/pipeline/progress.py`:`ProgressObserver` / `ProgressTracker` / `ProgressEvent`(pydantic)+ `PrintProgressObserver`(無 WebSocket)
+- ✅ `media_processor_config.py` 加入 batch size、`BATCH_COLLECT_TIMEOUT_MS`、`GPU_SAFETY_BUFFER_GB`、`QWEN_USE_AWQ_DEFAULT` 常數
+- ✅ 新增 `model/gpu_gate.py`(`GpuGate` ABC + `BinaryGate`)
 
-### 驗收條件
-- 同一張測試圖跑舊版 8-bit 與新版 AWQ,caption / mood / scene_tags 文字微差可接受,但結構欄位(`technical_score` 等)一致
-- 跑 50 個 asset,Qwen + Whisper 設同卡測試不再 OOM
-- 單張 Qwen 推論時間從 ~5s 降到 ~1.5s
+### 驗收條件達成狀態
+- ✅ **FA2 實機生效**:`model.config._attn_implementation == "flash_attention_2"`,dtype `bfloat16`,單卡載入成功
+- ⬜ 品質回歸 A/B(AWQ vs 8-bit 結構欄位一致)— 待跑真實 phase 1
+- ⬜ 50 asset 同卡 Qwen+Whisper 不 OOM — 待跑
+- ⬜ 單張 Qwen ~5s → ~1.5s 計時 — 待跑
 
-### 風險與緩解
-| 風險 | 緩解 |
-|---|---|
-| AWQ 模型品質下降 | 先單獨驗證再進入下週;若不通過則 rollback 環境變數切回 8-bit |
-| Flash Attention 安裝失敗 | 加 `try/except` fallback 到預設 attention,程式不掛 |
-| GPU Semaphore 引入死鎖 | 鎖順序固定「外到內」,單元手動測試覆蓋四種同卡組合 |
+### 外部依賴實況(在另一台機器要重現需注意)
+- AWQ 模型需 **`compressed-tensors`**(cyankiwi 用 llm-compressor 量化,格式是 compressed-tensors 不是 autoawq)
+- **torch 降到 2.10 / torchvision 0.25**:因 `compressed-tensors>=0.16` 要 `torch>=2.10`,且 flash-attn 預編譯 wheel 天花板就是 torch2.10
+- flash-attn 用預編譯 wheel `v2.8.1+cu12torch2.10cxx11abiTRUE-cp312`(torch2.11 無 wheel,只能源碼編譯)
+- `autoawq` 雖裝了但實際沒用到(此模型走 compressed-tensors 路徑),且官方已 deprecated
 
-### 不做
+### 不做(維持原規劃)
 - 不動 `director_service.py` 序列迴圈,既有流程照跑
-- 不啟用 batch scoring 的呼叫(只新增方法,Stage 化後 Week 3a 才實際接入)
-- 不接 WebSocket(Week 3c 才做)
+- 不啟用 batch scoring 的呼叫(只新增方法,Week 3a 才接 BatchCollector)
+- 不接 WebSocket(Week 3c)
+- 同卡多 instance 紅利 Week 1 看不到(BinaryGate 仍序列化,需 Week 3b BudgetGate)
 
 ---
 
