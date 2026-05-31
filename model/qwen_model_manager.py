@@ -141,11 +141,18 @@ class QwenModelManager(BaseModelManager):
 
         try:
             text_prompt = self.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-            image_inputs, video_inputs = process_vision_info(messages)
+            # 必須用 return_video_kwargs 取回影片 metadata（fps / 總幀數）並轉交 processor，
+            # 否則新版 transformers 因缺 metadata 會把影片採樣 fallback 成 fps=24，
+            # 抽幀數暴增 → video tokens 暴增 → Qwen VRAM 爆掉（單支影片可膨脹逾 20GB）。
+            # 圖片情境下 video_kwargs 為空 dict，展開後不影響 processor。
+            image_inputs, video_inputs, video_kwargs = process_vision_info(
+                messages, return_video_kwargs=True
+            )
 
             inputs = self.processor(
                 text=[text_prompt], images=image_inputs, videos=video_inputs,
-                padding=True, return_tensors="pt"
+                padding=True, return_tensors="pt",
+                **video_kwargs,
             ).to(self.device)
 
             generated_ids = self.model.generate(**inputs, max_new_tokens=QWEN_MAX_NEW_TOKENS)
