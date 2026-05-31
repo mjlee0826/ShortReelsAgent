@@ -1,11 +1,13 @@
 """
 QwenModelManager：本地視覺大腦 (Qwen3-VL)，提供圖片與影片的 caption / mood / scene_tags 等推論。
 
-Week 1 變動
------------
-- 新增 4-bit **AWQ** 載入路徑（主路徑，預設啟用）：模型 id ``Qwen3-VL-8B-Instruct-AWQ``。
-- 新增 **Flash Attention 2** 啟用 + sdpa fallback（Strategy + try/except 隔離）。
-- 舊版 8-bit 量化路徑透過 env var ``QWEN_USE_AWQ=false`` 保留，供品質回歸 A/B。
+量化策略
+--------
+- 4-bit 主路徑：**bitsandbytes NF4**（``QWEN_USE_AWQ=true``，預設）。原規劃的
+  compressed-tensors AWQ（cyankiwi）在 transformers 推理時會整包解壓成 bf16、
+  runtime 不省 VRAM（真正的 4-bit kernel 僅 vLLM 有），故改用 bnb 才能真正砍半。
+- 8-bit 後備路徑：``QWEN_USE_AWQ=false``，供品質回歸 A/B。
+- **Flash Attention 2** 啟用 + sdpa fallback（Strategy + try/except 隔離）。
 
 設計模式
 --------
@@ -98,19 +100,25 @@ class QwenModelManager(BaseModelManager):
         - **device_map 鎖定 self.device**：每個 Manager 實例對應一張指定 GPU
           （由 ``device_id`` 決定），避免 ``device_map="auto"`` 在共用 GPU 環境
           抓到別人佔用的卡，也讓 Week 3b 多 GPU Pool 的「一卡一實例」成立。
-        - AWQ 模型自帶 4-bit 量化權重，**不可** 再傳 ``BitsAndBytesConfig``；
-          AWQ 內部不同層使用不同精度（I32 / BF16），用 ``dtype="auto"`` 讓 loader
-          依模型自帶的 quantization_config 自動決定。
-        - Legacy 路徑沿用 8-bit BitsAndBytes 量化以維持品質回歸路徑與原行為一致。
+        - 量化一律由 **bitsandbytes** 即時量化官方 base model：4-bit(NF4) 為主路徑、
+          8-bit 為品質回歸後備。改採 bnb 是因 compressed-tensors AWQ 在 transformers
+          推理時會整包解壓成 bf16、runtime 不省 VRAM（真正的 4-bit kernel 僅 vLLM 有）。
         """
         # device_map={"": self.device} 將整個模型固定在指定 GPU，
         # 不做跨卡切分，符合 BaseModelManager 以 device_id 區分實例的設計
         load_kwargs: dict = {"device_map": {"": self.device}}
         if QWEN_USE_AWQ:
-            # AWQ 路徑：dtype="auto" 對應 cyankiwi 模型卡建議寫法
-            load_kwargs["dtype"] = "auto"
+            # 4-bit 主路徑：bitsandbytes NF4。權重在 runtime 保持 4-bit（不解壓），
+            # 8B 模型約 5-6GB；compute dtype 用 bf16、double quant 再壓 scale 記憶體
+            load_kwargs["torch_dtype"] = torch.bfloat16
+            load_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.bfloat16,
+                bnb_4bit_use_double_quant=True,
+            )
         else:
-            # Legacy 路徑：補上 8-bit 量化設定，行為與 Week 1 之前一致
+            # 8-bit 後備路徑：bitsandbytes 8-bit，供品質回歸 A/B
             load_kwargs["torch_dtype"] = torch.float16
             load_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
         return load_kwargs

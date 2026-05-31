@@ -96,8 +96,11 @@ def _read_bool_env(env_name: str, default: bool) -> bool:
 QWEN_USE_AWQ        = _read_bool_env("QWEN_USE_AWQ", QWEN_USE_AWQ_DEFAULT)
 # Flash Attention 2 開關，安裝失敗時 QwenModelManager 內部會 fallback 到 sdpa
 QWEN_USE_FLASH_ATTN = _read_bool_env("QWEN_USE_FLASH_ATTN", True)
-# 對外 import 名稱：依旗標動態指向實際模型 id，呼叫端不需改
-QWEN_MODEL_ID       = QWEN_AWQ_MODEL_ID if QWEN_USE_AWQ else QWEN_LEGACY_MODEL_ID
+# 量化改用 bitsandbytes（4-bit/8-bit 皆即時量化官方 base model），不再用 cyankiwi
+# compressed-tensors AWQ —— 後者在 transformers 推理時會整包解壓成 bf16、runtime 不省
+# VRAM（實測載入 7.5GB → 推理 18GB；真正的 4-bit kernel 僅 vLLM 有）。
+# 故 model id 一律指向官方 base，由 BitsAndBytesConfig 即時量化。
+QWEN_MODEL_ID       = QWEN_LEGACY_MODEL_ID
 
 QWEN_MAX_NEW_TOKENS = 512
 # 限制影像解析度以節省 VRAM（pixel 數上限）
