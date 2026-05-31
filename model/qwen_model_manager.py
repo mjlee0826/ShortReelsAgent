@@ -15,7 +15,6 @@ Week 1 變動
 import torch
 import gc
 from transformers import Qwen3VLForConditionalGeneration, AutoProcessor, BitsAndBytesConfig
-from qwen_vl_utils import process_vision_info
 from prompt_manager.base_prompt_manager import BasePromptManager
 from prompt_manager.default_prompt_manager import DefaultPromptManager
 from prompt_manager.task_mode import TaskMode
@@ -140,25 +139,21 @@ class QwenModelManager(BaseModelManager):
         messages = [{"role": "user", "content": content}]
 
         try:
-            text_prompt = self.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-            # 必須用 return_video_kwargs 取回影片 metadata（fps / 總幀數）並轉交 processor，
-            # 否則新版 transformers 因缺 metadata 會把影片採樣 fallback 成 fps=24，
-            # 抽幀數暴增 → video tokens 暴增 → Qwen VRAM 爆掉（單支影片可膨脹逾 20GB）。
-            # 圖片情境下 video_kwargs 為空 dict，展開後不影響 processor。
-            image_inputs, video_inputs, video_kwargs = process_vision_info(
-                messages, return_video_kwargs=True
-            )
-            # qwen-vl-utils 將 fps 包成 list（為支援多影片批次），但此版 transformers 的
-            # processor 對 fps 欄位只收單一數值；本流程一次僅處理一支影片，取出單值即可
-            fps_value = video_kwargs.get("fps")
-            if isinstance(fps_value, (list, tuple)) and len(fps_value) == 1:
-                video_kwargs["fps"] = fps_value[0]
-
-            inputs = self.processor(
-                text=[text_prompt], images=image_inputs, videos=video_inputs,
-                padding=True, return_tensors="pt",
-                **video_kwargs,
+            # Qwen3-VL 以「文字時間戳」對齊影片，processor 必須自行讀檔取得 video_metadata
+            # （原始 fps / 總幀數）才能正確抽幀；此版 qwen-vl-utils 預抽幀後不附 metadata，
+            # 會害 processor fallback 成 fps=24、影片 token 暴增而 OOM。
+            # 改走官方推薦的 apply_chat_template(tokenize=True)：由 processor 一手讀檔、
+            # 取 metadata、依 content 指定的 fps 抽幀；圖片與影片共用同一路徑，
+            # 亦免去舊路徑「圖片 fps=[] 型別錯誤」的問題。
+            inputs = self.processor.apply_chat_template(
+                messages,
+                tokenize=True,
+                add_generation_prompt=True,
+                return_dict=True,
+                return_tensors="pt",
             ).to(self.device)
+            # 部分 transformers 版本會多出 generate 不需要的 token_type_ids，移除以免報錯
+            inputs.pop("token_type_ids", None)
 
             generated_ids = self.model.generate(**inputs, max_new_tokens=QWEN_MAX_NEW_TOKENS)
             generated_ids_trimmed = [
