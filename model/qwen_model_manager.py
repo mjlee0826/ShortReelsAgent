@@ -148,6 +148,11 @@ class QwenModelManager(BaseModelManager):
             image_inputs, video_inputs, video_kwargs = process_vision_info(
                 messages, return_video_kwargs=True
             )
+            # qwen-vl-utils 將 fps 包成 list（為支援多影片批次），但此版 transformers 的
+            # processor 對 fps 欄位只收單一數值；本流程一次僅處理一支影片，取出單值即可
+            fps_value = video_kwargs.get("fps")
+            if isinstance(fps_value, (list, tuple)) and len(fps_value) == 1:
+                video_kwargs["fps"] = fps_value[0]
 
             inputs = self.processor(
                 text=[text_prompt], images=image_inputs, videos=video_inputs,
