@@ -48,6 +48,8 @@ __all__ = [
     # MediaPipe
     "MEDIAPIPE_MODEL_SELECTION",
     "MEDIAPIPE_MIN_DETECTION_CONFIDENCE",
+    "MEDIAPIPE_FACE_MODEL_FILENAME",
+    "MEDIAPIPE_FACE_MODEL_URL",
     # LAION
     "LAION_CLIP_MODEL_ID",
     "LAION_MLP_INPUT_SIZE",
@@ -116,9 +118,17 @@ AUDIO_SAMPLING_RATE = 16000
 # 低於此信心分數的分類視為無意義，過濾掉
 AUDIO_ENV_MIN_SCORE = 0.01
 
-# ── MediaPipe Face Detection ──────────────────────────────────────────────────
-MEDIAPIPE_MODEL_SELECTION          = 0    # 0=short-range（2m 內），1=full-range
+# ── MediaPipe Face Detection (Tasks API) ──────────────────────────────────────
+# 自 mediapipe 0.10.22 起官方 linux wheel 不再附 legacy mp.solutions（python/ 子套件遺失），
+# 改用官方主推、在該批 wheel 仍自包含可用的 Tasks API FaceDetector，需指定 .tflite 模型檔。
+MEDIAPIPE_MODEL_SELECTION          = 0    # 保留向後相容；Tasks 改由模型檔決定偵測範圍
 MEDIAPIPE_MIN_DETECTION_CONFIDENCE = 0.5
+# BlazeFace short-range（2m 內）官方預訓練權重，首次使用時自動下載至 model/ 旁
+MEDIAPIPE_FACE_MODEL_FILENAME = "blaze_face_short_range.tflite"
+MEDIAPIPE_FACE_MODEL_URL = (
+    "https://storage.googleapis.com/mediapipe-models/face_detector"
+    "/blaze_face_short_range/float16/1/blaze_face_short_range.tflite"
+)
 
 # ── LAION Aesthetic Predictor ─────────────────────────────────────────────────
 LAION_CLIP_MODEL_ID  = "openai/clip-vit-large-patch14"
