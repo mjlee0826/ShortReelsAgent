@@ -58,8 +58,8 @@ BATCH_COLLECT_TIMEOUT_MS = 50
 # 預留給系統 / 共用 GPU 的其他使用者的 VRAM，不納入 BudgetGate 預算
 GPU_SAFETY_BUFFER_GB = 1.5
 
-# ── Qwen VLM 模型切換 ─────────────────────────────────────────────────────────
-# 啟動時 env var QWEN_USE_AWQ 未設定時的預設值
-# True： 走 4-bit AWQ + Flash Attention 路徑（主路徑）
-# False：走舊版 8-bit 量化（品質回歸 A/B 用）
-QWEN_USE_AWQ_DEFAULT = True
+# ── Qwen VLM 量化切換 ─────────────────────────────────────────────────────────
+# 啟動時 env var QWEN_USE_4BIT 未設定時的預設值
+# True： bitsandbytes 4-bit(NF4) 量化（主路徑，runtime ~6.4GB）
+# False：bitsandbytes 8-bit 量化（品質回歸 A/B，runtime ~10GB）
+QWEN_USE_4BIT_DEFAULT = True

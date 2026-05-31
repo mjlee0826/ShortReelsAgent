@@ -83,7 +83,7 @@
 |---|---|
 | Context 失控 | 1500–2000 行新增 + 反覆 read 既有 8 個檔案,長對話後期會自動壓縮早期訊息,設計決策走偏 |
 | 中段無法驗證 | 分層設計 Layer 1 錯 → Layer 2 跟著錯,沒有人類在中段檢查,4 週累積的錯誤可能整體重來 |
-| 外部依賴擋路 | AWQ 下載模型、Google Drive OAuth、WebSocket 端對端、多 GPU 行為都不能在 sandbox 跑 |
+| 外部依賴擋路 | 模型下載(Qwen base 等)、Google Drive OAuth、WebSocket 端對端、多 GPU 行為都不能在 sandbox 跑 |
 | 業界共識漸進 | Anyscale / Cursor / Sourcegraph 的最佳實踐都是 vertical slice + small PR,review 100 行容易,review 2000 行不可能 |
 
 ### 1.2 分批的原則
@@ -132,18 +132,25 @@ Week 4b  ─ Layer 5(前端 Asset Management UI)            ~600 行 ─┘
 
 ---
 
-## 3. Week 1:Layer 1 模型層獨立優化 ✅ 已完成(2026-05-30)
+## 3. Week 1:Layer 1 模型層獨立優化 ✅ 已完成(2026-05-30;2026-06-01 實機落地修正)
 
 > **狀態:已完成並實機驗證**。程式碼在 commit `51ef717`(主體)+ `43a8d10`(device 鎖定修正)。
 > Lock 機制完整設計另見 `docs/lock_design.md`。
+>
+> **⚠️ 2026-06-01 實機落地修正(真正跑 Phase 1 後發現的偏差,以本區為準,覆寫下方舊敘述)**:
+> 1. **量化改 bitsandbytes 4-bit NF4**:原 cyankiwi compressed-tensors AWQ 在 **transformers 推理時會整包解壓成 bf16、runtime 不省 VRAM**(實測載入 7.5GB → 推理 **18GB**;真正的 4-bit kernel 只在 vLLM)。改用 bnb 4-bit 量化官方 base 後實測 **6.4GB**,VRAM 砍半才真正達成。旗標 `QWEN_USE_AWQ` → 改名 **`QWEN_USE_4BIT`**。
+> 2. **torchaudio 須 2.10.0、torchcodec 須 0.10.0**:當初 torch 降 2.10 時這兩個漏降(留 2.11/0.11),造成 `.so` ABI 不相容、影片音訊鏈全掛。
+> 3. **MediaPipe 改用 Tasks API `FaceDetector`**:mediapipe 0.10.22+ 官方 linux wheel 缺 `python/` 子套件、`mp.solutions` 不存在;pin **0.10.30**、走 Tasks(`.tflite` 首次自動下載)。
+> 4. **Qwen 影片改走 `apply_chat_template(tokenize=True)`**:Qwen3-VL 需 video_metadata 算時間戳,舊的 `process_vision_info` 會 fallback 成 fps=24、token 暴增 OOM。
+> 5. **AudioEnv 修 `inference()` 回傳順序**(embedding 被當分數而索引越界)、模型實為 PANNs **CNN14**(非 CNN6)。
 
 ### 範圍
 純模型層改動,**完全不動現有 pipeline 架構**,只把模型本身換掉與加 GPU Gate。
 
 ### 主要產出(實際完成)
-- ✅ Qwen 換成 **`cyankiwi/Qwen3-VL-8B-Instruct-AWQ-4bit`**(官方未釋出 AWQ,改用社群 4-bit 版),Flash Attention 2 啟用、失敗 fallback 到 sdpa
-  - env var `QWEN_USE_AWQ`(預設 true)可一行切回 8-bit legacy 供品質回歸
-  - **Processor 仍從官方 base `Qwen/Qwen3-VL-8B-Instruct` 載**(AWQ repo 不附 processor)
+- ✅ Qwen 量化 + Flash Attention 2(失敗 fallback sdpa)。**量化最終採 bitsandbytes 4-bit NF4**(量化官方 base `Qwen/Qwen3-VL-8B-Instruct`)— 見上方落地修正第 1 點;原 cyankiwi AWQ 因 transformers 解壓不省 VRAM 已棄用
+  - env var **`QWEN_USE_4BIT`**(預設 true)可一行切 bnb 8-bit 供品質回歸
+  - **Processor 從官方 base 載入**(tokenizer + 影像/影片前處理)
   - device_map 改 `{"": self.device}` **鎖定指定 GPU**(原 `"auto"` 在共用 GPU 會亂抓滿的卡,也破壞 Week 3b 多卡 Pool)
 - ✅ `BaseModelManager` 加 **`GpuGate`(Strategy Pattern)層**,取代原規劃的裸 `GPU_SEMAPHORES`:
   - Week 1 預設 `BinaryGate`(= Semaphore(1));Week 3b 由 Capacity Manager 用 `register_gate_factory()` 一行換成 `BudgetGate`
@@ -152,20 +159,23 @@ Week 4b  ─ Layer 5(前端 Asset Management UI)            ~600 行 ─┘
 - ✅ `ModelPool` 新增 **`slots`(`GpuSlot`)介面**,保留 `gpu_ids` 為 backward-compat alias
 - ✅ 新增 `MUSIQ.score_batch()` / `LAION.score_batch()` / `Whisper.transcribe_batch()`(保留舊單張介面,尚未接入)
 - ✅ 新增 `media_processor/pipeline/progress.py`:`ProgressObserver` / `ProgressTracker` / `ProgressEvent`(pydantic)+ `PrintProgressObserver`(無 WebSocket)
-- ✅ `media_processor_config.py` 加入 batch size、`BATCH_COLLECT_TIMEOUT_MS`、`GPU_SAFETY_BUFFER_GB`、`QWEN_USE_AWQ_DEFAULT` 常數
+- ✅ `media_processor_config.py` 加入 batch size、`BATCH_COLLECT_TIMEOUT_MS`、`GPU_SAFETY_BUFFER_GB`、`QWEN_USE_4BIT_DEFAULT` 常數
 - ✅ 新增 `model/gpu_gate.py`(`GpuGate` ABC + `BinaryGate`)
 
 ### 驗收條件達成狀態
 - ✅ **FA2 實機生效**:`model.config._attn_implementation == "flash_attention_2"`,dtype `bfloat16`,單卡載入成功
-- ⬜ 品質回歸 A/B(AWQ vs 8-bit 結構欄位一致)— 待跑真實 phase 1
-- ⬜ 50 asset 同卡 Qwen+Whisper 不 OOM — 待跑
-- ⬜ 單張 Qwen ~5s → ~1.5s 計時 — 待跑
+- ✅ **Qwen VRAM 砍半**:bnb 4-bit 實測載入/推理皆 **6.40GB**、峰值 6.64GB(對比 compressed-tensors AWQ 解壓後的 17.98GB)
+- ✅ **Phase 1 端到端可跑**:torchaudio/torchcodec/mediapipe/fps/AudioEnv 一連串實機問題修正後,圖片與影片都能正常產出分析(見落地修正)
+- ⬜ 品質回歸 A/B(bnb 4-bit vs 8-bit 結構欄位一致)— 待跑
+- ⬜ 50 asset 同卡 Qwen+Whisper 不 OOM — 待跑(共用 GPU 被別人佔滿時仍會 OOM,屬 Week 3b Capacity Manager 範圍)
+- ⬜ 單張 Qwen 計時 — 待跑
 
 ### 外部依賴實況(在另一台機器要重現需注意)
-- AWQ 模型需 **`compressed-tensors`**(cyankiwi 用 llm-compressor 量化,格式是 compressed-tensors 不是 autoawq)
-- **torch 降到 2.10 / torchvision 0.25**:因 `compressed-tensors>=0.16` 要 `torch>=2.10`,且 flash-attn 預編譯 wheel 天花板就是 torch2.10
+- **torch 2.10 全家鎖定**:torch 2.10 / torchvision 0.25 / **torchaudio 2.10 / torchcodec 0.10**(後兩者當初漏降成 2.11/0.11,造成 `.so` ABI 不相容,務必對齊);torch 定在 2.10 是因 flash-attn 預編譯 wheel 天花板就是 torch2.10
 - flash-attn 用預編譯 wheel `v2.8.1+cu12torch2.10cxx11abiTRUE-cp312`(torch2.11 無 wheel,只能源碼編譯)
-- `autoawq` 雖裝了但實際沒用到(此模型走 compressed-tensors 路徑),且官方已 deprecated
+- **量化改 bitsandbytes**(原 compressed-tensors AWQ 在 transformers 解壓不省 VRAM 已棄用);`compressed-tensors` / `autoawq` 已非必要
+- **mediapipe pin 0.10.30 + 走 Tasks API**(0.10.22+ wheel 缺 `python/`、`mp.solutions` 不存在)
+- **執行環境在遠端 Leibniz/Turing 的共用 GPU**,常被別人佔滿 VRAM 而 OOM,與程式無關
 
 ### 不做(維持原規劃)
 - 不動 `director_service.py` 序列迴圈,既有流程照跑
@@ -502,7 +512,7 @@ Google Drive workspace → project 自動偵測。**與 Week 4b 可平行**。
 
 | 依賴 | 用在 | 操作 |
 |---|---|---|
-| AWQ 模型下載 | Week 1 | `huggingface-cli download Qwen/Qwen3-VL-8B-Instruct-AWQ` |
+| Qwen base 模型下載 | Week 1 | `huggingface-cli download Qwen/Qwen3-VL-8B-Instruct`(~17GB,由 bnb 即時量化) |
 | Flash Attention 安裝 | Week 1 | `pip install flash-attn --no-build-isolation` |
 | 多 GPU 環境 | Week 3b | 實機驗證雙卡 Qwen 同時推論 |
 | 故意佔 VRAM 測試 | Week 3b | 用 `torch` 佔住 GPU 1 部分 VRAM 測 Capacity Manager |
@@ -521,7 +531,7 @@ Google Drive workspace → project 自動偵測。**與 Week 4b 可平行**。
 
 | 階段 | 工期 |
 |---|---|
-| Week 1 | 2 天(含實機驗證 AWQ 品質) |
+| Week 1 | 2 天(含實機驗證 4-bit 量化品質) |
 | Week 2a | 3 天 |
 | Week 2b | 2 天 |
 | Week 2c | 2 天 |

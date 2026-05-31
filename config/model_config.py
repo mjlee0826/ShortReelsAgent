@@ -5,7 +5,7 @@ model/ 底下所有 manager 的常數統一在此定義，對外是唯一的 imp
 import os
 from config.media_processor_config import (
     MUSIQ_MAX_INPUT_SIZE as MUSIQ_MAX_SHORT_SIDE,
-    QWEN_USE_AWQ_DEFAULT,
+    QWEN_USE_4BIT_DEFAULT,
 )
 
 # ── Gemini 影片上傳輪詢 ───────────────────────────────────────────────────────
@@ -30,9 +30,8 @@ __all__ = [
     # Qwen
     "QWEN_MODEL_ID",
     "QWEN_PROCESSOR_ID",
-    "QWEN_AWQ_MODEL_ID",
     "QWEN_LEGACY_MODEL_ID",
-    "QWEN_USE_AWQ",
+    "QWEN_USE_4BIT",
     "QWEN_USE_FLASH_ATTN",
     "QWEN_MAX_NEW_TOKENS",
     "QWEN_MAX_PIXELS",
@@ -46,7 +45,6 @@ __all__ = [
     "AUDIO_SAMPLING_RATE",
     "AUDIO_ENV_MIN_SCORE",
     # MediaPipe
-    "MEDIAPIPE_MODEL_SELECTION",
     "MEDIAPIPE_MIN_DETECTION_CONFIDENCE",
     "MEDIAPIPE_FACE_MODEL_FILENAME",
     "MEDIAPIPE_FACE_MODEL_URL",
@@ -75,12 +73,11 @@ GEMINI_DEFAULT_MODEL = 'gemini-2.5-flash'
 GEMINI_STRONG_MODEL  = 'gemini-3.1-pro-preview'
 
 # ── Qwen3-VL ─────────────────────────────────────────────────────────────────
-# 兩條模型路徑：AWQ 為主路徑，legacy 8-bit 作為品質回歸 A/B 後備
-# Qwen 官方未釋出 AWQ 變體，採社群重量化版本（cyankiwi，月下載 124k，Apache-2.0）
-QWEN_AWQ_MODEL_ID    = "cyankiwi/Qwen3-VL-8B-Instruct-AWQ-4bit"
+# 模型一律從官方 base 載入，再由 bitsandbytes 即時量化（4-bit 主、8-bit 後備）。
+# 原社群 compressed-tensors AWQ（cyankiwi）在 transformers 推理時會解壓成 bf16、
+# runtime 不省 VRAM，已棄用。
 QWEN_LEGACY_MODEL_ID = "Qwen/Qwen3-VL-8B-Instruct"
-# Processor (tokenizer + image preprocessor) 永遠從官方 base model 載入
-# AWQ 重量化的 repo 不一定附 processor 設定，且 processor 不需量化
+# Processor (tokenizer + image preprocessor) 從官方 base model 載入
 QWEN_PROCESSOR_ID    = QWEN_LEGACY_MODEL_ID
 
 
@@ -93,7 +90,7 @@ def _read_bool_env(env_name: str, default: bool) -> bool:
 
 
 # 啟動時決定走哪條 Qwen 路徑（Feature Toggle）；rollback 時設 false
-QWEN_USE_AWQ        = _read_bool_env("QWEN_USE_AWQ", QWEN_USE_AWQ_DEFAULT)
+QWEN_USE_4BIT        = _read_bool_env("QWEN_USE_4BIT", QWEN_USE_4BIT_DEFAULT)
 # Flash Attention 2 開關，安裝失敗時 QwenModelManager 內部會 fallback 到 sdpa
 QWEN_USE_FLASH_ATTN = _read_bool_env("QWEN_USE_FLASH_ATTN", True)
 # 量化改用 bitsandbytes（4-bit/8-bit 皆即時量化官方 base model），不再用 cyankiwi
@@ -113,7 +110,7 @@ QWEN_FPS_DEFAULT    = 1.0
 WHISPER_MODEL_ID        = "openai/whisper-large-v3"
 WHISPER_CHUNK_LENGTH_SEC = 30
 
-# ── Audio Env (PANNs CNN6) ────────────────────────────────────────────────────
+# ── Audio Env (PANNs CNN14) ───────────────────────────────────────────────────
 # 回傳信心分數前 K 高的分類標籤（AudioSet 527 類）
 AUDIO_ENV_TOP_K     = 5
 # Whisper / VAD / PANNs 共同要求 16000Hz 採樣率
@@ -124,7 +121,6 @@ AUDIO_ENV_MIN_SCORE = 0.01
 # ── MediaPipe Face Detection (Tasks API) ──────────────────────────────────────
 # 自 mediapipe 0.10.22 起官方 linux wheel 不再附 legacy mp.solutions（python/ 子套件遺失），
 # 改用官方主推、在該批 wheel 仍自包含可用的 Tasks API FaceDetector，需指定 .tflite 模型檔。
-MEDIAPIPE_MODEL_SELECTION          = 0    # 保留向後相容；Tasks 改由模型檔決定偵測範圍
 MEDIAPIPE_MIN_DETECTION_CONFIDENCE = 0.5
 # BlazeFace short-range（2m 內）官方預訓練權重，首次使用時自動下載至 model/ 旁
 MEDIAPIPE_FACE_MODEL_FILENAME = "blaze_face_short_range.tflite"

@@ -3,15 +3,15 @@ QwenModelManager：本地視覺大腦 (Qwen3-VL)，提供圖片與影片的 capt
 
 量化策略
 --------
-- 4-bit 主路徑：**bitsandbytes NF4**（``QWEN_USE_AWQ=true``，預設）。原規劃的
+- 4-bit 主路徑：**bitsandbytes NF4**（``QWEN_USE_4BIT=true``，預設）。原規劃的
   compressed-tensors AWQ（cyankiwi）在 transformers 推理時會整包解壓成 bf16、
   runtime 不省 VRAM（真正的 4-bit kernel 僅 vLLM 有），故改用 bnb 才能真正砍半。
-- 8-bit 後備路徑：``QWEN_USE_AWQ=false``，供品質回歸 A/B。
+- 8-bit 後備路徑：``QWEN_USE_4BIT=false``，供品質回歸 A/B。
 - **Flash Attention 2** 啟用 + sdpa fallback（Strategy + try/except 隔離）。
 
 設計模式
 --------
-- **Strategy**：``_LoadStrategy`` 內部介面，依 ``QWEN_USE_AWQ`` 切兩條載入路徑。
+- **Strategy**：依 ``QWEN_USE_4BIT`` 在 ``_build_base_load_kwargs`` 切 4-bit / 8-bit 兩條載入路徑。
 - **Chain of Responsibility (簡化版)**：Attention 實作優先序 FA2 → sdpa，遇錯自動 fallback。
 """
 import torch
@@ -25,9 +25,7 @@ from model.base_model_manager import BaseModelManager, synchronized_inference
 from config.model_config import (
     QWEN_MODEL_ID,
     QWEN_PROCESSOR_ID,
-    QWEN_AWQ_MODEL_ID,
-    QWEN_LEGACY_MODEL_ID,
-    QWEN_USE_AWQ,
+    QWEN_USE_4BIT,
     QWEN_USE_FLASH_ATTN,
     QWEN_MAX_NEW_TOKENS,
     QWEN_MAX_PIXELS,
@@ -42,11 +40,11 @@ _ATTN_FALLBACK = "sdpa"
 
 
 class QwenModelManager(BaseModelManager):
-    """統一的本地視覺大腦 (Qwen3-VL)，AWQ 為主路徑、legacy 8-bit 為回歸路徑。"""
+    """統一的本地視覺大腦 (Qwen3-VL)，bitsandbytes 4-bit 為主路徑、8-bit 為品質回歸路徑。"""
 
     def _initialize(self, device_id: int = 0):
         """
-        依 ``QWEN_USE_AWQ`` 旗標選擇模型載入路徑，並嘗試啟用 Flash Attention 2。
+        依 ``QWEN_USE_4BIT`` 旗標選擇模型載入路徑，並嘗試啟用 Flash Attention 2。
 
         Flash Attn 安裝失敗或硬體不支援時，自動 fallback 到 sdpa 而不中斷流程。
         """
@@ -55,7 +53,7 @@ class QwenModelManager(BaseModelManager):
 
         # 依旗標決定走哪條載入策略（Strategy Pattern）
         self.model = self._load_model_with_attention_fallback()
-        # Processor 永遠從官方 base model 載入，避免社群 AWQ repo 缺 processor 設定
+        # Processor 從官方 base model 載入（tokenizer + 影像/影片前處理）
         self.processor = AutoProcessor.from_pretrained(QWEN_PROCESSOR_ID)
 
     def _load_model_with_attention_fallback(self) -> Qwen3VLForConditionalGeneration:
@@ -107,7 +105,7 @@ class QwenModelManager(BaseModelManager):
         # device_map={"": self.device} 將整個模型固定在指定 GPU，
         # 不做跨卡切分，符合 BaseModelManager 以 device_id 區分實例的設計
         load_kwargs: dict = {"device_map": {"": self.device}}
-        if QWEN_USE_AWQ:
+        if QWEN_USE_4BIT:
             # 4-bit 主路徑：bitsandbytes NF4。權重在 runtime 保持 4-bit（不解壓），
             # 8B 模型約 5-6GB；compute dtype 用 bf16、double quant 再壓 scale 記憶體
             load_kwargs["torch_dtype"] = torch.bfloat16
