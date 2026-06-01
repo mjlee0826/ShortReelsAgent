@@ -1,14 +1,17 @@
 import os
 import json
 from datetime import datetime, timezone
-from media_processor.media_processor_factory import MediaProcessorFactory
 from media_processor.video_strategy import VideoStrategy
+from media_processor.pipeline import PipelineRunner
 from media_tools.media_standardizer import MediaStandardizer
 from template_engine.template_analyzer_facade import TemplateAnalyzerFacade
 from director_agent.director_facade import DirectorFacade
 
 # 計算素材數量時認定的媒體副檔名
 _MEDIA_EXTENSIONS = {'.mp4', '.mov', '.jpg', '.jpeg', '.png', '.heic', '.heif', '.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg'}
+
+# Phase 1 感知分析支援的媒體副檔名（不含純音訊；音訊由 Phase 3 處理）
+_SUPPORTED_MEDIA_EXTENSIONS = {'.mp4', '.mov', '.jpg', '.jpeg', '.png', '.heic', '.heif'}
 
 # 前端影片品質選項：'1' 代表高品質（Gemini 深度索引），其餘為快速本地 Qwen 分析
 _COMPLEX_VIDEO_OPTION = "1"
@@ -20,6 +23,8 @@ class DirectorService:
     def __init__(self):
         self.base_assets_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
         self.standardizer = MediaStandardizer()
+        # Phase 1 感知分析的並行流水線 Facade（Week 2a 取代原序列迴圈）
+        self.pipeline_runner = PipelineRunner()
         self.template_analyzer = TemplateAnalyzerFacade()
         self.director = DirectorFacade()
         self.backend_url = os.getenv("BACKEND_URL", "http://localhost:5174")
@@ -43,6 +48,31 @@ class DirectorService:
                 json.dump(meta, f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"⚠️ [Service] 更新專案 meta 失敗: {e}")
+
+    def _collect_asset_files(self, target_dir: str) -> list[str]:
+        """
+        列出資料夾內待 Phase 1 處理的媒體檔案絕對路徑（沿用原序列迴圈的過濾規則）。
+
+        - 原始檔若已有對應 _std 標準化版本，跳過原始檔只處理標準化版本（避免重複）。
+        - 僅保留圖片／影片副檔名白名單內的檔案。
+        回傳順序即 os.listdir 順序，確保 Pipeline 輸出與舊版逐欄一致。
+        """
+        all_files = [
+            f for f in os.listdir(target_dir)
+            if os.path.isfile(os.path.join(target_dir, f))
+        ]
+        asset_files: list[str] = []
+        for filename in all_files:
+            # 原始檔若已有對應 _std 版本，跳過原始檔（只處理標準化後的版本）
+            if "_std." not in filename:
+                std_version = os.path.splitext(filename)[0] + "_std"
+                if any(std_version in f for f in all_files):
+                    continue
+            ext = os.path.splitext(filename)[1].lower()
+            if ext not in _SUPPORTED_MEDIA_EXTENSIONS:
+                continue
+            asset_files.append(os.path.join(target_dir, filename))
+        return asset_files
 
     def run_workflow(self, prompt: str, folder_name: str, user_id: str = None,
                     template: str = None,
@@ -89,9 +119,6 @@ class DirectorService:
         # --- 否則，執行完整的新生成流程 ---
         else:
             self.standardizer.standardize_folder(target_dir)
-            all_files = [f for f in os.listdir(target_dir) if os.path.isfile(os.path.join(target_dir, f))]
-            
-            print(f"[Service] 正在處理 {len(all_files)} 個素材...")
 
             # 前端傳入的影片品質選項轉為策略列舉；工廠會依副檔名路由，
             # 故圖片一律走預設 SIMPLE，僅影片會套用此處的 video_strategy
@@ -100,30 +127,15 @@ class DirectorService:
                 else VideoStrategy.SIMPLE
             )
 
-            for filename in all_files:
-                if "_std." not in filename:
-                    std_version = os.path.splitext(filename)[0] + "_std"
-                    if any(std_version in f for f in all_files):
-                        continue 
+            # 收集待處理素材（沿用原跳過 _std 重複 + 副檔名白名單邏輯）
+            asset_files = self._collect_asset_files(target_dir)
+            print(f"[Service] 正在處理 {len(asset_files)} 個素材...")
 
-                file_path = os.path.join(target_dir, filename)
-                ext = os.path.splitext(filename)[1].lower()
-                
-                if ext not in ['.mp4', '.mov', '.jpg', '.jpeg', '.png', '.heic', '.heif']:
-                    continue
-
-                try:
-                    print(f"   ⏳ 正在分析: {filename}")
-                    processor = MediaProcessorFactory.create_processor(
-                        file_path, video_strategy=video_strategy_enum
-                    )
-                    metadata = processor.process(file_path)
-                    if metadata.get("status") != "success":
-                        print(f"   ⚠️ 素材被過濾: {filename} ({metadata.get('reason') or metadata.get('message', '未知原因')})")
-                        continue
-                    raw_assets_metadata.append(metadata)
-                except Exception as e:
-                    print(f"   ⚠️ 分析失敗，跳過 {filename}: {str(e)}")
+            # 以 Pipeline 框架取代原序列迴圈：asset 間並行，輸出依輸入順序、僅收 success，
+            # 與舊版逐欄一致（Week 2a：LegacyStage 內部仍呼叫既有 process()）
+            raw_assets_metadata = self.pipeline_runner.run(
+                asset_files, target_dir, video_strategy_enum
+            )
 
             if not raw_assets_metadata:
                 raise ValueError("資料夾內沒有成功解析的有效素材！")

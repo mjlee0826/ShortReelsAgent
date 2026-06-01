@@ -209,3 +209,31 @@ class ProgressTracker:
             error=error,
             payload=payload or {},
         ))
+
+    def emit_pipeline_start(
+        self,
+        asset_id: Optional[str],
+        payload: Optional[dict] = None,
+    ) -> None:
+        """送出 PIPELINE_START 事件;帶 asset_id 以便觀察各 asset 流水線的起點(並行驗證)。"""
+        self.publish(ProgressEvent(
+            event_type=ProgressEventType.PIPELINE_START,
+            job_id=self._job_id,
+            asset_id=asset_id,
+            payload=payload or {},
+        ))
+
+    def emit_pipeline_finish(
+        self,
+        asset_id: Optional[str],
+        duration_ms: Optional[float] = None,
+        payload: Optional[dict] = None,
+    ) -> None:
+        """送出 PIPELINE_FINISH 事件,帶該 asset 整條流水線耗時。"""
+        self.publish(ProgressEvent(
+            event_type=ProgressEventType.PIPELINE_FINISH,
+            job_id=self._job_id,
+            asset_id=asset_id,
+            duration_ms=duration_ms,
+            payload=payload or {},
+        ))
