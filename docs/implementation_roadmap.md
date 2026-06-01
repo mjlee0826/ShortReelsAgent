@@ -99,13 +99,13 @@
 ## 2. 9 個對話總覽
 
 ```
-Week 1   ─ Layer 1 全部 + ProgressTracker 介面          ~400 行   獨立可驗收
+Week 1   ─ Layer 1 全部 + ProgressTracker 介面          ~400 行   ✅ 已完成
    ↓
-Week 2a  ─ Pipeline 骨架 + LegacyStage 包既有 process    ~600 行   ← 框架就緒
+Week 2a  ─ Pipeline 骨架 + LegacyStage 包既有 process    ~600 行   ✅ 已完成(框架就緒)
    ↓
-Week 2b  ─ Stage 拆解(image)                          ~300 行
+Week 2b  ─ Stage 拆解(image)                          ~300 行   ✅ 已完成
    ↓
-Week 2c  ─ Stage 拆解(video)+ StageGroup 編排         ~400 行
+Week 2c  ─ Stage 拆解(video)+ StageGroup 編排         ~400 行   ← 下一步
    ↓
 Week 3a  ─ Dynamic Batching(BatchCollector)            ~300 行   ← 高風險獨立做
    ↓
@@ -120,9 +120,9 @@ Week 4b  ─ Layer 5(前端 Asset Management UI)            ~600 行 ─┘
 
 | 對話 | 範圍 | 約略行數 | 平行可行 | 驗收型態 |
 |---|---|---|---|---|
-| Week 1 | Layer 1 模型優化 + Tracker 介面 | 400 | 否 | 實機 GPU 測試 |
-| Week 2a | Pipeline 骨架 + LegacyStage | 600 | 否(Week 1 之後) | 端到端輸出比對 |
-| Week 2b | Image Stage 拆解 | 300 | 否(Week 2a 之後) | 輸出與 2a 一致 |
+| Week 1 ✅ | Layer 1 模型優化 + Tracker 介面 | 400 | 否 | 實機 GPU 測試 |
+| Week 2a ✅ | Pipeline 骨架 + LegacyStage | 600 | 否(Week 1 之後) | 端到端輸出比對 |
+| Week 2b ✅ | Image Stage 拆解 | 300(實際 ~510 含 docstring) | 否(Week 2a 之後) | 輸出與 2a 一致 |
 | Week 2c | Video Stage 拆解 + Group 編排 | 400 | 否(Week 2b 之後) | 輸出與 2b 一致 + 效能提升 |
 | Week 3a | Dynamic Batching | 300 | 否(Week 2c 之後) | 壓測 + 結果一致 |
 | Week 3b | 雙 GPU + Capacity Manager | 300 | 與 3a 可平行 | 多 GPU 實機測試 |
@@ -185,7 +185,11 @@ Week 4b  ─ Layer 5(前端 Asset Management UI)            ~600 行 ─┘
 
 ---
 
-## 4. Week 2a:Pipeline 骨架 + LegacyStage 包裝
+## 4. Week 2a:Pipeline 骨架 + LegacyStage 包裝 ✅ 已完成(commit `03b98bb`)
+
+> **狀態:框架就緒、`director_service` 已切換為 `PipelineRunner.run(...)`**。Pipeline / StageGroup /
+> ExecutorRegistry / ModelPoolRegistry / HybridScheduler / Builder / Runner 全數落地,圖片與影片皆以單一
+> LegacyStage 包整段 `process()`,輸出與 Week 1 序列版一致。Week 2b 起在此框架上拆 image Stage。
 
 ### 範圍
 **框架建好但不拆 Stage**。新框架包舊邏輯,所有風險降到最低,但 director_service 已切換完。
@@ -224,7 +228,16 @@ Week 4b  ─ Layer 5(前端 Asset Management UI)            ~600 行 ─┘
 
 ---
 
-## 5. Week 2b:Stage 拆解(image)
+## 5. Week 2b:Stage 拆解(image) ✅ 已完成(2026-06-02)
+
+> **狀態:程式完成,本機結構/邏輯驗證通過;端到端實機 A/B 待跑。**
+> - ✅ 11 新檔(`image_work.py` + 10 image Stage)+ builder 五群編排 + `USE_LEGACY_IMAGE_PIPELINE` 旗標
+> - ✅ 本機驗證:`py_compile` 全通過;builder 產出精確五群(semantic 在 G3 第一、各 resource type 正確);
+>   COMPLEX→API、Legacy 回退、`ImageWork` 行為正確;**assembly 組裝 / reject 邏輯與原版逐欄一致**
+>   (bbox 覆蓋、crop_feasibility、round、reject reason 字串、metadata 欄位集合)
+> - ✅ **編排決策**:semantic 併入 G3 平行群(非原規劃獨立 G4,理由見主要產出);不加 StageGroup priority
+>   (BinaryGate 下同卡 GPU forward 全序列化、makespan 與順序無關,無加速;真正併發插空屬 Week 3b BudgetGate)
+> - ⬜ 待實機(Leibniz,需真實模型 / cv2 / 圖片):端到端逐欄一致 A/B、單張計時、Early Rejection 事件流、corrupt 圖韌性
 
 ### 範圍
 把 `LegacyImagePipelineStage` 內部展開成 10 個獨立 Stage,設計 image pipeline 的 StageGroup 編排。
@@ -255,13 +268,17 @@ Week 4b  ─ Layer 5(前端 Asset Management UI)            ~600 行 ─┘
 - `LegacyImagePipelineStage` 保留作為 fallback 與 regression 比對
 
 ### 驗收條件
-- 同一組圖片用 `LegacyImageStage` 與新拆 Stage 各跑一次,輸出逐欄一致
-- 單張圖片耗時應略降(因為 G3 群組內並行)
-- Early Rejection 觸發時,後續 Saliency / AesScore / SemanticImage 確實未呼叫(用 ProgressTracker 事件驗證)
+- ⬜（實機）同一組圖片用 `USE_LEGACY_IMAGE_PIPELINE=true`(Legacy)與 `false`(新拆)各跑一次,輸出逐欄一致
+  — 本機已證 assembly / reject 邏輯與原版逐欄一致,端到端 A/B 待 Leibniz
+- ⬜（實機）單張圖片耗時應略降(G3 群組內並行 + qwen 不被 CPU stage barrier 卡)
+- ⬜（實機）Early Rejection 觸發時,後續 Saliency / AesScore / SemanticImage / CVFeatures / FaceDetect / Exif 確實未呼叫
+  — Pipeline 既有短路(reject 設 `REJECTED` 後 G3/G4 不執行)已保證,用 ProgressTracker 事件確認
+- ✅（本機已證)Legacy 與新拆切換、五群編排結構、bbox/crop/round/reason 等值組裝
 
 ### 不做
 - 不拆 video Stage(Week 2c)
 - 不做 image 的 batch scoring(Week 3a 才接 Dynamic Batching)
+- 不做 StageGroup priority(評估後 2b 無加速;見上方狀態說明)
 
 ---
 
@@ -569,4 +586,4 @@ Google Drive workspace → project 自動偵測。**與 Week 4b 可平行**。
 
 ---
 
-*文件最後更新:2026-05-30*
+*文件最後更新:2026-06-02(Week 2a/2b 標記完成、Week 2b 編排修正)*
