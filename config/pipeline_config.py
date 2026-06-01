@@ -62,3 +62,12 @@ STAGE_SUBMIT_TIMEOUT_SEC: float | None = None
 # 真正的啟動期預載 + VRAM 不足自動降級 lazy,留待 Week 3b GPU Capacity Manager 實作。
 EAGER_MODELS_DEFAULT = False
 EAGER_MODELS = _read_bool_env("EAGER_MODELS", EAGER_MODELS_DEFAULT)
+
+# ── 圖片 Pipeline 拆 Stage 切換 (Week 2b) ──────────────────────────────────────
+# False(預設):走 Week 2b 新拆的細粒度 Stage 編排(Decode → Tech → Reject → 平行群 → Assembly)。
+# True：回退 Week 2a 的單一 LegacyImagePipelineStage,供 A/B 逐欄一致回歸與緊急 rollback。
+# 人類同組素材各跑一次 true / false,diff phase1_assets_metadata.json 即完成驗收(roadmap §13)。
+USE_LEGACY_IMAGE_PIPELINE_DEFAULT = False
+USE_LEGACY_IMAGE_PIPELINE = _read_bool_env(
+    "USE_LEGACY_IMAGE_PIPELINE", USE_LEGACY_IMAGE_PIPELINE_DEFAULT
+)

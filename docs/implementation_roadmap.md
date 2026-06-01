@@ -231,23 +231,27 @@ Week 4b  ─ Layer 5(前端 Asset Management UI)            ~600 行 ─┘
 
 ### 主要產出
 - `media_processor/pipeline/stages/` 內新增:
+  - `image_work.py`(`@dataclass ImageWork` 中間狀態容器 + `IMAGE_WORK_KEY`;取代裸 scratch dict)
   - `decode_image_stage.py`
-  - `saliency_stage.py`
   - `tech_score_stage.py`
-  - `aes_score_stage.py`
   - `reject_filter_stage.py`
+  - `saliency_stage.py`
+  - `aes_score_stage.py`
   - `cv_features_stage.py`
   - `face_detect_stage.py`
   - `exif_stage.py`
   - `semantic_image_stage.py`(內部依 strategy 呼叫 Qwen 或 Gemini)
   - `assembly_image_stage.py`
-- `PipelineBuilder` 加入 `_build_image_pipeline()` 方法,定義 StageGroup 編排:
+- `config/pipeline_config.py` 加 `USE_LEGACY_IMAGE_PIPELINE`(預設 false=新拆;true=回退 Legacy 供 A/B 逐欄比對)
+- `PipelineBuilder._build_image_pipeline()` 定義 StageGroup 編排(**五群,semantic 併入平行群**):
   - G0: `[DecodeImage]`
   - G1: `[TechScore]`(儘早 reject)
   - G2: `[RejectFilter]`(短路檢查)
-  - G3: `[Saliency, AesScore, CVFeatures, FaceDetect, Exif]` 大平行
-  - G4: `[SemanticImage]`
-  - G5: `[AssemblyImage]`
+  - G3: `[SemanticImage, Saliency, AesScore, CVFeatures, FaceDetect, Exif]` 大平行(semantic 放第一個提交=軟性 qwen 優先)
+  - G4: `[AssemblyImage]`(唯一 join,含 subject_bbox 解析 + crop_feasibility)
+  - **編排調整理由**:圖片 semantic 只依賴解碼後的圖(`analyze_visual_semantics` 收的 exif 未使用),與其他 G3 stage 無依賴,
+    故併入同一平行群,不再像原規劃 G4 Semantic→G5 Assembly 那樣排在 CPU stage 之後(避免 qwen 空等 cv/face/exif)。輸出仍逐欄一致;
+    硬性優先 / 同卡併發插空屬 Week 3b BudgetGate。
 - `LegacyImagePipelineStage` 保留作為 fallback 與 regression 比對
 
 ### 驗收條件
