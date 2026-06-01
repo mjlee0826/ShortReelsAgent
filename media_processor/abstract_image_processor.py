@@ -136,6 +136,9 @@ class AbstractImageProcessor(MediaStrategy):
             ).to_dict()
 
         except Exception as e:
+            # asset 級失敗：process() 自行吞例外只回 error dict，若不在此印出，
+            # console 完全看不到是哪張圖、為何失敗（上層 Pipeline 也只會收到 error 狀態）
+            print(f"[ImageProcessor Error] 處理失敗 {file_path}: {e}")
             return ProcessorResult(
                 status="error", file=file_path, message=str(e)
             ).to_dict()

@@ -20,8 +20,9 @@ class AudioEnvModelManager(BaseModelManager):
         """載入 PANNs CNN14 模型（panns_inference 套件）。"""
         from panns_inference import AudioTagging
         self.device = self.get_device_str(device_id)
-        # AudioTagging 內部自動處理 GPU/CPU 分配
-        self._tagger = AudioTagging(checkpoint_path=None, device=self.device)
+        with self._log_load("AudioEnv"):
+            # AudioTagging 內部自動處理 GPU/CPU 分配
+            self._tagger = AudioTagging(checkpoint_path=None, device=self.device)
 
     @synchronized_inference
     def classify_environment(self, audio_path: str) -> list:

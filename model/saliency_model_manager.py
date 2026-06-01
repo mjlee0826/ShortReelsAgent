@@ -13,7 +13,8 @@ class SaliencyModelManager(BaseModelManager):
         載入 U2-Net 輕量級模型 session。
         rembg 內部自行管理 device，device_id 保留以維持簽名一致性。
         """
-        self.session = new_session(SALIENCY_MODEL_NAME)
+        with self._log_load("Saliency"):
+            self.session = new_session(SALIENCY_MODEL_NAME)
 
     @synchronized_inference
     def get_saliency_mask(self, pil_image: Image.Image) -> np.ndarray:

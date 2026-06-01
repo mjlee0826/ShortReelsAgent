@@ -35,14 +35,15 @@ class WhisperModelManager(BaseModelManager):
     def _initialize(self, device_id: int = 0):
         """載入 Whisper pipeline，使用 FP16 加速並啟用時間戳記。"""
         self.device = self.get_device_str(device_id)
-        self.transcriber = pipeline(
-            "automatic-speech-recognition",
-            model=WHISPER_MODEL_ID,
-            device=self.device,
-            chunk_length_s=WHISPER_CHUNK_LENGTH_SEC,
-            return_timestamps=True,
-            dtype=torch.float16
-        )
+        with self._log_load("Whisper"):
+            self.transcriber = pipeline(
+                "automatic-speech-recognition",
+                model=WHISPER_MODEL_ID,
+                device=self.device,
+                chunk_length_s=WHISPER_CHUNK_LENGTH_SEC,
+                return_timestamps=True,
+                dtype=torch.float16
+            )
 
     def _filter_hallucination(self, raw_result: dict) -> dict:
         """
@@ -85,6 +86,8 @@ class WhisperModelManager(BaseModelManager):
             raw_result = self.transcriber(audio_path, generate_kwargs=_GENERATE_KWARGS)
             return self._filter_hallucination(raw_result)
         except Exception as e:
+            # 與其他 Manager 一致：吞錯回 Null Object 前先印出，避免轉錄失敗無聲無息
+            print(f"[Whisper Error] 轉錄失敗: {e}")
             return {"text": "", "error": str(e)}
 
     @synchronized_inference
@@ -109,4 +112,5 @@ class WhisperModelManager(BaseModelManager):
 
         except Exception as e:
             # 整批失敗仍須回傳等長 list，下游 zip 對齊不會錯位
+            print(f"[Whisper Batch Error] 批次轉錄失敗: {e}")
             return [{"text": "", "error": str(e)} for _ in audio_paths]

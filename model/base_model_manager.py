@@ -30,6 +30,7 @@ BaseModelManager：執行緒安全的多 GPU Singleton 基底類別。
 """
 import re
 import json
+import time
 import threading
 import functools
 from abc import ABC, abstractmethod
@@ -154,6 +155,24 @@ class BaseModelManager(ABC):
         except ImportError:
             pass
         return "cpu"
+
+    @contextmanager
+    def _log_load(self, model_name: str) -> Iterator[None]:
+        """
+        記錄模型載入的起訖與耗時（Context Manager）。
+
+        模型載入是整條流程中最耗時的一次性操作（可能含權重下載 / 量化），
+        且每個 (device, slot) singleton 只發生一次，故值得印出供觀察；
+        所有 Manager 共用同一入口，日後要改成正式 logging 只需改這一處。
+        子類別 ``_initialize`` 把載入邏輯包進此 context manager 即可。
+        """
+        # device 屬性可能尚未設定（rembg / silero 由套件內部自行管理裝置）
+        device = getattr(self, "device", None) or "內部管理"
+        print(f"[{model_name}] 開始載入模型 (device={device})")
+        start = time.perf_counter()
+        yield
+        # 載入失敗時例外會往上拋，不會印出「完成」，符合直覺
+        print(f"[{model_name}] 模型載入完成，耗時 {time.perf_counter() - start:.1f}s")
 
     def _uses_gpu(self) -> bool:
         """

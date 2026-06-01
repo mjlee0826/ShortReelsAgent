@@ -1,103 +1,15 @@
 """
-ProgressTracker：Pipeline 進度事件廣播機制 (Observer Pattern)。
+進度廣播中樞：Subject 側 (Observer Pattern)。
 
-Week 1 範疇
------------
-本檔僅定義介面與一個 ``PrintProgressObserver``，**不接 WebSocket**。
-Week 3c 才實作 ``WebSocketProgressObserver`` 推播給前端，
-本檔提早建好讓 Stage 開發時即可埋事件，不需等到後期重構。
-
-設計重點
---------
-- **Subject (ProgressTracker)** 廣播給多個 **Observer**，
-  任一 Observer 失敗 try/except 隔離，**絕對不阻斷主流水線**。
-- **Pydantic BaseModel (ProgressEvent)**：Week 3c 接 WebSocket 時可
-  直接 ``model_dump_json()`` 序列化，無需額外轉換層。
-- **Enum (ProgressEventType)**：所有可能事件型態列舉，靜態檢查可發現未處理分支。
+``ProgressTracker`` 持有 observer 清單並廣播事件，
+與「事件定義（``events``）」「觀察者實作（``observer``）」分離：
+新增 observer 不動本檔，調整事件結構也不動本檔。
 """
-import time
 import threading
-from abc import ABC, abstractmethod
-from enum import Enum
-from typing import Any, Optional
+from typing import Optional
 
-from pydantic import BaseModel, Field
-
-
-class ProgressEventType(str, Enum):
-    """所有 Pipeline 階段可能產生的事件型態。"""
-
-    # ── Stage 級別 ────────────────────────────────────────────────────────────
-    STAGE_START  = "stage_start"
-    STAGE_FINISH = "stage_finish"
-    STAGE_ERROR  = "stage_error"
-
-    # ── Pipeline 級別 ────────────────────────────────────────────────────────
-    PIPELINE_START  = "pipeline_start"
-    PIPELINE_FINISH = "pipeline_finish"
-
-    # ── 啟動期 ────────────────────────────────────────────────────────────────
-    # Eager warm up 模型載入事件，Week 2a 才實際發送，本檔提早定義
-    MODEL_WARMUP = "model_warmup"
-
-
-class ProgressEvent(BaseModel):
-    """
-    Pipeline 進度事件（不可變值物件）。
-
-    序列化策略：Week 3c WebSocket 直接呼叫 ``event.model_dump_json()`` 推給前端。
-    """
-
-    event_type: ProgressEventType
-    # 一次完整 generate 請求對應一個 job_id；Week 1 由 Tracker 建構時帶入
-    job_id: Optional[str] = None
-    # 多 asset 場景下 stage 事件需區分屬於哪個 asset；Pipeline 級別事件可空
-    asset_id: Optional[str] = None
-    # Stage 名稱（例如 "decode_image" / "semantic_image"）；非 stage 事件可空
-    stage_name: Optional[str] = None
-    # 事件發生時刻（unix 秒，預設取建立時當下）
-    timestamp: float = Field(default_factory=time.time)
-    # STAGE_FINISH / PIPELINE_FINISH 帶入該階段耗時（毫秒）
-    duration_ms: Optional[float] = None
-    # 任意額外資訊（例如 model 名稱、batch 大小、score 等）
-    payload: dict[str, Any] = Field(default_factory=dict)
-    # STAGE_ERROR 帶入錯誤訊息（保留 raw 字串，前端決定如何顯示）
-    error: Optional[str] = None
-
-
-class ProgressObserver(ABC):
-    """
-    進度觀察者介面 (Observer Pattern)。
-
-    具體實作可以是：
-    - 印到 stdout（``PrintProgressObserver``，Week 1）
-    - 推到 WebSocket client（Week 3c）
-    - 寫進結構化 log / 上報 metrics（未來擴展）
-    """
-
-    @abstractmethod
-    def on_event(self, event: ProgressEvent) -> None:
-        """處理一個事件；本方法應 **盡量快速** 且不拋出例外。"""
-
-
-class PrintProgressObserver(ProgressObserver):
-    """
-    最小可用 Observer：將事件以可讀格式印到 stdout。
-
-    主要用於 Week 1/2 開發期，無需架設 WebSocket 即可肉眼觀察事件流。
-    """
-
-    def on_event(self, event: ProgressEvent) -> None:
-        """以「[type] asset/stage – duration」格式印出事件。"""
-        # 將 None 欄位以「-」顯示，避免訊息中出現「None」混淆
-        asset    = event.asset_id  or "-"
-        stage    = event.stage_name or "-"
-        duration = f"{event.duration_ms:.1f}ms" if event.duration_ms is not None else "-"
-        suffix   = f" err={event.error}" if event.error else ""
-        print(
-            f"[Progress] {event.event_type.value:<16} "
-            f"asset={asset:<24} stage={stage:<24} dur={duration}{suffix}"
-        )
+from media_processor.pipeline.progress.events import ProgressEvent, ProgressEventType
+from media_processor.pipeline.progress.observer import ProgressObserver
 
 
 class ProgressTracker:

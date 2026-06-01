@@ -164,6 +164,8 @@ class AbstractVideoProcessor(MediaStrategy):
             ).to_dict()
 
         except Exception as e:
+            # asset 級失敗：同圖片處理器，吞例外回 error dict 前先印出哪支影片、為何失敗
+            print(f"[VideoProcessor Error] 處理失敗 {file_path}: {e}")
             return ProcessorResult(
                 status="error", file=file_path, message=str(e)
             ).to_dict()
@@ -237,7 +239,9 @@ class AbstractVideoProcessor(MediaStrategy):
         """
         try:
             return SceneCutExtractor().get_cuts(file_path)
-        except Exception:
+        except Exception as e:
+            # 場景切點失敗不阻斷主流程，但需印出以免靜默吞錯後難以定位
+            print(f"[VideoProcessor Warning] 場景切點擷取失敗 {file_path}: {e}")
             return []
 
     def _get_saliency_at_time(self, file_path: str, time_sec: float) -> SubjectBbox:
@@ -262,8 +266,9 @@ class AbstractVideoProcessor(MediaStrategy):
                 if face_bbox is not None:
                     bbox = face_bbox
                 return bbox
-        except Exception:
-            pass
+        except Exception as e:
+            # 抓幀 / 臉部偵測失敗時退回全畫面安全區；印警告協助定位（saliency 本身另有內部 log）
+            print(f"[VideoProcessor Warning] saliency 抓幀失敗 (t={time_sec:.1f}s): {e}")
         return SubjectBbox(x1=0.0, y1=0.0, x2=100.0, y2=100.0)
 
     def _get_saliency_bbox_union(self, file_path: str, duration: float) -> SubjectBbox:
@@ -289,8 +294,9 @@ class AbstractVideoProcessor(MediaStrategy):
             cap.release()
             if ret:
                 return Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        except Exception:
-            pass
+        except Exception as e:
+            # 取代表幀失敗不致命（下游會跳過畫質 / 視覺特徵），印警告即可
+            print(f"[VideoProcessor Warning] 代表幀擷取失敗 {file_path}: {e}")
         return None
 
     def _compute_frame_features(

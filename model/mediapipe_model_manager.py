@@ -46,21 +46,22 @@ class MediaPipeModelManager(BaseModelManager):
         # 讓 BaseModelManager 的 L2 GpuGate 依 _uses_gpu 自動跳過
         self.device = "cpu"
 
-        # 模型檔固定存放在 model/ 目錄旁，避免 cwd 差異（與 LAION 權重作法一致）
-        model_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            MEDIAPIPE_FACE_MODEL_FILENAME,
-        )
-        if not os.path.exists(model_path):
-            print("正在下載 MediaPipe 臉部偵測模型...")
-            urllib.request.urlretrieve(MEDIAPIPE_FACE_MODEL_URL, model_path)
+        with self._log_load("MediaPipe"):
+            # 模型檔固定存放在 model/ 目錄旁，避免 cwd 差異（與 LAION 權重作法一致）
+            model_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                MEDIAPIPE_FACE_MODEL_FILENAME,
+            )
+            if not os.path.exists(model_path):
+                print("[MediaPipe] 首次使用，正在下載臉部偵測模型...")
+                urllib.request.urlretrieve(MEDIAPIPE_FACE_MODEL_URL, model_path)
 
-        # Tasks API：以 IMAGE 模式（FaceDetectorOptions 預設）建立偵測器
-        options = mp_vision.FaceDetectorOptions(
-            base_options=BaseOptions(model_asset_path=model_path),
-            min_detection_confidence=MEDIAPIPE_MIN_DETECTION_CONFIDENCE,
-        )
-        self._detector = mp_vision.FaceDetector.create_from_options(options)
+            # Tasks API：以 IMAGE 模式（FaceDetectorOptions 預設）建立偵測器
+            options = mp_vision.FaceDetectorOptions(
+                base_options=BaseOptions(model_asset_path=model_path),
+                min_detection_confidence=MEDIAPIPE_MIN_DETECTION_CONFIDENCE,
+            )
+            self._detector = mp_vision.FaceDetector.create_from_options(options)
 
     @synchronized_inference
     def detect(self, pil_image: Image.Image) -> tuple[FaceInfo, Optional[SubjectBbox]]:

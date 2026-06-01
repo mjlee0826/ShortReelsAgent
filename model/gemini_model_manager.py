@@ -48,7 +48,8 @@ class GeminiModelManager(BaseModelManager):
                 if poll_count >= GEMINI_POLL_MAX_COUNT:
                     raise TimeoutError("Gemini 影片處理逾時（超過 5 分鐘），請稍後重試或換短影片。")
                 poll_count += 1
-                print("[Gemini API] 影片處理中，等待 2 秒...")
+                # 後台處理輪詢：刻意不在迴圈內印 log，長影片可達上百圈會刷爆 console；
+                # 上方「上傳」與下方「開始推論」兩則訊息已足以界定這段等待
                 time.sleep(GEMINI_POLL_INTERVAL_SEC)
                 video_file = self.client.files.get(name=video_file.name)
 
@@ -69,10 +70,10 @@ class GeminiModelManager(BaseModelManager):
             # 確保上傳的檔案會被刪除，保護隱私與配額
             if video_file:
                 try:
+                    # 清理成功屬預期行為，不印 log；僅在刪除失敗時警告（涉及配額與隱私風險）
                     self.client.files.delete(name=video_file.name)
-                    print(f"[Gemini API] 已清理雲端暫存檔: {video_file.name}")
                 except Exception as e:
-                    print(f"[Gemini API] 無法刪除雲端暫存檔: {e}")
+                    print(f"[Gemini API Warning] 無法刪除雲端暫存檔: {e}")
 
     @synchronized_inference
     def generate_director_plan(self, prompt: str, tools: list = None) -> str:

@@ -11,13 +11,14 @@ class VadModelManager(BaseModelManager):
         透過 Torch Hub 載入 Silero VAD，免安裝額外套件。
         Silero VAD 內部自行管理 device，device_id 保留以維持簽名一致性。
         """
-        self.model, utils = torch.hub.load(
-            repo_or_dir=VAD_REPO,
-            model='silero_vad',
-            force_reload=False
-        )
-        # 解構官方提供的輔助函式
-        self.get_speech_timestamps, _, self.read_audio, _, _ = utils
+        with self._log_load("VAD"):
+            self.model, utils = torch.hub.load(
+                repo_or_dir=VAD_REPO,
+                model='silero_vad',
+                force_reload=False
+            )
+            # 解構官方提供的輔助函式
+            self.get_speech_timestamps, _, self.read_audio, _, _ = utils
 
     @synchronized_inference
     def has_speech(self, audio_path: str) -> bool:

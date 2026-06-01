@@ -51,10 +51,18 @@ class QwenModelManager(BaseModelManager):
         self.device = self.get_device_str(device_id)
         self.prompt_manager = DefaultPromptManager()
 
-        # 依旗標決定走哪條載入策略（Strategy Pattern）
-        self.model = self._load_model_with_attention_fallback()
-        # Processor 從官方 base model 載入（tokenizer + 影像/影片前處理）
-        self.processor = AutoProcessor.from_pretrained(QWEN_PROCESSOR_ID)
+        # 載入是最耗時的一次性操作（含 bnb 量化），記錄起訖與耗時供觀察
+        with self._log_load("Qwen"):
+            # 依旗標決定走哪條載入策略（Strategy Pattern）
+            self.model = self._load_model_with_attention_fallback()
+            # Processor 從官方 base model 載入（tokenizer + 影像/影片前處理）
+            self.processor = AutoProcessor.from_pretrained(QWEN_PROCESSOR_ID)
+
+        # 印出實際生效的 attention 實作與量化模式：方便確認 FA2 是否真的啟用、
+        # 以及落在 4-bit 主路徑或 8-bit 回歸路徑（對應驗收條件「FA2 實機生效」）
+        attn_impl = getattr(self.model.config, "_attn_implementation", "unknown")
+        quant_mode = "4bit-nf4" if QWEN_USE_4BIT else "8bit"
+        print(f"[Qwen] attn_implementation={attn_impl}, 量化={quant_mode}")
 
     def _load_model_with_attention_fallback(self) -> Qwen3VLForConditionalGeneration:
         """

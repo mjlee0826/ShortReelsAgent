@@ -65,19 +65,20 @@ class LaionModelManager(BaseModelManager):
         """初始化 CLIP 特徵提取器與 LAION MLP 評分器，必要時自動下載權重。"""
         self.device = self.get_device_str(device_id)
 
-        self.processor = CLIPProcessor.from_pretrained(LAION_CLIP_MODEL_ID)
-        self.clip_model = CLIPModel.from_pretrained(LAION_CLIP_MODEL_ID).to(self.device).eval()
+        with self._log_load("LAION"):
+            self.processor = CLIPProcessor.from_pretrained(LAION_CLIP_MODEL_ID)
+            self.clip_model = CLIPModel.from_pretrained(LAION_CLIP_MODEL_ID).to(self.device).eval()
 
-        self.mlp = LAIONAestheticMLP(LAION_MLP_INPUT_SIZE).to(self.device).eval()
+            self.mlp = LAIONAestheticMLP(LAION_MLP_INPUT_SIZE).to(self.device).eval()
 
-        # 權重固定存放在 model/ 目錄旁，避免 cwd 差異
-        weight_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), LAION_WEIGHT_FILENAME)
-        if not os.path.exists(weight_path):
-            print("正在下載 LAION Aesthetic 權重...")
-            urllib.request.urlretrieve(LAION_WEIGHT_URL, weight_path)
+            # 權重固定存放在 model/ 目錄旁，避免 cwd 差異
+            weight_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), LAION_WEIGHT_FILENAME)
+            if not os.path.exists(weight_path):
+                print("[LAION] 首次使用，正在下載 Aesthetic 權重...")
+                urllib.request.urlretrieve(LAION_WEIGHT_URL, weight_path)
 
-        # weights_only=True 防止反序列化任意程式碼（PyTorch >= 2.0 安全要求）
-        self.mlp.load_state_dict(torch.load(weight_path, map_location=self.device, weights_only=True))
+            # weights_only=True 防止反序列化任意程式碼（PyTorch >= 2.0 安全要求）
+            self.mlp.load_state_dict(torch.load(weight_path, map_location=self.device, weights_only=True))
 
     def _normalize_score(self, raw_score: float) -> float:
         """將 LAION 1~10 分制轉換為系統統一的 0~100 分制。"""

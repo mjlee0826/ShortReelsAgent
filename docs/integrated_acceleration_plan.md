@@ -249,6 +249,13 @@ L2 GpuGate(GPU 層,per-device)
 
 **BudgetGate 的真實紅利場景**(釐清):是「**同卡跨不同 model 併發**」(例:GPU0 上 Qwen 5GB + Whisper 3GB 同時 forward),**不是**「同卡同 model 跑多 asset」—— 後者受限於 Pool 一卡一 instance,要同卡多 instance 才行(已備 `(device_id, slot_id)` 結構,Week 3b 才有效)。
 
+> **⚠️ Week 3b 落地注意:`cost_gb` 必須是「forward 暫態峰值」,不是「常駐權重大小」**。
+> 模型 eager 常駐後,權重(如 Qwen 4-bit 6.4GB)無論有沒有 forward 都一直佔著 VRAM、載入時就鎖死了;
+> 真正導致「同卡併發 forward 才 OOM」的是 forward 當下的**暫態記憶體**(activation / KV cache / workspace)。因此:
+> - 子類的 `INFERENCE_VRAM_COST_GB` 應填**該模型單次 forward 的暫態峰值**,以 `torch.cuda.reset_peak_memory_stats()` + `torch.cuda.max_memory_allocated()` 包一次 forward 實測得出,**不是**權重大小。
+> - BudgetGate 的預算總額 = `free VRAM − 已常駐權重總和 − GPU_SAFETY_BUFFER_GB`;放行條件為「在飛行中的 forward 暫態成本加總 ≤ 預算」。
+> - 若誤把 cost 填成權重大小,等於把常駐記憶體**重複扣兩次**,gate 過度保守、同卡併發紅利幾乎拿不到(退化成接近 BinaryGate)。上方「Qwen 5GB + Whisper 3GB」僅為示意,實作時須換成實測的暫態值。
+
 完整三層鎖(L1 ModelPool / L2 GpuGate / L3 inference lock)的職責、不可省略反例、呼叫路徑見 **`docs/lock_design.md`**。
 
 不影響介面、改動小,是後續多模型共卡的安全基礎。
@@ -311,6 +318,11 @@ L2 GpuGate(GPU 層,per-device)
 - **動態決定 ModelPool size** — free VRAM 不足某模型最低需求的卡,直接從 pool 排除
 - **執行時動態退場** — 每次 `borrow()` 前再檢查可用 VRAM,不夠就 block 等待 + 通知 Observer
 - **OOM 容錯** — Stage 跑到一半遇 CUDA OOM,釋放當前 model + `empty_cache()` + asset 放回隊列重試最多 N 次
+
+> **⚠️ Week 3b 落地注意(共 2 點)**:
+>
+> 1. **OOM 容錯優先「等待」而非「卸載重載」,避免 thrash**:上面「OOM 容錯」的釋放 model + 重載,在鄰居**持續**佔住 VRAM 時會退化成 `載入→OOM→釋放→重載→又 OOM…`,連 N 次很浪費(Qwen 重載要數秒)。政策應為:遇 OOM **優先走「執行時動態退場」的 block 等待 VRAM 釋放**;「釋放+重載」只保留給真正的記憶體洩漏或單次性尖峰,且重試上限 N 要小。
+> 2. **Eager Warm Up 需要「優先序 + 載入前檢查」**:當熱門模型清單(§5.2)加總超過 free VRAM,須有明確降級順序 —— **Qwen(主瓶頸)一定常駐**,VAD / MediaPipe(CPU 或極小)優先降級 lazy;且必須 **check-before-load**(先用 `torch.cuda.mem_get_info()` 算放不放得下再載),不能 load 完才撞 OOM。降級決策集中在 Capacity Manager,`ModelPoolRegistry` 依其結果決定哪些 eager、哪些 lazy。
 
 啟動時讀 `CUDA_VISIBLE_DEVICES`,搭配上述動態邏輯,**單卡/多卡/共用 GPU 三種環境完全自適應**,Worker 數不寫死。
 

@@ -37,8 +37,9 @@ class MusiqModelManager(BaseModelManager):
     def _initialize(self, device_id: int = 0):
         """透過 PyIQA 載入 MUSIQ 模型，權重自動下載。"""
         self.device = torch.device(self.get_device_str(device_id))
-        self.metric_network = pyiqa.create_metric(MUSIQ_METRIC_NAME, device=self.device)
-        self.transform = transforms.ToTensor()
+        with self._log_load("MUSIQ"):
+            self.metric_network = pyiqa.create_metric(MUSIQ_METRIC_NAME, device=self.device)
+            self.transform = transforms.ToTensor()
 
     @synchronized_inference
     def get_technical_score(self, pil_image: Image.Image) -> float:
