@@ -35,8 +35,8 @@ from media_processor.pipeline.stages.semantic_image_stage import SemanticImageSt
 
 # ── 影片專屬 Stage ────────────────────────────────────────────────────────────
 from media_processor.pipeline.stages.assembly_video_stage import AssemblyVideoStage
+from media_processor.pipeline.stages.audio_env_stage import AudioEnvStage
 from media_processor.pipeline.stages.audio_extraction_stage import AudioExtractionStage
-from media_processor.pipeline.stages.audio_inference_stage import AudioInferenceStage
 from media_processor.pipeline.stages.decode_video_stage import DecodeVideoStage
 from media_processor.pipeline.stages.event_bbox_stage import EventBboxStage
 from media_processor.pipeline.stages.legacy_video_stage import LegacyVideoPipelineStage
@@ -45,6 +45,8 @@ from media_processor.pipeline.stages.saliency_union_stage import SaliencyUnionSt
 from media_processor.pipeline.stages.scene_cut_stage import SceneCutStage
 from media_processor.pipeline.stages.semantic_video_stage import SemanticVideoStage
 from media_processor.pipeline.stages.timecode_stage import TimecodeStage
+from media_processor.pipeline.stages.vad_stage import VadStage
+from media_processor.pipeline.stages.whisper_stage import WhisperStage
 
 # Pipeline 名稱(legacy 與細粒度兩種編排共用同一識別,下游無感)
 _IMAGE_PIPELINE_NAME = "image_pipeline"
@@ -106,22 +108,20 @@ class PipelineBuilder:
 
     def _build_simple_video_pipeline(self, context: AssetContext) -> Pipeline:
         """
-        Simple 影片依賴圖(鏡像圖片的早 reject;Qwen 全局分析)。
+        Simple 影片依賴圖(鏡像圖片的早 reject;Qwen 全局分析;音訊鏈全拆)。
 
-        ``decode → tech → reject → {semantic(Qwen), audio_infer, scene, motion, saliency_union,
-        aes, cv, face} → assembly``。audio_extract 只依賴 decode(與 tech 重疊、不被 reject gate;便宜 IO),
-        audio_infer 另依賴 audio_extract;reject 之後的工作在 reject 觸發時全被短路(連 whisper / qwen 都省)。
+        ``decode → tech → reject → {semantic(Qwen), scene, motion, saliency_union, aes, cv, face}``;
+        音訊鏈:``audio_extract``(只依賴 decode、與 tech 重疊、不被 reject gate;便宜 IO)→
+        ``vad``(+reject)→ ``whisper``;``audio_env`` 另只依賴 audio_extract+reject,與語音鏈並行(全拆紅利)。
+        reject 觸發時 reject 之後的工作全被短路(連 vad / whisper / qwen 都省);assembly 等齊視覺群 + whisper + audio_env。
         """
         decode = DecodeVideoStage()
         tech = TechScoreStage()
         audio_extract = AudioExtractionStage()
         reject = RejectFilterStage()
-        # reject 之後才解除依賴的工作(reject 觸發時全部跳過)
-        semantic = SemanticVideoStage(context.video_strategy)  # SIMPLE → Qwen(GPU)
-        audio_infer = AudioInferenceStage()
+        # reject 之後才解除依賴的視覺 / 語意工作(reject 觸發時全部跳過)
         gated = [
-            semantic,
-            audio_infer,
+            SemanticVideoStage(context.video_strategy),  # SIMPLE → Qwen(GPU)
             SceneCutStage(),
             MotionIntensityStage(),
             SaliencyUnionStage(),
@@ -129,16 +129,26 @@ class PipelineBuilder:
             CVFeaturesStage(),
             FaceDetectStage(),
         ]
+        # 音訊鏈全拆:vad → whisper 為語音鏈;audio_env 獨立並行,三者皆受 reject gate
+        vad = VadStage()
+        whisper = WhisperStage()
+        audio_env = AudioEnvStage()
         reject_name = reject.meta.name
         nodes = [
             StageNode(decode),
             StageNode(tech, (decode.meta.name,)),
             StageNode(audio_extract, (decode.meta.name,)),
             StageNode(reject, (tech.meta.name,)),
-            # audio_infer 需「音訊已抽出」且「未被 reject」雙重前提
-            StageNode(audio_infer, (audio_extract.meta.name, reject_name)),
-            *[StageNode(stage, (reject_name,)) for stage in gated if stage is not audio_infer],
-            StageNode(AssemblyVideoStage(), tuple(stage.meta.name for stage in gated)),
+            # vad / audio_env 需「音訊已抽出」且「未被 reject」雙重前提;whisper 接在 vad 後
+            StageNode(vad, (audio_extract.meta.name, reject_name)),
+            StageNode(whisper, (vad.meta.name,)),
+            StageNode(audio_env, (audio_extract.meta.name, reject_name)),
+            *[StageNode(stage, (reject_name,)) for stage in gated],
+            StageNode(
+                AssemblyVideoStage(),
+                # 視覺 / 語意群 + 音訊輸出(whisper / audio_env)湊齊所有 metadata 來源
+                tuple(stage.meta.name for stage in gated) + (whisper.meta.name, audio_env.meta.name),
+            ),
         ]
         return Pipeline(nodes, name=_VIDEO_PIPELINE_NAME)
 
@@ -152,7 +162,10 @@ class PipelineBuilder:
         """
         decode = DecodeVideoStage()
         audio_extract = AudioExtractionStage()
-        audio_infer = AudioInferenceStage()
+        # 音訊鏈全拆:vad → whisper 為語音鏈;audio_env 獨立並行(皆只依賴 audio_extract,Complex 無 reject gate)
+        vad = VadStage()
+        whisper = WhisperStage()
+        audio_env = AudioEnvStage()
         timecode = TimecodeStage()
         scene = SceneCutStage()
         cv = CVFeaturesStage()
@@ -164,7 +177,9 @@ class PipelineBuilder:
         nodes = [
             StageNode(decode),
             StageNode(audio_extract, (decode_name,)),
-            StageNode(audio_infer, (audio_extract.meta.name,)),
+            StageNode(vad, (audio_extract.meta.name,)),
+            StageNode(whisper, (vad.meta.name,)),
+            StageNode(audio_env, (audio_extract.meta.name,)),
             StageNode(timecode, (decode_name,)),
             StageNode(scene, (decode_name,)),
             StageNode(cv, (decode_name,)),
@@ -173,9 +188,10 @@ class PipelineBuilder:
             StageNode(event_bbox, (semantic.meta.name,)),     # 逐 event bbox 需 Gemini 事件清單
             StageNode(
                 AssemblyVideoStage(),
-                # event_bbox 已涵蓋 semantic(vlm_result);加 audio/scene/cv/face 湊齊所有 metadata 來源
+                # event_bbox 已涵蓋 semantic(vlm_result);加 whisper/audio_env/scene/cv/face 湊齊所有 metadata 來源
                 (
-                    audio_infer.meta.name,
+                    whisper.meta.name,
+                    audio_env.meta.name,
                     scene.meta.name,
                     cv.meta.name,
                     face.meta.name,

@@ -1,18 +1,21 @@
 """
 MusiqModelManager：MUSIQ 技術畫質評分器（手震 / 噪點 / 失焦偵測）。
 
-Week 1 變動
------------
-新增 :meth:`score_batch` 介面，多張圖片一次 forward。
-單張介面 :meth:`get_technical_score` 維持不變，呼叫端零侵入。
-Batch 介面預計於 Week 3a ``BatchCollector`` 接入，本週只提供方法。
+Week 1 / Week 3a 變動
+---------------------
+Week 1 新增 :meth:`score_batch`(多張一次 forward),單張 :meth:`get_technical_score` 維持不變。
+Week 3a 由 ``BatchCollector`` 接入,並把批次前處理從「center-crop 成正方形」改為
+「每張走與單張完全相同的 :meth:`_preprocess_single` 保比例縮放 + 對批內最大 H/W zero-padding」再 stack
+—— 內容區與單張逐像素一致,差異僅來自 padding 區,最大化與單張分數的一致性。
 
 設計模式
 --------
-- **Template Method**：與單張共用 ``_preprocess`` 與 ``_clamp_score``，避免重複。
+- **Template Method**：批次直接複用單張的 :meth:`_preprocess_single` 與 :meth:`_clamp_score`，
+  保證內容前處理一致、避免重複。
 - **Null Object**：失敗時整批回填 ``DEFAULT_FALLBACK_SCORE``，下游無需特例處理。
 """
 import torch
+import torch.nn.functional as F
 import gc
 from PIL import Image
 import torchvision.transforms as transforms
@@ -25,10 +28,6 @@ from config.model_config import (
     SCORE_MIN,
     SCORE_MAX,
 )
-
-
-# Batch 模式統一邊長：短邊縮放後再 center-crop 至正方形，便於 stack
-_BATCH_SQUARE_SIDE = MUSIQ_MAX_SHORT_SIDE
 
 
 class MusiqModelManager(BaseModelManager):
@@ -69,8 +68,9 @@ class MusiqModelManager(BaseModelManager):
         """
         對多張 PIL 圖片一次 forward，回傳 0~100 分數列表（與輸入順序一致）。
 
-        為了在 GPU 上 stack 成單一 batch tensor，所有圖片統一 resize 至
-        ``MUSIQ_MAX_SHORT_SIDE × MUSIQ_MAX_SHORT_SIDE`` 正方形（短邊縮放 + 長邊 center-crop）。
+        每張先走與單張完全相同的 :meth:`_preprocess_single`（保比例縮放，短邊 ≤ MUSIQ_MAX_SHORT_SIDE），
+        轉 tensor 後對批內最大 (H, W) 做右下 zero-padding，再 stack 成 ``[N, C, maxH, maxW]`` 一次 forward。
+        如此每張的內容前處理與單張逐像素一致，分數差異僅來自 padding 區（不裁切、不丟內容）。
         失敗時整批回填 ``DEFAULT_FALLBACK_SCORE``，呼叫端無需特例處理。
         """
         if not pil_images:
@@ -78,13 +78,20 @@ class MusiqModelManager(BaseModelManager):
             return []
 
         try:
-            # 所有圖片統一裁切到相同邊長後再 stack
+            # 與單張同一條前處理 → 各張尺寸可不同（保比例，不裁切）
             tensors = [
-                self.transform(self._preprocess_for_batch(img)).to(self.device)
+                self.transform(self._preprocess_single(img)).to(self.device)
                 for img in pil_images
             ]
-            # [N, C, H, W]
-            batch_tensor = torch.stack(tensors, dim=0)
+            # 對批內最大高/寬做右下 padding（內容靠左上、補 0=黑），使形狀一致可 stack
+            max_h = max(t.shape[1] for t in tensors)
+            max_w = max(t.shape[2] for t in tensors)
+            # F.pad 參數順序為 (左, 右, 上, 下)：只補右與下，保持內容區與單張對齊
+            padded = [
+                F.pad(t, (0, max_w - t.shape[2], 0, max_h - t.shape[1]))
+                for t in tensors
+            ]
+            batch_tensor = torch.stack(padded, dim=0)  # [N, C, maxH, maxW]
 
             with torch.no_grad():
                 # PyIQA metric_network 接受 batch tensor，回傳 [N] 形狀的分數
@@ -115,29 +122,6 @@ class MusiqModelManager(BaseModelManager):
             new_size = (int(width * scale), int(height * scale))
             pil_image = pil_image.resize(new_size, Image.Resampling.BILINEAR)
         return pil_image
-
-    @staticmethod
-    def _preprocess_for_batch(pil_image: Image.Image) -> Image.Image:
-        """
-        Batch 路徑前處理：短邊縮至 ``_BATCH_SQUARE_SIDE``，長邊 center-crop 至同邊長。
-
-        統一邊長以滿足 ``torch.stack`` 的形狀要求。
-        若品質壓測發現偏差過大，Week 3a 可改為 dynamic padding 取代裁切。
-        """
-        if pil_image.mode != "RGB":
-            pil_image = pil_image.convert("RGB")
-
-        width, height = pil_image.size
-        # Step 1：等比縮放，使短邊等於 _BATCH_SQUARE_SIDE
-        scale = _BATCH_SQUARE_SIDE / min(width, height)
-        new_size = (int(round(width * scale)), int(round(height * scale)))
-        scaled = pil_image.resize(new_size, Image.Resampling.BILINEAR)
-
-        # Step 2：對長邊 center-crop 至 _BATCH_SQUARE_SIDE，得正方形輸入
-        new_w, new_h = scaled.size
-        left = (new_w - _BATCH_SQUARE_SIDE) // 2
-        top  = (new_h - _BATCH_SQUARE_SIDE) // 2
-        return scaled.crop((left, top, left + _BATCH_SQUARE_SIDE, top + _BATCH_SQUARE_SIDE))
 
     @staticmethod
     def _clamp_score(raw_score: float) -> float:

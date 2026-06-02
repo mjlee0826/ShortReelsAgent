@@ -3,6 +3,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
 
+from config.media_processor_config import BATCH_COLLECT_TIMEOUT_MS, LAION_BATCH_SIZE
+from config.pipeline_config import LAION_BATCH_ENABLED
+from media_processor.pipeline.batch_collector import BatchCollectorRegistry, BatchSpec
 from media_processor.pipeline.context import AssetContext
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
 from media_processor.pipeline.stages.frame_analysis import get_frame_analysis
@@ -11,6 +14,20 @@ if TYPE_CHECKING:
     from model.laion_model_manager import LaionModelManager
 
 _STAGE_NAME = "aes_score"
+
+# 跨 asset 共享的 LAION 合批規格(CLIP 固定 resize 224²,單張/批次分數完全一致,預設安全可開)
+_LAION_SPEC = BatchSpec(
+    key="laion",
+    batch_size=LAION_BATCH_SIZE,
+    timeout_ms=BATCH_COLLECT_TIMEOUT_MS,
+    enabled=LAION_BATCH_ENABLED,
+)
+
+
+def _laion_batch(images: list) -> list:
+    """BatchCollector 合批函式:lazy 取得 LAION singleton 後一次評分多張(順序一致)。"""
+    from model.laion_model_manager import LaionModelManager
+    return LaionModelManager().score_batch(images)
 
 
 class AesScoreStage(Stage):
@@ -34,7 +51,12 @@ class AesScoreStage(Stage):
         return self._laion
 
     def run(self, context: AssetContext) -> None:
-        """計算美學分並寫入當前幀的 aes_score;代表幀缺失時跳過。"""
+        """計算美學分並寫入當前幀的 aes_score;代表幀缺失時跳過。啟用合批走 collector,否則單張。"""
         frame = get_frame_analysis(context)
-        if frame.pil_image is not None:
+        if frame.pil_image is None:
+            return
+        if LAION_BATCH_ENABLED:
+            collector = BatchCollectorRegistry.get(_LAION_SPEC, _laion_batch)
+            frame.aes_score = collector.submit(frame.pil_image).result()
+        else:
             frame.aes_score = self._engine().get_aesthetic_score(frame.pil_image)

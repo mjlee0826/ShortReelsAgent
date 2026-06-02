@@ -56,9 +56,12 @@ class HybridScheduler:
         if not contexts:
             return []
 
+        # 實際並行度取「上限」與 asset 數的較小值:小批不浪費 thread、也讓 Dynamic Batching 的
+        # inline stage(圖片 tech)有效合批量貼齊實際 asset 數;大批則受上限保護 RAM。
+        effective_parallel = min(len(contexts), self._max_assets_parallel)
         # driver 池與單次 run 綁定,結束即回收;ResourceRegistry 則跨 run 長存
         with ThreadPoolExecutor(
-            max_workers=self._max_assets_parallel,
+            max_workers=effective_parallel,
             thread_name_prefix=_DRIVER_THREAD_PREFIX,
         ) as driver_pool:
             futures = [driver_pool.submit(self._drive_one, ctx, tracker) for ctx in contexts]

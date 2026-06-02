@@ -35,9 +35,14 @@ _CPU_COUNT = os.cpu_count() or 4
 
 
 # ── Asset 驅動層並行度 ────────────────────────────────────────────────────────
-# HybridScheduler 同時推進幾個 asset driver。每 asset 解碼後 PIL/numpy 約 50–200MB,
-# 預設 4 約佔 1GB RAM。設為 1 等同序列化整條框架,可作為 rollback / 除錯安全閥。
-MAX_ASSETS_PARALLEL = _read_int_env("MAX_ASSETS_PARALLEL", 4)
+# HybridScheduler 同時推進幾個 asset driver 的「上限」;實際並行度 = min(asset 數, 本值)
+# (見 HybridScheduler.run)。每 asset 解碼後 PIL/numpy 約 50–200MB,本值越大越吃 RAM
+# (8 約 1.6GB、16 約 3.2GB)。
+# 與 Dynamic Batching 的共調:inline 執行的 stage(圖片 tech)其有效合批量 ≤ 本值,
+# 故要讓 MUSIQ batch 填得滿,本值需逼近 batch_size(預設 16);GPU-pool 類 stage 的批量則受
+# GPU_POOL_MULTIPLIER 影響。預設 8 兼顧 RAM 與合批;壓測時可用 env 調到 16。
+# 設為 1 等同序列化整條框架,可作為 rollback / 除錯安全閥。
+MAX_ASSETS_PARALLEL = _read_int_env("MAX_ASSETS_PARALLEL", 8)
 
 # ── 四種 Resource Pool 大小 (ExecutorRegistry) ────────────────────────────────
 # IO Pool:FFmpeg subprocess、檔案讀寫、雲端上傳。高併發可大量,但 FFmpeg 也吃 CPU,封頂 8。
@@ -81,3 +86,15 @@ USE_LEGACY_VIDEO_PIPELINE_DEFAULT = False
 USE_LEGACY_VIDEO_PIPELINE = _read_bool_env(
     "USE_LEGACY_VIDEO_PIPELINE", USE_LEGACY_VIDEO_PIPELINE_DEFAULT
 )
+
+# ── Dynamic Batching 逐模型開關 (Week 3a) ──────────────────────────────────────
+# 控制各 Stage 是否走 BatchCollector 合批;False 時該 Stage 回退原單張呼叫(對 driver 透明)。
+# 與 USE_LEGACY_* 同屬操作開關,供逐欄一致 A/B 與緊急 rollback:
+#   - LAION 因 CLIP 固定 resize 224²,單張/批次完全一致,預設安全可開。
+#   - MUSIQ 批次走「保比例 + padding」(非裁切),與單張僅 padding 區有微差;實機量 drift 超過
+#     ±0.01 時設 MUSIQ_BATCH_ENABLED=false 回到單張精確分數。
+#   - Whisper / AudioEnv 批次對變長輸入做 padding,亦可能有微差,可逐一關閉比對。
+MUSIQ_BATCH_ENABLED     = _read_bool_env("MUSIQ_BATCH_ENABLED", True)
+LAION_BATCH_ENABLED     = _read_bool_env("LAION_BATCH_ENABLED", True)
+WHISPER_BATCH_ENABLED   = _read_bool_env("WHISPER_BATCH_ENABLED", True)
+AUDIO_ENV_BATCH_ENABLED = _read_bool_env("AUDIO_ENV_BATCH_ENABLED", True)

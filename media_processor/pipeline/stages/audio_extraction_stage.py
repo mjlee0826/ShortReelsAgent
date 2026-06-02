@@ -18,7 +18,7 @@ class AudioExtractionStage(Stage):
     以 FFmpeg 抽出 AI 分析專用的單聲道 wav 暫存檔,路徑寫入 ``VideoWork.audio_path``。
 
     暫存檔登記到 ``context.temp_paths``,由 Pipeline 結束時統一刪除(取代原 process() 的 finally)。
-    標記為 IO 資源(ffmpeg 子程序);AudioInferenceStage 之後對此檔做 VAD / Whisper / 環境音分析。
+    標記為 IO 資源(ffmpeg 子程序);後續 VadStage / WhisperStage / AudioEnvStage 對此檔做 VAD / Whisper / 環境音分析。
     """
 
     def __init__(self):

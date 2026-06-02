@@ -46,11 +46,13 @@ MIDDLE_FRAME_POSITION     = 0.5              # 代表幀位置（對應 SALIENCY
 # ComplexVideo 無 technical_score 欄位，ContextCompressor 以此值強制通過畫質篩選
 TECHNICAL_SCORE_FORCE_PASS = 100.0
 
-# ── Dynamic Batching 參數 (Week 3a BatchCollector 啟用) ────────────────────────
-# 各支援 batch 推論的模型一次合批的最大樣本數
-MUSIQ_BATCH_SIZE   = 16
-LAION_BATCH_SIZE   = 16
-WHISPER_BATCH_SIZE = 4
+# ── Dynamic Batching 參數 (Week 3a BatchCollector 已接入) ──────────────────────
+# 各支援 batch 推論的模型一次合批的最大樣本數（上限；實際批量受上游併發與 timeout 決定）。
+# 開關（*_BATCH_ENABLED）與 asset 並行度（影響 inline stage 有效批量）放在 pipeline_config.py。
+MUSIQ_BATCH_SIZE     = 16
+LAION_BATCH_SIZE     = 16
+WHISPER_BATCH_SIZE   = 4
+AUDIO_ENV_BATCH_SIZE = 4
 # 末尾未達 batch_size 時，等待多少毫秒就強制觸發 forward，避免最後幾張卡死
 BATCH_COLLECT_TIMEOUT_MS = 50
 

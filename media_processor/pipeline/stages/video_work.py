@@ -12,9 +12,11 @@ CPython GIL 下單一 attribute 賦值為原子操作,無 torn write。
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from config.media_processor_config import MINIMUM_AUDIO_FILE_BYTES
 from media_processor.models import SubjectBbox
 from media_processor.pipeline.context import AssetContext
 from media_processor.pipeline.stages.frame_analysis import FrameAnalysis
@@ -48,7 +50,7 @@ class VideoWork:
     tc_file_path: Optional[str] = None   # TimecodeStage 燒錄後的時間碼影片(Complex)
     audio_path: Optional[str] = None     # AudioExtractionStage 抽出的 wav
 
-    # ── 音訊分析(AudioInferenceStage 產出)─────────────────────────────────
+    # ── 音訊分析(VadStage / WhisperStage / AudioEnvStage 產出)──────────────
     has_speech: bool = False
     spoken_language: str = ""
     audio_transcript: dict[str, Any] = field(default_factory=dict)
@@ -76,3 +78,17 @@ def get_video_work(context: AssetContext) -> VideoWork:
             f"VideoWork 尚未建立(asset={context.asset_id});DecodeVideoStage 必須先於其他影片 Stage 執行"
         )
     return work
+
+
+def audio_file_ready(audio_path: Optional[str]) -> bool:
+    """
+    判斷 AudioExtractionStage 抽出的 wav 是否為有效音訊(VAD / AudioEnv 共用守門)。
+
+    靜音 / 無音軌時 ffmpeg 會產出近乎空的 wav,小於 ``MINIMUM_AUDIO_FILE_BYTES`` 視為無效;
+    無效時音訊類 Stage 直接保留 VideoWork 預設(無語音 / 空轉錄 / 空環境音),對齊原 ``_analyze_audio`` 短路。
+    """
+    return bool(
+        audio_path
+        and os.path.exists(audio_path)
+        and os.path.getsize(audio_path) > MINIMUM_AUDIO_FILE_BYTES
+    )

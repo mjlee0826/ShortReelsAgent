@@ -13,6 +13,7 @@ import os
 import uuid
 
 from config.pipeline_config import EAGER_MODELS, MAX_ASSETS_PARALLEL
+from media_processor.pipeline.batch_collector import BatchCollectorRegistry
 from media_processor.pipeline.builder import PipelineBuilder
 from media_processor.pipeline.context import AssetContext, derive_media_kind
 from media_processor.pipeline.executor.executor_registry import ExecutorRegistry
@@ -119,5 +120,7 @@ class PipelineRunner:
         return contexts
 
     def shutdown(self) -> None:
-        """關閉底層資源池(伺服器正常運作下不需呼叫,程式結束自動回收)。"""
+        """關閉底層資源池與所有 BatchCollector(伺服器正常運作下不需呼叫,程式結束自動回收)。"""
         self._registry.shutdown()
+        # BatchCollector 的 worker 為 daemon thread,此處主動收工以利乾淨關閉
+        BatchCollectorRegistry.shutdown_all()
