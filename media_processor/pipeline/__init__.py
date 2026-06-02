@@ -28,6 +28,7 @@ from media_processor.pipeline.executor import (
     ModelPoolRegistry,
     detect_gpu_ids,
 )
+from media_processor.pipeline.node import StageNode
 from media_processor.pipeline.pipeline import Pipeline
 from media_processor.pipeline.runner import PipelineRunner
 from media_processor.pipeline.scheduler import HybridScheduler
@@ -37,7 +38,6 @@ from media_processor.pipeline.stage import (
     StageError,
     StageMeta,
 )
-from media_processor.pipeline.stage_group import StageGroup
 
 __all__ = [
     # Week 1 progress
@@ -61,5 +61,5 @@ __all__ = [
     "StageMeta",
     "StageError",
     "ResourceType",
-    "StageGroup",
+    "StageNode",
 ]

@@ -82,6 +82,10 @@ class AssetContext:
     error: Optional[str] = None     # status==error 時的錯誤訊息
     # 拆 Stage 後各 Stage 的中間產物暫存區(Week 2a 暫不使用,預留擴充)
     scratch: dict[str, Any] = field(default_factory=dict)
+    # 本 asset 處理期間產生、結束時需刪除的暫存檔絕對路徑(Week 2c:影片 audio wav / timecode mp4)。
+    # 建檔 Stage 以 append 登記(GIL 下 list.append 為原子操作,平行 Stage 併發登記安全);
+    # Pipeline.execute 在 finally 統一清除,success / rejected / error 三條路徑都會清(取代原 process() 的 finally)。
+    temp_paths: list[str] = field(default_factory=list)
 
     @property
     def is_success(self) -> bool:

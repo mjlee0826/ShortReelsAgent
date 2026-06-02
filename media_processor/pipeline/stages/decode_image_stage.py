@@ -6,6 +6,7 @@ from PIL import Image
 
 from media_processor.pipeline.context import AssetContext
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
+from media_processor.pipeline.stages.frame_analysis import FrameAnalysis
 from media_processor.pipeline.stages.image_work import IMAGE_WORK_KEY, ImageWork
 
 # HEIC/HEIF 支援:與既有 processor 一致,在模組載入時註冊(idempotent)
@@ -35,8 +36,9 @@ class DecodeImageStage(Stage):
         # 與原版一致:height 為 0 時 aspect_ratio 退 0.0,避免除零
         aspect_ratio = round(width / height, _ASPECT_RATIO_NDIGITS) if height > 0 else 0.0
 
+        # 整張圖即「代表幀」,放入共用的 FrameAnalysis;尺寸等圖片專有欄位留在 ImageWork
         context.scratch[IMAGE_WORK_KEY] = ImageWork(
-            pil_image=pil_image,
+            frame=FrameAnalysis(pil_image=pil_image),
             width=width,
             height=height,
             aspect_ratio=aspect_ratio,

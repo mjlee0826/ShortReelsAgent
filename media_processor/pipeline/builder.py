@@ -1,43 +1,58 @@
 """
-PipelineBuilder:依 asset 類型組裝 Pipeline (Builder Pattern)。
+PipelineBuilder:依 asset 類型與策略組裝 Pipeline 依賴圖 (Builder Pattern)。
 
-把「Pipeline 由哪些 StageGroup 組成」這個編排知識集中在這裡,呼叫端(Runner / Scheduler)
-只拿成品 Pipeline,不需知道 Stage 細節。Week 2b/2c 會在 ``_build_image_pipeline`` /
-``_build_video_pipeline`` 內把單一 LegacyStage 展開成多個 StageGroup,**呼叫端零改動**。
+把「Pipeline 由哪些 Stage、彼此依賴關係如何」這個編排知識集中在這裡,呼叫端(Runner / Scheduler)
+只拿成品 Pipeline,不需知道 Stage 細節。Week 2c 起改用 :class:`StageNode` 宣告**每個 Stage 的真依賴**
+(取代 StageGroup barrier),由 Pipeline 以拓樸順序排程 —— 無依賴的 Stage 真正並行、不互相 block。
+
+各依賴圖見 plan Week 2c D3;``USE_LEGACY_*_PIPELINE`` 旗標可回退單節點 Legacy 供 A/B 逐欄一致回歸。
 """
 from __future__ import annotations
 
-from config.pipeline_config import USE_LEGACY_IMAGE_PIPELINE
+from config.pipeline_config import (
+    USE_LEGACY_IMAGE_PIPELINE,
+    USE_LEGACY_VIDEO_PIPELINE,
+)
 from media_processor.pipeline.context import AssetContext, MediaKind
+from media_processor.pipeline.node import StageNode
 from media_processor.pipeline.pipeline import Pipeline
-from media_processor.pipeline.stage_group import StageGroup
+from media_processor.video_strategy import VideoStrategy
+
+# ── 共用 per-frame Stage(image / video 皆用)──────────────────────────────────
 from media_processor.pipeline.stages.aes_score_stage import AesScoreStage
-from media_processor.pipeline.stages.assembly_image_stage import AssemblyImageStage
 from media_processor.pipeline.stages.cv_features_stage import CVFeaturesStage
-from media_processor.pipeline.stages.decode_image_stage import DecodeImageStage
-from media_processor.pipeline.stages.exif_stage import ExifStage
 from media_processor.pipeline.stages.face_detect_stage import FaceDetectStage
-from media_processor.pipeline.stages.legacy_image_stage import LegacyImagePipelineStage
-from media_processor.pipeline.stages.legacy_video_stage import LegacyVideoPipelineStage
 from media_processor.pipeline.stages.reject_filter_stage import RejectFilterStage
-from media_processor.pipeline.stages.saliency_stage import SaliencyStage
-from media_processor.pipeline.stages.semantic_image_stage import SemanticImageStage
 from media_processor.pipeline.stages.tech_score_stage import TechScoreStage
 
-# Week 2a Legacy 單一群組名稱;Week 2b 圖片改用下方多群組編排
-_LEGACY_GROUP_NAME = "legacy"
-# 圖片 Pipeline 名稱(legacy 與細粒度兩種編排共用同一識別,下游無感)
+# ── 圖片專屬 Stage ────────────────────────────────────────────────────────────
+from media_processor.pipeline.stages.assembly_image_stage import AssemblyImageStage
+from media_processor.pipeline.stages.decode_image_stage import DecodeImageStage
+from media_processor.pipeline.stages.exif_stage import ExifStage
+from media_processor.pipeline.stages.legacy_image_stage import LegacyImagePipelineStage
+from media_processor.pipeline.stages.saliency_stage import SaliencyStage
+from media_processor.pipeline.stages.semantic_image_stage import SemanticImageStage
+
+# ── 影片專屬 Stage ────────────────────────────────────────────────────────────
+from media_processor.pipeline.stages.assembly_video_stage import AssemblyVideoStage
+from media_processor.pipeline.stages.audio_extraction_stage import AudioExtractionStage
+from media_processor.pipeline.stages.audio_inference_stage import AudioInferenceStage
+from media_processor.pipeline.stages.decode_video_stage import DecodeVideoStage
+from media_processor.pipeline.stages.event_bbox_stage import EventBboxStage
+from media_processor.pipeline.stages.legacy_video_stage import LegacyVideoPipelineStage
+from media_processor.pipeline.stages.motion_intensity_stage import MotionIntensityStage
+from media_processor.pipeline.stages.saliency_union_stage import SaliencyUnionStage
+from media_processor.pipeline.stages.scene_cut_stage import SceneCutStage
+from media_processor.pipeline.stages.semantic_video_stage import SemanticVideoStage
+from media_processor.pipeline.stages.timecode_stage import TimecodeStage
+
+# Pipeline 名稱(legacy 與細粒度兩種編排共用同一識別,下游無感)
 _IMAGE_PIPELINE_NAME = "image_pipeline"
-# Week 2b 圖片各 StageGroup 名稱(供日誌 / ProgressTracker 觀察群組邊界)
-_G0_DECODE = "g0_decode"
-_G1_TECH_SCORE = "g1_tech_score"
-_G2_REJECT_FILTER = "g2_reject_filter"
-_G3_PARALLEL = "g3_parallel"
-_G4_ASSEMBLY = "g4_assembly"
+_VIDEO_PIPELINE_NAME = "video_pipeline"
 
 
 class PipelineBuilder:
-    """依 ``AssetContext.media_kind`` 選擇並建構對應的 Pipeline。"""
+    """依 ``AssetContext.media_kind`` 與策略選擇並建構對應的 Pipeline 依賴圖。"""
 
     def build(self, context: AssetContext) -> Pipeline:
         """為單一 asset 建立 Pipeline(圖片或影片)。"""
@@ -45,54 +60,127 @@ class PipelineBuilder:
             return self._build_image_pipeline(context)
         return self._build_video_pipeline(context)
 
+    # ── 圖片 ─────────────────────────────────────────────────────────────────
+
     def _build_image_pipeline(self, context: AssetContext) -> Pipeline:
         """
-        圖片 Pipeline(Week 2b 細粒度編排,可旗標回退 Legacy)。
+        圖片 Pipeline(Week 2c DAG 表達,可旗標回退 Legacy)。
 
-        ``USE_LEGACY_IMAGE_PIPELINE=true``:回退 Week 2a 單一 ``[LegacyImagePipelineStage]``,
-        供 A/B 逐欄一致回歸與緊急 rollback。
-
-        預設(false):五群編排 ──
-          - G0 ``[DecodeImage]``           開圖、建 ImageWork
-          - G1 ``[TechScore]``             MUSIQ 技術分(供儘早 reject)
-          - G2 ``[RejectFilter]``          畫質不足即短路,後續群組自動跳過(Early Rejection)
-          - G3 ``[Semantic, Saliency, Aes, CVFeatures, FaceDetect, Exif]`` 大平行群
-          - G4 ``[AssemblyImage]``         唯一 join,組裝 metadata
-
-        **semantic 併入 G3 並放 list 第一個提交**:圖片語意只依賴解碼後的圖,與其他 G3 stage 無依賴,
-        故不必排在它們之後(避免 qwen 空等 CPU stage);放第一個提交可最早搶到 GpuGate,做到軟性 qwen 優先。
-        詳見 plan 設計決策 8/9。
+        依賴圖:``decode → tech → reject → {semantic, saliency, aes, cv, face, exif} → assembly``。
+        reject 之後的六個 Stage 並行(各只依賴 reject);reject 觸發時它們與 assembly 全被短路跳過。
+        輸出與 Week 2b 逐欄一致(只改排程,不改值)。
         """
         if USE_LEGACY_IMAGE_PIPELINE:
-            group = StageGroup(name=_LEGACY_GROUP_NAME, stages=[LegacyImagePipelineStage()])
-            return Pipeline(groups=[group], name=_IMAGE_PIPELINE_NAME)
+            return Pipeline([StageNode(LegacyImagePipelineStage())], name=_IMAGE_PIPELINE_NAME)
 
-        groups = [
-            StageGroup(name=_G0_DECODE, stages=[DecodeImageStage()]),
-            StageGroup(name=_G1_TECH_SCORE, stages=[TechScoreStage()]),
-            StageGroup(name=_G2_REJECT_FILTER, stages=[RejectFilterStage()]),
-            StageGroup(
-                name=_G3_PARALLEL,
-                stages=[
-                    # semantic 放第一個提交 → 最早搶 GpuGate(軟性 qwen 優先);依 strategy 走 Qwen/Gemini
-                    SemanticImageStage(context.image_strategy),
-                    SaliencyStage(),
-                    AesScoreStage(),
-                    CVFeaturesStage(),
-                    FaceDetectStage(),
-                    ExifStage(),
-                ],
-            ),
-            StageGroup(name=_G4_ASSEMBLY, stages=[AssemblyImageStage()]),
+        decode = DecodeImageStage()
+        tech = TechScoreStage()
+        reject = RejectFilterStage()
+        # reject 之後的平行群:semantic 依策略走 Qwen / Gemini
+        parallel = [
+            SemanticImageStage(context.image_strategy),
+            SaliencyStage(),
+            AesScoreStage(),
+            CVFeaturesStage(),
+            FaceDetectStage(),
+            ExifStage(),
         ]
-        return Pipeline(groups=groups, name=_IMAGE_PIPELINE_NAME)
+        nodes = [
+            StageNode(decode),
+            StageNode(tech, (decode.meta.name,)),
+            StageNode(reject, (tech.meta.name,)),
+            *[StageNode(stage, (reject.meta.name,)) for stage in parallel],
+            StageNode(AssemblyImageStage(), tuple(stage.meta.name for stage in parallel)),
+        ]
+        return Pipeline(nodes, name=_IMAGE_PIPELINE_NAME)
+
+    # ── 影片 ─────────────────────────────────────────────────────────────────
 
     def _build_video_pipeline(self, context: AssetContext) -> Pipeline:
-        """
-        影片 Pipeline。
+        """影片 Pipeline:旗標回退 Legacy,否則依 strategy 建 Simple / Complex 依賴圖。"""
+        if USE_LEGACY_VIDEO_PIPELINE:
+            return Pipeline([StageNode(LegacyVideoPipelineStage())], name=_VIDEO_PIPELINE_NAME)
+        if context.video_strategy == VideoStrategy.COMPLEX:
+            return self._build_complex_video_pipeline(context)
+        return self._build_simple_video_pipeline(context)
 
-        Week 2a:單一群組 ``[LegacyVideoPipelineStage]``。
-        Week 2c 展開為 G0 Decode → G1 大平行(音訊鏈 / 場景 / 動態)→ G2 ... → Semantic → Assembly。
+    def _build_simple_video_pipeline(self, context: AssetContext) -> Pipeline:
         """
-        group = StageGroup(name=_LEGACY_GROUP_NAME, stages=[LegacyVideoPipelineStage()])
-        return Pipeline(groups=[group], name="video_pipeline")
+        Simple 影片依賴圖(鏡像圖片的早 reject;Qwen 全局分析)。
+
+        ``decode → tech → reject → {semantic(Qwen), audio_infer, scene, motion, saliency_union,
+        aes, cv, face} → assembly``。audio_extract 只依賴 decode(與 tech 重疊、不被 reject gate;便宜 IO),
+        audio_infer 另依賴 audio_extract;reject 之後的工作在 reject 觸發時全被短路(連 whisper / qwen 都省)。
+        """
+        decode = DecodeVideoStage()
+        tech = TechScoreStage()
+        audio_extract = AudioExtractionStage()
+        reject = RejectFilterStage()
+        # reject 之後才解除依賴的工作(reject 觸發時全部跳過)
+        semantic = SemanticVideoStage(context.video_strategy)  # SIMPLE → Qwen(GPU)
+        audio_infer = AudioInferenceStage()
+        gated = [
+            semantic,
+            audio_infer,
+            SceneCutStage(),
+            MotionIntensityStage(),
+            SaliencyUnionStage(),
+            AesScoreStage(),
+            CVFeaturesStage(),
+            FaceDetectStage(),
+        ]
+        reject_name = reject.meta.name
+        nodes = [
+            StageNode(decode),
+            StageNode(tech, (decode.meta.name,)),
+            StageNode(audio_extract, (decode.meta.name,)),
+            StageNode(reject, (tech.meta.name,)),
+            # audio_infer 需「音訊已抽出」且「未被 reject」雙重前提
+            StageNode(audio_infer, (audio_extract.meta.name, reject_name)),
+            *[StageNode(stage, (reject_name,)) for stage in gated if stage is not audio_infer],
+            StageNode(AssemblyVideoStage(), tuple(stage.meta.name for stage in gated)),
+        ]
+        return Pipeline(nodes, name=_VIDEO_PIPELINE_NAME)
+
+    def _build_complex_video_pipeline(self, context: AssetContext) -> Pipeline:
+        """
+        Complex 影片依賴圖(Timecode 與所有非-Gemini 工作並行;Gemini 只等 Timecode)。
+
+        ``decode → {audio_extract→audio_infer, timecode→semantic(Gemini)→event_bbox, scene, cv, face}
+        → assembly``。timecode(最耗時的燒碼)只被 semantic 依賴,故與音訊鏈 / 場景 / 視覺特徵自然重疊;
+        semantic 不再被同群的 audio/cv/face 卡住(修正 StageGroup 時代的過度約束)。
+        """
+        decode = DecodeVideoStage()
+        audio_extract = AudioExtractionStage()
+        audio_infer = AudioInferenceStage()
+        timecode = TimecodeStage()
+        scene = SceneCutStage()
+        cv = CVFeaturesStage()
+        face = FaceDetectStage()
+        semantic = SemanticVideoStage(context.video_strategy)  # COMPLEX → Gemini(API)
+        event_bbox = EventBboxStage()
+
+        decode_name = decode.meta.name
+        nodes = [
+            StageNode(decode),
+            StageNode(audio_extract, (decode_name,)),
+            StageNode(audio_infer, (audio_extract.meta.name,)),
+            StageNode(timecode, (decode_name,)),
+            StageNode(scene, (decode_name,)),
+            StageNode(cv, (decode_name,)),
+            StageNode(face, (decode_name,)),
+            StageNode(semantic, (timecode.meta.name,)),       # Gemini 只等 timecode
+            StageNode(event_bbox, (semantic.meta.name,)),     # 逐 event bbox 需 Gemini 事件清單
+            StageNode(
+                AssemblyVideoStage(),
+                # event_bbox 已涵蓋 semantic(vlm_result);加 audio/scene/cv/face 湊齊所有 metadata 來源
+                (
+                    audio_infer.meta.name,
+                    scene.meta.name,
+                    cv.meta.name,
+                    face.meta.name,
+                    event_bbox.meta.name,
+                ),
+            ),
+        ]
+        return Pipeline(nodes, name=_VIDEO_PIPELINE_NAME)

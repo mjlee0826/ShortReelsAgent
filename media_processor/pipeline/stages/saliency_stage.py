@@ -38,5 +38,5 @@ class SaliencyStage(Stage):
     def run(self, context: AssetContext) -> None:
         """取得遮罩並換算 bbox(共用既有 staticmethod,計算與原版一致)。"""
         work = get_image_work(context)
-        mask = self._engine().get_saliency_mask(work.pil_image)
+        mask = self._engine().get_saliency_mask(work.frame.pil_image)
         work.saliency_bbox = MediaStrategy._compute_saliency_bbox(mask, work.width, work.height)

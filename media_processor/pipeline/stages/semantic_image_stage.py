@@ -59,9 +59,9 @@ class SemanticImageStage(Stage):
         work = get_image_work(context)
         if self._image_strategy == ImageStrategy.COMPLEX:
             work.vlm_result = self._gemini_engine().analyze_media(
-                work.pil_image, media_type=_MEDIA_TYPE_IMAGE, mode=TaskMode.COMPLEX_IMAGE_ANALYSIS
+                work.frame.pil_image, media_type=_MEDIA_TYPE_IMAGE, mode=TaskMode.COMPLEX_IMAGE_ANALYSIS
             )
         else:
             work.vlm_result = self._qwen_engine().analyze_media(
-                work.pil_image, media_type=_MEDIA_TYPE_IMAGE, mode=TaskMode.GLOBAL_ANALYSIS
+                work.frame.pil_image, media_type=_MEDIA_TYPE_IMAGE, mode=TaskMode.GLOBAL_ANALYSIS
             )

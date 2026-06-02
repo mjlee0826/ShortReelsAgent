@@ -32,9 +32,10 @@ class AssemblyImageStage(Stage):
     def run(self, context: AssetContext) -> None:
         """解析 bbox → 算 crop → 組 ImageMetadata → 寫入成功 result 並標記狀態。"""
         work = get_image_work(context)
+        frame = work.frame
 
         # 主體定位:有臉以臉部 bbox 覆蓋 saliency(與原 process() 一致)
-        subject_bbox = work.face_bbox if work.face_bbox is not None else work.saliency_bbox
+        subject_bbox = frame.face_bbox if frame.face_bbox is not None else work.saliency_bbox
         crop_feasibility = MediaStrategy._compute_crop_feasibility(subject_bbox, work.aspect_ratio)
 
         # 語意欄位以 .get 取值並沿用原版預設,確保缺欄位時行為一致
@@ -52,14 +53,14 @@ class AssemblyImageStage(Stage):
             camera_angle=vlm.get("camera_angle", ""),
             action_tags=vlm.get("action_tags", []),
             time_of_day=vlm.get("time_of_day", ""),
-            technical_score=round(work.tech_score, _SCORE_NDIGITS),
-            aesthetic_score=round(work.aes_score, _SCORE_NDIGITS),
-            brightness=work.brightness,
-            color_temperature=work.color_temperature,
-            dominant_colors=work.dominant_colors,
+            technical_score=round(frame.tech_score, _SCORE_NDIGITS),
+            aesthetic_score=round(frame.aes_score, _SCORE_NDIGITS),
+            brightness=frame.brightness,
+            color_temperature=frame.color_temperature,
+            dominant_colors=frame.dominant_colors,
             subject_bbox=subject_bbox,
             crop_feasibility=crop_feasibility,
-            faces=work.face_info,
+            faces=frame.face_info,
         )
 
         context.result = ProcessorResult(

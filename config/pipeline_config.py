@@ -71,3 +71,13 @@ USE_LEGACY_IMAGE_PIPELINE_DEFAULT = False
 USE_LEGACY_IMAGE_PIPELINE = _read_bool_env(
     "USE_LEGACY_IMAGE_PIPELINE", USE_LEGACY_IMAGE_PIPELINE_DEFAULT
 )
+
+# ── 影片 Pipeline 拆 Stage 切換 (Week 2c) ──────────────────────────────────────
+# False(預設):走 Week 2c 新拆的細粒度 Stage 依賴圖(DAG):Decode → Tech → Reject → 大平行群 → Assembly
+#   (Simple);Decode → (Timecode‖音訊‖場景‖視覺特徵) → Gemini → EventBbox → Assembly(Complex)。
+# True：回退 Week 2a 的單一 LegacyVideoPipelineStage,供 A/B 逐欄一致回歸與緊急 rollback。
+# 人類同組影片各跑一次 true / false,diff phase1_assets_metadata.json 即完成驗收(roadmap §13)。
+USE_LEGACY_VIDEO_PIPELINE_DEFAULT = False
+USE_LEGACY_VIDEO_PIPELINE = _read_bool_env(
+    "USE_LEGACY_VIDEO_PIPELINE", USE_LEGACY_VIDEO_PIPELINE_DEFAULT
+)

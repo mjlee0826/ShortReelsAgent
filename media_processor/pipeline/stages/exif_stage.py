@@ -24,4 +24,4 @@ class ExifStage(Stage):
     def run(self, context: AssetContext) -> None:
         """解析 EXIF 並寫入 ImageWork.exif(共用既有 staticmethod)。"""
         work = get_image_work(context)
-        work.exif = MediaStrategy._extract_exif_metadata(work.pil_image)
+        work.exif = MediaStrategy._extract_exif_metadata(work.frame.pil_image)
