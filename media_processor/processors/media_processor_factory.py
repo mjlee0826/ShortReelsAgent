@@ -4,10 +4,10 @@ import os
 from media_processor.media_strategy import MediaStrategy
 from media_processor.image_strategy import ImageStrategy
 from media_processor.video_strategy import VideoStrategy
-from media_processor.image_processor import ImageProcessor
-from media_processor.complex_image_processor import ComplexImageProcessor
-from media_processor.video_processor import VideoProcessor
-from media_processor.complex_video_processor import ComplexVideoProcessor
+from media_processor.processors.image_processor import ImageProcessor
+from media_processor.processors.complex_image_processor import ComplexImageProcessor
+from media_processor.processors.video_processor import VideoProcessor
+from media_processor.processors.complex_video_processor import ComplexVideoProcessor
 
 
 class MediaProcessorFactory:

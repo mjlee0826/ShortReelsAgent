@@ -1,6 +1,6 @@
 """一般影片處理器，使用本地 Qwen 進行全局語意分析。"""
 
-from media_processor.abstract_video_processor import AbstractVideoProcessor
+from media_processor.processors.abstract_video_processor import AbstractVideoProcessor
 from prompt_manager.task_mode import TaskMode
 
 

@@ -2,7 +2,7 @@ import os
 from media_tools.media_downloader import MediaDownloader
 from media_tools.ffmpeg_adapter import FFmpegAdapter
 from media_tools.audio_beat_extractor import AudioBeatExtractor
-from media_processor.complex_video_processor import ComplexVideoProcessor
+from media_processor.processors.complex_video_processor import ComplexVideoProcessor
 
 from template_engine.scene_cut_extractor import SceneCutExtractor
 from template_engine.blueprint_builder import BlueprintBuilder

@@ -8,7 +8,7 @@ DecodeStage / TechScoreStage / SemanticStage 等細粒度 Stage,屆時本 Stage 
 """
 from __future__ import annotations
 
-from media_processor.media_processor_factory import MediaProcessorFactory
+from media_processor.processors.media_processor_factory import MediaProcessorFactory
 from media_processor.pipeline.context import AssetContext, STATUS_ERROR
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
 
