@@ -259,7 +259,7 @@ L2 GpuGate(GPU 層,per-device)
 - **Week 3b `BudgetGate`**:帶 per-model VRAM cost,VRAM 夠就放行同卡併發。由 GPU Capacity Manager 啟動時 `BaseModelManager.register_gate_factory(BudgetGate)` 一行替換,**Manager 子類零改動**
 - CPU/雲端 API 模型依 `self.device` 自動跳過 L2(只取 L3)
 
-**BudgetGate 的真實紅利場景**(釐清):是「**同卡跨不同 model 併發**」(例:GPU0 上 Qwen 5GB + Whisper 3GB 同時 forward),**不是**「同卡同 model 跑多 asset」—— 後者受限於 Pool 一卡一 instance,要同卡多 instance 才行(已備 `(device_id, slot_id)` 結構,Week 3b 才有效)。
+**BudgetGate 的真實紅利場景**(釐清):主要是「**同卡跨不同 model 併發**」(例:GPU0 上 Qwen + Whisper 同時 forward)。「同卡同 model 跑多 asset」需同卡多 instance —— **✅ Week 3b 起由 `GpuCapacityManager` 依 VRAM 自動規劃**(`QWEN_MAX_SLOTS_PER_GPU`:`0`=auto 取「能真正並行的份數」、`>0`=上限),不必手填 slots;BudgetGate(非 BinaryGate)下這些同卡 instance 才真的能並行。另:`@oom_resilient`(同卡重試)+ `ModelPool.run_with_failover`(鄰居持續佔卡時跨卡換卡)兩層兜 OOM。
 
 > **⚠️ Week 3b 落地注意:`cost_gb` 必須是「forward 暫態峰值」,不是「常駐權重大小」**。
 > 模型 eager 常駐後,權重(如 Qwen 4-bit 6.4GB)無論有沒有 forward 都一直佔著 VRAM、載入時就鎖死了;
@@ -320,6 +320,11 @@ L2 GpuGate(GPU 層,per-device)
 - VRAM 不夠時 GPU Capacity Manager 自動降級該模型為 lazy
 
 這個策略對齊業界慣例(vLLM / Triton / TorchServe 都是啟動時 warm up,不 lazy)。
+
+> **✅ Week 3b 已實作**:`ModelPoolRegistry.warm_up` —— Qwen / Whisper / LAION / MUSIQ / AudioEnv / **Saliency** 走 capacity
+> pool(Saliency「每卡一份」多卡),**VAD / MediaPipe** 走 `_warm_up_auxiliary`(CPU singleton);**Gemini 不預載**
+> (雲端 client、無本地權重、未設 `GEMINI_API_KEY` 會讓啟動失敗)。啟動另印 `StartupReporter` 佈局表
+> (每卡 VRAM / 模型放置 / 各 pool 並行度),逐一推 `MODEL_WARMUP` 事件。`EAGER_MODELS=false` 可關。
 
 ### 5.3 GPU Capacity Manager(共用 GPU 適應)
 

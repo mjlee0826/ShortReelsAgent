@@ -519,6 +519,26 @@ Week 4b  ─ Layer 5(前端 Asset Management UI)            ~600 行 ─┘
 | 鄰居長期佔 VRAM 致 borrow 永久等待 | borrow 重檢有 `max_wait`(預設 30s)逾時盡力放行,OOM 由 `oom_resilient` 兜底 |
 | 小模型串流餓死 Qwen | BudgetGate `priority` 反餓死:Qwen 在等時低優先讓路 |
 
+### 後續強化(2026-06-04,本機結構/邏輯已驗;實機待跑)
+
+Week 3b 主體完成後,依使用者實機回饋再補的強化(本機注入假值驗證通過):
+
+- ✅ **同卡多 instance 自動規劃**:`QWEN_MAX_SLOTS_PER_GPU`(`0`=依 VRAM 自動算可並行份數、`>0`=上限);
+  per-model 上限表讓 Saliency 用 `1`(每卡一份)。
+- ✅ **placement 強化**:單卡小模型集中到「最不排擠 Qwen lane 的卡」(min-displacement,非最空卡);
+  放置硬條件改為「放得下 常駐+暫態+buffer」才放 —— 移除舊「min-1 強制至少一份」在瀕死/共用卡硬塞跑不動的
+  Qwen(實機共用 GPU hang 根因之一)。
+- ✅ **跨卡 OOM failover**:`ModelPool.run_with_failover` —— 某卡持續 OOM 自動換卡(補 `oom_resilient` 只能同卡重試的盲區)。
+- ✅ **Saliency 納入 capacity**:onnxruntime 綁「最空卡」+ `self.device=cuda:N` + `INFERENCE_VRAM_COST_GB` → 走 BudgetGate;
+  「每卡一份」多卡 + warmup(解掉它原本未納管、在共用卡 onnxruntime 自選 cuda:0 而 hang 的根因)。
+- ✅ **全模型 warmup**:saliency 走 capacity pool;VAD / MediaPipe 走 `_warm_up_auxiliary`(CPU);
+  Gemini 刻意跳過(雲端 client、無權重、未設 `GEMINI_API_KEY` 會讓啟動報錯)。VAD stage 改 `ResourceType.CPU`。
+- ✅ **觀測性**:啟動印 `StartupReporter` 佈局表(每卡 VRAM / 模型放置 / 各 pool 並行度);`StallWatchdog` 心跳印
+  進行中 stage + **`faulthandler` dead-man dump**(GIL 被 C 擴充凍住也能從 C 層 dump 全 thread 堆疊;另註冊 `SIGUSR1`
+  手動 dump,免 py-spy / root);Phase 1 總耗時計時(`runner.last_run_elapsed_sec`)。
+- ✅ **Worker pool 調校**:`MAX_ASSETS_PARALLEL`、IO/CPU/GPU/API 池大小依實機(40 核 / 4×24GB)調整;GPU 池綁 `MAX_ASSETS_PARALLEL` 下限。
+- ⬜(實機)上述多卡放置、OOM 換卡、saliency 的 onnxruntime `CUDAExecutionProvider` 綁卡,仍待多 GPU 機驗證。
+
 ---
 
 ## 9. Week 3c:Layer 4 WebSocket 接前端

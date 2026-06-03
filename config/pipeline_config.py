@@ -109,6 +109,11 @@ LAION_BATCH_ENABLED     = _read_bool_env("LAION_BATCH_ENABLED", True)
 WHISPER_BATCH_ENABLED   = _read_bool_env("WHISPER_BATCH_ENABLED", True)
 AUDIO_ENV_BATCH_ENABLED = _read_bool_env("AUDIO_ENV_BATCH_ENABLED", True)
 
+# ── MediaPipe Face Detect Pool ────────────────────────────────────────────────
+# 每個 asset 可獨立借出一個 FaceDetector instance → 上限取 MAX_ASSETS_PARALLEL（zero-queue）。
+# 超過 MAX_ASSETS_PARALLEL 個 instance 不會帶來額外並行收益，故以此為上限避免浪費記憶體。
+MEDIAPIPE_POOL_SIZE: int = MAX_ASSETS_PARALLEL
+
 # ── 卡住偵測 Watchdog (Week 3b 觀測性) ─────────────────────────────────────────
 # 背景 daemon 每隔 heartbeat 秒印出「目前進行中的 stage + 已執行秒數」，超過 stall_warn 秒標 ⚠。
 # 只在「有進行中 stage」時才印（idle 不洗版）；processor 疑似卡住時用來看卡在哪個 stage、

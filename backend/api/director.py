@@ -8,6 +8,7 @@ from typing import Optional, Dict
 from backend.services.director_service import DirectorService
 from backend.services.render_service import RenderService
 from backend.auth.logto_jwt_verifier import verify_token
+from config.app_config import ASSETS_DIR
 
 router = APIRouter()
 director_service = DirectorService()
@@ -15,7 +16,7 @@ render_service = RenderService()
 
 # 允許上傳的音訊副檔名白名單
 _ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"}
-_ASSETS_BASE_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
+_ASSETS_BASE_PATH = ASSETS_DIR
 
 
 class GenerateRequest(BaseModel):

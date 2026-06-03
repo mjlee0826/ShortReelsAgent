@@ -66,7 +66,13 @@ __all__ = [
     "DEFAULT_FALLBACK_SCORE",
     "SCORE_MIN",
     "SCORE_MAX",
+    # 本地模型權重目錄
+    "MODEL_WEIGHTS_DIR",
 ]
+
+# ── 本地模型權重目錄 ───────────────────────────────────────────────────────────
+# LAION 與 MediaPipe 的 .pth / .tflite 權重存放於此；首次缺檔時 auto-download 到同路徑
+MODEL_WEIGHTS_DIR = os.environ.get("MODEL_WEIGHTS_DIR", "/data1/cache/mjlee/models")
 
 # ── Gemini ────────────────────────────────────────────────────────────────────
 GEMINI_DEFAULT_MODEL = 'gemini-2.5-flash'

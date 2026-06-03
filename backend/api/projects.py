@@ -13,10 +13,11 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from backend.auth.logto_jwt_verifier import verify_token
+from config.app_config import ASSETS_DIR
 
 router = APIRouter()
 
-_ASSETS_BASE_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
+_ASSETS_BASE_PATH = ASSETS_DIR
 
 # --- 允許的媒體副檔名（用於計算素材數量）---
 _MEDIA_EXTENSIONS = {'.mp4', '.mov', '.jpg', '.jpeg', '.png', '.heic', '.heif', '.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg'}

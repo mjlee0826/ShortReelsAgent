@@ -3,6 +3,7 @@ import json
 import uuid
 import shutil
 from backend.services.remotion_adapter import RemotionAdapter
+from config.app_config import TEMP_WORKSPACES_DIR
 
 class RenderWorkspace:
     """
@@ -30,8 +31,7 @@ class RenderService:
     Service Pattern: 統籌 SSR 算圖的商業邏輯流程。
     """
     def __init__(self):
-        self.project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        self.workspace_base = os.path.join(self.project_root, "temp_workspaces")
+        self.workspace_base = TEMP_WORKSPACES_DIR
         self.adapter = RemotionAdapter()
 
     def create_workspace(self) -> RenderWorkspace:

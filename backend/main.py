@@ -10,6 +10,7 @@ sys.path.append(PROJECT_ROOT)
 # 【關鍵修正】在讀取任何環境變數之前，必須先載入 .env 檔案
 load_dotenv()
 
+from config.app_config import ASSETS_DIR, TEMP_TEMPLATES_DIR
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,17 +30,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# [1] 影片素材區：掛載使用者的專案資料夾
-ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
+# [1] 影片素材區：掛載使用者的專案資料夾（指向本地 /data1，避免 NFS hang）
 if not os.path.exists(ASSETS_DIR):
     os.makedirs(ASSETS_DIR)
 app.mount("/static", StaticFiles(directory=ASSETS_DIR), name="static")
 
-# [2] 全域系統快取區：掛載 temp_templates
-CACHE_DIR = os.path.join(PROJECT_ROOT, "temp_templates")
-if not os.path.exists(CACHE_DIR):
-    os.makedirs(CACHE_DIR)
-app.mount("/cache", StaticFiles(directory=CACHE_DIR), name="cache")
+# [2] 全域系統快取區：掛載 temp_templates（指向本地 /data1，避免 NFS hang）
+if not os.path.exists(TEMP_TEMPLATES_DIR):
+    os.makedirs(TEMP_TEMPLATES_DIR)
+app.mount("/cache", StaticFiles(directory=TEMP_TEMPLATES_DIR), name="cache")
 
 app.include_router(director_router, prefix="/api")
 app.include_router(projects_router, prefix="/api")

@@ -33,6 +33,7 @@ from config.model_config import (
     LAION_SCORE_MAX,
     LAION_WEIGHT_FILENAME,
     LAION_WEIGHT_URL,
+    MODEL_WEIGHTS_DIR,
     DEFAULT_FALLBACK_SCORE,
     SCORE_MIN,
     SCORE_MAX,
@@ -80,8 +81,9 @@ class LaionModelManager(BaseModelManager):
 
             self.mlp = LAIONAestheticMLP(LAION_MLP_INPUT_SIZE).to(self.device).eval()
 
-            # 權重固定存放在 model/ 目錄旁，避免 cwd 差異
-            weight_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), LAION_WEIGHT_FILENAME)
+            # 權重存放於本地熱資料目錄（避免 NFS 讀取，首次缺檔時 auto-download）
+            os.makedirs(MODEL_WEIGHTS_DIR, exist_ok=True)
+            weight_path = os.path.join(MODEL_WEIGHTS_DIR, LAION_WEIGHT_FILENAME)
             if not os.path.exists(weight_path):
                 print("[LAION] 首次使用，正在下載 Aesthetic 權重...")
                 urllib.request.urlretrieve(LAION_WEIGHT_URL, weight_path)

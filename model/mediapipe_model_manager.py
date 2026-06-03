@@ -23,6 +23,7 @@ from config.model_config import (
     MEDIAPIPE_MIN_DETECTION_CONFIDENCE,
     MEDIAPIPE_FACE_MODEL_FILENAME,
     MEDIAPIPE_FACE_MODEL_URL,
+    MODEL_WEIGHTS_DIR,
 )
 
 # 相對座標 → 百分比的換算係數與上下界（避免 magic number）
@@ -47,11 +48,9 @@ class MediaPipeModelManager(BaseModelManager):
         self.device = "cpu"
 
         with self._log_load("MediaPipe"):
-            # 模型檔固定存放在 model/ 目錄旁，避免 cwd 差異（與 LAION 權重作法一致）
-            model_path = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)),
-                MEDIAPIPE_FACE_MODEL_FILENAME,
-            )
+            # 模型檔存放於本地熱資料目錄（避免 NFS 讀取，首次缺檔時 auto-download）
+            os.makedirs(MODEL_WEIGHTS_DIR, exist_ok=True)
+            model_path = os.path.join(MODEL_WEIGHTS_DIR, MEDIAPIPE_FACE_MODEL_FILENAME)
             if not os.path.exists(model_path):
                 print("[MediaPipe] 首次使用，正在下載臉部偵測模型...")
                 urllib.request.urlretrieve(MEDIAPIPE_FACE_MODEL_URL, model_path)

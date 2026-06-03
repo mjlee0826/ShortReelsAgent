@@ -1,6 +1,7 @@
 import os
 import json
 from datetime import datetime, timezone
+from config.app_config import ASSETS_DIR, TEMP_TEMPLATES_DIR
 from media_processor.video_strategy import VideoStrategy
 from media_processor.pipeline import PipelineRunner
 from media_tools.media_standardizer import MediaStandardizer
@@ -21,7 +22,7 @@ class DirectorService:
     Service Pattern: 負責協調整個 AI 剪輯流水線 (Pipeline)
     """
     def __init__(self):
-        self.base_assets_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
+        self.base_assets_path = ASSETS_DIR
         self.standardizer = MediaStandardizer()
         # Phase 1 感知分析的並行流水線 Facade（Week 2a 取代原序列迴圈）
         self.pipeline_runner = PipelineRunner()
@@ -188,9 +189,7 @@ class DirectorService:
             
             if source_audio_path and os.path.exists(source_audio_path):
                 try:
-                    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                    cache_dir = os.path.join(project_root, "temp_templates")
-                    rel_path = os.path.relpath(source_audio_path, cache_dir)
+                    rel_path = os.path.relpath(source_audio_path, TEMP_TEMPLATES_DIR)
                     audio_url = f"{self.backend_url}/cache/{rel_path}".replace('\\', '/')
                     
                     if "bgm_track" in final_blueprint and isinstance(final_blueprint["bgm_track"], dict):

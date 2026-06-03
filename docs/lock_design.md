@@ -116,6 +116,18 @@ BaseModelManager.register_gate_factory(
 所有 Manager 子類繼續用 `inference_guard()`,零修改。`INFERENCE_VRAM_COST_GB` 須填**forward 暫態峰值**
 (非常駐權重);常駐權重已在 `total_gb` 扣除,填錯成權重會重複扣、gate 過度保守。
 
+### OOM 容錯:同卡重試 + 跨卡 failover（✅ Week 3b）
+
+兩層分工,對應「瞬時 OOM」與「持續 OOM」:
+
+- **同卡瞬時 OOM** → `@oom_resilient` 裝飾器(套 `@synchronized_inference` **外層**):catch CUDA OOM →
+  鎖外 `empty_cache()` + 線性 backoff → 重試 ≤ N(`OOM_RETRY_MAX_ATTEMPTS`),耗盡 re-raise。每次重試都
+  重新取 L2/L3,給同卡其他 forward / 鄰居 process 排空時間。GPU manager 的 broad except 前先
+  `if is_cuda_oom(e): raise`,不再把 OOM 吞成 null object。
+- **同卡持續 OOM(鄰居佔住該卡)** → `ModelPool.run_with_failover(fn)`:同卡重試無效時**改借不同 device
+  的 instance** 重試,直到成功或試完所有不同卡。換卡發生在 L1(借出層),與 `oom_resilient`(同卡)分工互補。
+  semantic(Qwen)/ saliency / 各 batch_fn 都走這條;單卡 pool 自動退化為單次借出(無回歸)。
+
 ---
 
 ## 5. 同卡多 instance Pool 結構
@@ -131,12 +143,16 @@ qwen_pool = ModelPool(QwenManager, slots=[
 ])
 ```
 
-要支援這個結構需要兩個基礎變動:
+要支援這個結構需要兩個基礎變動(Week 1 已備):
 - `BaseModelManager` singleton key 從 `device_id` 改 `(device_id, slot_id)` tuple
 - `ModelPool` 介面從 `gpu_ids: list[int]` 改 `slots: list[GpuSlot]`(`gpu_ids` 保留為 backward-compat alias)
 
-**Week 1 結構就緒,但 BinaryGate 下同卡兩 instance forward 仍會被 L2 序列化,
-紅利要等 Week 3b BudgetGate 才現**。
+**✅ Week 3b 起由 `GpuCapacityManager` 自動規劃 slots,呼叫端不必手填**:
+- **Qwen**:依該卡 free VRAM 自動算同卡份數(`QWEN_MAX_SLOTS_PER_GPU`:`0`=auto 取「能真正並行的份數」
+  = `floor((free−小模型常駐−buffer)/(resident+transient))`、`>0`=上限)。BudgetGate(非 BinaryGate)下
+  同卡多 instance 才真的能並行 forward —— 紅利現了。
+- **Saliency**:以 per-model 上限 `1` 做「每卡一份」的多卡分散(小模型不需同卡多份)。
+- 規劃會避免把瀕死卡塞爆(放不下「常駐+暫態+buffer」就不放),並把單卡小模型集中到「最不排擠 Qwen lane」的卡。
 
 ---
 
@@ -192,11 +208,15 @@ BatchCollector worker thread(達 batch_size 或 timeout_ms):
 | 模型 | self.device | L2 | L3 |
 |---|---|---|---|
 | Qwen / Whisper / MUSIQ / LAION / AudioEnv | `cuda:N` | ✓ | ✓ |
+| **Saliency**(rembg/onnxruntime) | `cuda:N`(Week 3b 起綁卡 + 納入 capacity) | ✓ | ✓ |
 | MediaPipe | `cpu` | skip | ✓ |
-| Saliency(rembg)、VAD(silero) | 內部管理,不設 self.device | skip | ✓ |
+| **VAD**(silero) | `cpu`(Week 3b 起顯式標記;模型極輕本就跑 CPU) | skip | ✓ |
 | Gemini API | 無 device attribute | skip | ✓ |
 
-子類別零改動。
+> **⚠️ 更正(Week 3b)**:Saliency 原本「內部管理、不設 device → 跳過 L2」,在共用機上 onnxruntime 會自選
+> cuda:0、不受 BudgetGate 控管而 hang(實機事故根因)。改為由呼叫端綁「最空卡」+ 設 `self.device=cuda:N`
+> + `INFERENCE_VRAM_COST_GB`,forward 經 L2 BudgetGate;VAD 則顯式標 `cpu`(它本就該在 CPU、搬 GPU 反而更慢)。
+> 子類其餘零改動。
 
 ---
 
@@ -218,4 +238,6 @@ BatchCollector worker thread(達 batch_size 或 timeout_ms):
 
 ---
 
-*文件最後更新:2026-06-03(Week 3b:BudgetGate 實作 + priority 反餓死 + gate factory 簽名帶 device_id)*
+*文件最後更新:2026-06-04(Week 3b 後續:Saliency 納入 capacity/BudgetGate、VAD 顯式 CPU、
+同卡多 instance 由 capacity 自動規劃、OOM 同卡重試 + 跨卡 failover)*
+*前版:2026-06-03(Week 3b:BudgetGate + priority 反餓死 + gate factory 簽名帶 device_id)*
