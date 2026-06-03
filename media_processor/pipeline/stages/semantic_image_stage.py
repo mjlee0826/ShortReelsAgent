@@ -81,7 +81,10 @@ class SemanticImageStage(Stage):
         observer = ModelPoolRegistry.make_borrow_observer(
             context.tracker, context.asset_id, self.meta.name
         )
-        with ModelPoolRegistry.instance().get_pool(QwenModelManager).borrow(observer=observer) as qwen:
-            return qwen.analyze_media(
+        # run_with_failover:單卡持續 OOM(鄰居佔 VRAM)時自動換到別張卡重試,而非死守同卡
+        return ModelPoolRegistry.instance().get_pool(QwenModelManager).run_with_failover(
+            lambda qwen: qwen.analyze_media(
                 pil_image, media_type=_MEDIA_TYPE_IMAGE, mode=TaskMode.GLOBAL_ANALYSIS
-            )
+            ),
+            observer=observer,
+        )

@@ -40,7 +40,7 @@ from config.media_processor_config import (
     BORROW_VRAM_MAX_WAIT_SEC,
     GPU_SAFETY_BUFFER_GB,
 )
-from model.base_model_manager import BaseModelManager
+from model.base_model_manager import BaseModelManager, is_cuda_oom
 
 T = TypeVar("T", bound=BaseModelManager)
 
@@ -229,6 +229,91 @@ class ModelPool(Generic[T]):
         # 曾等待過才推 ready 事件（與 wait 成對，前端可收斂「等待中」狀態）
         if waited and observer is not None:
             observer.on_vram_ready(device_id, slot_id, self._free_scan(device_id))
+
+    def run_with_failover(
+        self,
+        fn: Callable[[T], object],
+        observer: Optional[PoolBorrowObserver] = None,
+        timeout: float | None = None,
+    ) -> object:
+        """
+        借出一個 instance 執行 ``fn``；若 ``fn`` 拋 CUDA OOM 就**改換不同 device 的 instance 重試**，
+        直到成功或試完所有不同的卡。專治「某張卡被鄰居 process 佔走 VRAM 而持續 OOM」——
+        在同一張卡上重試再多次也沒用，必須換卡。
+
+        與 manager 層 ``@oom_resilient`` 分工：
+        - ``@oom_resilient``：同卡**瞬時** OOM（empty_cache + backoff 重試同一張卡）。
+        - 本方法：同卡**持續** OOM → 換到別張卡。
+
+        單 instance（或單卡）pool 等於只跑一次（沒有別的卡可換），行為與 ``borrow`` 一致、無回歸。
+
+        Args:
+            fn:       對借到的 manager instance 執行的工作；其回傳值即本方法回傳值。
+            observer: borrow 即時 VRAM 重檢的觀察者（wait / ready 事件）。
+            timeout:  L1 借出佇列等待上限。
+
+        Raises:
+            最後一次 CUDA OOM（所有不同卡都 OOM 時）；或 ``fn`` 拋出的非 OOM 例外（原樣上拋）。
+        """
+        # 不同 device 數 = 最多換卡次數（每張卡至多試一輪）
+        distinct_devices = {getattr(inst, "_device_id", None) for inst in self._instances}
+        tried_devices: set = set()
+        last_oom: Optional[Exception] = None
+        for _ in range(len(distinct_devices)):
+            idx = self._acquire_preferring(tried_devices, timeout)
+            instance = self._instances[idx]
+            try:
+                # 借出前同樣做即時 VRAM 重檢（換到的新卡也要確認 free 夠）
+                self._await_vram(instance, observer)
+                return fn(instance)
+            except Exception as exc:
+                if not is_cuda_oom(exc):
+                    raise  # 非 OOM 不在 failover 職責內，原樣上拋（保持既有錯誤語意）
+                last_oom = exc
+                device_id = getattr(instance, "_device_id", None)
+                tried_devices.add(device_id)
+                print(
+                    f"[ModelPool failover] {type(instance).__name__} cuda:{device_id} 持續 OOM，"
+                    f"改換其他卡重試（已試 {sorted(d for d in tried_devices if d is not None)}）"
+                )
+            finally:
+                # 不論成功 / OOM / 例外都歸還槽位，避免池子被耗盡
+                self._available.put(idx)
+        # 所有不同卡都 OOM → 拋最後一次（交由 Pipeline 隔離成 asset error）
+        if last_oom is not None:
+            raise last_oom
+        # distinct_devices 至少 1、迴圈必跑；理論上不會到這
+        raise RuntimeError("run_with_failover：pool 無可用 instance")
+
+    def _acquire_preferring(self, avoid_devices: set, timeout: float | None) -> int:
+        """
+        從可用佇列借一個 instance，盡量避開 ``avoid_devices`` 的卡（給 failover 換卡用）。
+
+        先阻塞取一個（保證至少一個）；若它在 avoid set，再非阻塞地多撈、找出不在 avoid 的，
+        把沒選中的放回。全部都在 avoid（無其他卡可換）時退回最先取得的那個。
+        """
+        first = self._available.get(timeout=timeout)
+        if getattr(self._instances[first], "_device_id", None) not in avoid_devices:
+            return first
+        # first 在 avoid set：非阻塞撈其餘的找「不在 avoid」的
+        held: list[int] = []
+        chosen: Optional[int] = None
+        while True:
+            try:
+                idx = self._available.get_nowait()
+            except queue.Empty:
+                break
+            if getattr(self._instances[idx], "_device_id", None) not in avoid_devices:
+                chosen = idx
+                break
+            held.append(idx)
+        # 沒被選中的 avoid instances 全部放回
+        for idx in held:
+            self._available.put(idx)
+        if chosen is not None:
+            self._available.put(first)  # 改用 chosen，把 first 放回佇列
+            return chosen
+        return first  # 沒有「不在 avoid」的可借，只能用 first（保持借出）
 
     @staticmethod
     def _default_free_scan(device_id: int) -> float:

@@ -10,9 +10,16 @@ PipelineRunner:Phase 1 素材感知的對外單一入口 (Facade Pattern)。
 from __future__ import annotations
 
 import os
+import time
 import uuid
 
-from config.pipeline_config import EAGER_MODELS, MAX_ASSETS_PARALLEL
+from config.pipeline_config import (
+    EAGER_MODELS,
+    MAX_ASSETS_PARALLEL,
+    WATCHDOG_ENABLED,
+    WATCHDOG_HEARTBEAT_SEC,
+    WATCHDOG_STALL_WARN_SEC,
+)
 from media_processor.pipeline.batch_collector import BatchCollectorRegistry
 from media_processor.pipeline.builder import PipelineBuilder
 from media_processor.pipeline.context import AssetContext, derive_media_kind
@@ -23,7 +30,9 @@ from media_processor.pipeline.progress import (
     ProgressObserver,
     ProgressTracker,
 )
+from media_processor.pipeline.progress.watchdog import StallWatchdog
 from media_processor.pipeline.scheduler.hybrid_scheduler import HybridScheduler
+from media_processor.pipeline.startup_report import StartupReporter
 from media_processor.video_strategy import VideoStrategy
 
 
@@ -60,6 +69,8 @@ class PipelineRunner:
         # Layer 3 排程:Builder + HybridScheduler
         self._builder = PipelineBuilder()
         self._scheduler = HybridScheduler(self._registry, self._builder, max_assets_parallel)
+        # Phase 1 最近一次 run 的總耗時(秒);run() 結束時寫入,供外部查詢 / 測試
+        self.last_run_elapsed_sec: float | None = None
 
         print(f"[PipelineRunner] {self._registry.describe()}")
         if eager_models:
@@ -67,6 +78,13 @@ class PipelineRunner:
             # 讓第一個 asset 不再卡載入;無 CUDA 時 warm_up 自動 no-op
             print("[PipelineRunner] EAGER_MODELS=true,啟動期依 capacity 規劃預載熱門模型...")
             self._model_pool_registry.warm_up()
+
+        # Week 3b:warm up 後印啟動佈局表(GPU VRAM 放置 + 各 pool 並行度),讓使用者一眼確認資源分佈
+        print(StartupReporter(
+            capacity_manager=self._model_pool_registry.capacity,
+            executor_registry=self._registry,
+            max_assets_parallel=max_assets_parallel,
+        ).render())
 
     def run(
         self,
@@ -95,7 +113,29 @@ class PipelineRunner:
         for observer in self._observers:
             tracker.subscribe(observer)
 
-        results = self._scheduler.run(contexts, tracker)
+        # Week 3b:卡住偵測 watchdog(背景 daemon,定期印進行中 stage;本次 run 結束即收工)
+        watchdog = (
+            StallWatchdog(WATCHDOG_HEARTBEAT_SEC, WATCHDOG_STALL_WARN_SEC)
+            if WATCHDOG_ENABLED else None
+        )
+        if watchdog is not None:
+            tracker.subscribe(watchdog)
+            watchdog.start()
+        # Phase 1 計時:記錄「處理所有素材」的總 wall time(從排程開始到全部結束)
+        start_ts = time.perf_counter()
+        try:
+            results = self._scheduler.run(contexts, tracker)
+        finally:
+            # 無論成功 / 例外都停掉背景執行緒,避免殘留 daemon
+            if watchdog is not None:
+                watchdog.stop()
+            # 計時與摘要寫在 finally,例外中斷也能看到已花多久
+            self.last_run_elapsed_sec = time.perf_counter() - start_ts
+            print(
+                f"[PipelineRunner] Phase 1 處理 {len(contexts)} 個素材完成,"
+                f"總耗時 {self.last_run_elapsed_sec:.1f}s"
+                f"(平均 {self.last_run_elapsed_sec / len(contexts):.1f}s/素材)"
+            )
         # 只收成功的 asset,順序已由 scheduler 依 index 排好
         return [ctx.result for ctx in results if ctx.is_success and ctx.result is not None]
 

@@ -241,5 +241,5 @@ def borrow_for_batch(
         return fn(model_class())
     registry = ModelPoolRegistry.instance()
     observer = registry.startup_borrow_observer(stage_name)
-    with registry.get_pool(model_class).borrow(observer=observer) as manager:
-        return fn(manager)
+    # run_with_failover:多卡 pool 在某卡持續 OOM 時自動換卡;單卡 pool 退化為單次借出(無回歸)
+    return registry.get_pool(model_class).run_with_failover(fn, observer=observer)

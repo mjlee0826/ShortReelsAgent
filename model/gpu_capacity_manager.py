@@ -27,7 +27,7 @@ GpuCapacityManager：啟動時掃描各 GPU free VRAM，規劃模型放置 + 每
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from config.media_processor_config import (
@@ -82,6 +82,9 @@ class CapacityPlan:
     lazy_models: frozenset[type]
     # 本次規劃涵蓋的 GPU id（空 = 無 CUDA）
     gpu_ids: tuple[int, ...]
+    # plan 當下掃到的每卡 free / total VRAM（GB），供啟動佈局報表顯示（預設空字典向後相容）
+    free_by_device: dict[int, float] = field(default_factory=dict)
+    total_by_device: dict[int, float] = field(default_factory=dict)
 
 
 class GpuCapacityManager:
@@ -208,6 +211,32 @@ class GpuCapacityManager:
             f"placements=[{placements}], lazy={lazy})"
         )
 
+    def device_rows(self) -> list[tuple[int, float, float, float]]:
+        """每卡 VRAM 報表列：``(device_id, total_gb, plan時free_gb, BudgetGate total預算_gb)``。"""
+        current = self.plan()
+        return [
+            (
+                dev,
+                current.total_by_device.get(dev, 0.0),
+                current.free_by_device.get(dev, 0.0),
+                current.budget_by_device.get(dev, 0.0),
+            )
+            for dev in current.gpu_ids
+        ]
+
+    def placement_rows(self) -> list[tuple[str, list[str], float, str]]:
+        """模型放置報表列：``(模型名, [slot 字串], 單份常駐_gb, 'eager'|'lazy')``，eager 在前。"""
+        current = self.plan()
+        rows: list[tuple[str, list[str], float, str]] = []
+        for model_class, slots in current.slots_by_model.items():
+            slot_strs = [f"cuda:{s.device_id}#{s.slot_id}" for s in slots]
+            resident = self._profiles[model_class].resident_gb if model_class in self._profiles else 0.0
+            rows.append((model_class.__name__, slot_strs, resident, "eager"))
+        for model_class in sorted(current.lazy_models, key=lambda c: c.__name__):
+            resident = self._profiles[model_class].resident_gb if model_class in self._profiles else 0.0
+            rows.append((model_class.__name__, [], resident, "lazy"))
+        return rows
+
     # ── 規劃核心 ─────────────────────────────────────────────────────────────
 
     def _compute_plan(self) -> CapacityPlan:
@@ -217,16 +246,22 @@ class GpuCapacityManager:
             # 無 GPU：空計畫，所有模型視為 lazy（實際走 CPU 後備槽位）
             return CapacityPlan({}, {}, tuple(), frozenset(self._profiles), tuple())
 
-        # remaining[dev] 為「扣掉已放置常駐權重後」的剩餘 free VRAM（GB）
-        remaining = {dev: self._mem_scan(dev)[0] for dev in gpu_ids}
+        # 先存「plan 當下」每卡 (free, total) 掃描值；remaining 由 free 起算、放置時逐步扣除
+        scan = {dev: self._mem_scan(dev) for dev in gpu_ids}
+        remaining = {dev: scan[dev][0] for dev in gpu_ids}
         slots_by_model: dict[type, list[GpuSlot]] = {}
         eager: list[type] = []
         lazy: set[type] = set()
 
+        # 單卡小模型「集中放」的卡：選放它最不排擠 Qwen lane 的卡（通常 = 最緊但放得下的卡），
+        # 而非最空的卡。動機：小模型只 ~5.5GB，放最空的大卡會白白吃掉那張一整條 Qwen lane（10.5GB）；
+        # 改塞進「緊、但小模型剛好填進其放不滿一條 lane 的零頭」的卡，最空的大卡就能整張拿去放 Qwen。
+        small_host = self._choose_small_host(gpu_ids, {dev: scan[dev][0] for dev in gpu_ids})
+
         # 依 eager 優先序逐一放置：Qwen 在最前且多卡，先把它的常駐位置佔走
         for model in self._eager_order:
             profile = self._profiles[model]
-            placed = self._place_model(model, profile, gpu_ids, remaining)
+            placed = self._place_model(model, profile, gpu_ids, remaining, small_host)
             if placed:
                 slots_by_model[model] = placed
                 eager.append(model)
@@ -240,6 +275,8 @@ class GpuCapacityManager:
             eager_models=tuple(eager),
             lazy_models=frozenset(lazy),
             gpu_ids=tuple(gpu_ids),
+            free_by_device={dev: scan[dev][0] for dev in gpu_ids},
+            total_by_device={dev: scan[dev][1] for dev in gpu_ids},
         )
 
     def _place_model(
@@ -248,11 +285,13 @@ class GpuCapacityManager:
         profile: ModelVramProfile,
         gpu_ids: list[int],
         remaining: dict[int, float],
+        small_host: int,
     ) -> list[GpuSlot]:
         """
         為單一模型挑槽位並就地扣除 remaining（check-before-load）。
 
-        - 多卡模型（Qwen）：每張「放得下 resident + buffer」的卡各放一份。
+        - 多卡模型（Qwen）：每張卡依 free VRAM 算同卡份數；只有 ``small_host``（小模型會落腳的卡）
+          才預留小模型常駐，其餘卡整張拿去算 Qwen 份數（最大化空卡的 Qwen 並行）。
         - 單卡模型：挑剩餘最寬鬆且放得下的卡放單份。
         放不下回空列表（→ lazy）。``buffer`` 留作不被任何模型常駐佔用的頭空間。
         """
@@ -261,13 +300,19 @@ class GpuCapacityManager:
             # 多卡模型（Qwen）：每張卡依 free VRAM 算同卡份數（同卡多 slot ⇒ 同卡可並行多條 forward）
             placed = []
             for dev in gpu_ids:
-                count = self._multi_card_slot_count(profile, remaining[dev])
+                count = self._multi_card_slot_count(
+                    profile, remaining[dev], reserve_small=(dev == small_host)
+                )
                 for slot_id in range(count):
                     placed.append(GpuSlot(device_id=dev, slot_id=slot_id))
                     # 每份各扣一份常駐權重；buffer 是保留頭空間，不從預算實扣
                     remaining[dev] -= profile.resident_gb
             return placed
 
+        # 單卡模型：優先集中放到 small_host（最不排擠 Qwen 的緊卡），放不下才退回 best-fit
+        if remaining[small_host] >= need:
+            remaining[small_host] -= profile.resident_gb
+            return [GpuSlot(device_id=small_host, slot_id=_DEFAULT_SLOT_ID)]
         candidates = [dev for dev in gpu_ids if remaining[dev] >= need]
         if not candidates:
             return []
@@ -275,25 +320,62 @@ class GpuCapacityManager:
         remaining[best] -= profile.resident_gb
         return [GpuSlot(device_id=best, slot_id=_DEFAULT_SLOT_ID)]
 
-    def _multi_card_slot_count(self, profile: ModelVramProfile, free_on_dev: float) -> int:
+    def _choose_small_host(self, gpu_ids: list[int], free_by_dev: dict[int, float]) -> int:
+        """
+        選「單卡小模型集中放」的卡：放這張卡損失最少 Qwen lane（通常 = 最緊但放得下小模型的卡）。
+
+        為什麼不是最空的卡：小模型只 ~5.5GB，放最空的大卡會白白佔掉那張卡一整條 Qwen lane（10.5GB）；
+        改放到「小模型剛好塞進其放不滿一條 lane 的零頭」的卡，幾乎不損失 Qwen lane，最空的大卡
+        就能整張拿去放 Qwen。
+
+        規則：在「放得下全部小模型（+buffer）」的卡中，挑「當 small_host 時被排擠掉的 Qwen lane 數」
+        最小者；平手取較緊（free 較小）的，把空卡留給 Qwen。沒有卡放得下全部小模型時退回最空卡（盡力）。
+        """
+        small_total = self._single_card_resident_total()
+        multi = [m for m in self._eager_order if m in self._multi_card]
+        # 沒有多卡模型 / 沒有單卡模型 → small_host 不影響 Qwen 規劃，回最空卡（維持簡單）
+        if not multi or small_total <= 0:
+            return max(gpu_ids, key=lambda dev: free_by_dev[dev])
+        qwen_profile = self._profiles[multi[0]]
+        # 放得下全部小模型（+buffer）的卡才有資格當 host；都放不下則退回最空卡盡力
+        candidates = [dev for dev in gpu_ids if free_by_dev[dev] >= small_total + self._buffer]
+        if not candidates:
+            return max(gpu_ids, key=lambda dev: free_by_dev[dev])
+
+        def displaced_lanes(dev: int) -> int:
+            """放小模型在此卡會被排擠掉的 Qwen lane 數（不預留 vs 預留小模型的 lane 差）。"""
+            free = free_by_dev[dev]
+            return (
+                self._multi_card_slot_count(qwen_profile, free, reserve_small=False)
+                - self._multi_card_slot_count(qwen_profile, free, reserve_small=True)
+            )
+
+        # 損失最少 Qwen lane 者；平手取較緊（free 較小）的卡，把空卡留給 Qwen
+        return min(candidates, key=lambda dev: (displaced_lanes(dev), free_by_dev[dev]))
+
+    def _multi_card_slot_count(
+        self, profile: ModelVramProfile, free_on_dev: float, reserve_small: bool
+    ) -> int:
         """
         算多卡模型（Qwen）在單張卡上要放幾份 instance（同卡多 slot）。
 
         每條「能真正並行的 lane」需 resident（常駐權重）+ transient（forward 暫態）才有意義：
-        只塞得下額外 resident、塞不下其 transient 的 instance 只會在 L2 BudgetGate 空等，純浪費 VRAM；
-        且 Qwen 多 slot 會與同卡小模型共存，故先預留所有單卡模型常駐，再算「放得下幾條完整 lane」，
-        避免擠掉小模型常駐位 / 撐爆同卡併發暫態預算。
+        只塞得下額外 resident、塞不下其 transient 的 instance 只會在 L2 BudgetGate 空等，純浪費 VRAM。
 
-        自動份數 = ``floor((free − 單卡常駐總和 − buffer) / (resident + transient))``，
+        ``reserve_small``：此卡是否為「小模型會落腳的卡」（small_host）。
+        - True：預留所有單卡模型常駐，避免 Qwen 多 slot 擠掉小模型 / 撐爆同卡併發暫態預算。
+        - False：小模型不會放這張，整張拿去算 Qwen 份數（解掉空卡只放得下 1 個 Qwen 的浪費）。
+
+        自動份數 = ``floor((free − 預留 − buffer) / (resident + transient))``，
         只要常駐放得下就至少 1 份（單份 transient 不足由 ``BudgetGate`` 的 ``in_flight==0`` over-budget 兜底）。
-        ``self._max_slots_per_gpu > 0`` 時作為「上限」再夾住自動值（取 min，不會超過可並行份數）；
-        ``≤ 0``（預設）時純自動。
+        ``self._max_slots_per_gpu > 0`` 時作為「上限」再夾住自動值（取 min）；``≤ 0``（預設）時純自動。
         """
         # 硬條件：連一份常駐（+buffer）都放不下 → 此卡不放（與單卡分支的 need 判準一致）
         if free_on_dev < profile.resident_gb + self._buffer:
             return 0
-        # 預留其餘單卡模型常駐，避免 Qwen 多 slot 吃掉小模型常駐位 / 撐爆同卡併發暫態預算
-        usable = free_on_dev - self._single_card_resident_total() - self._buffer
+        # 只有 small_host 卡預留小模型常駐；其餘卡 reserve=0，整張算 Qwen
+        reserve = self._single_card_resident_total() if reserve_small else 0.0
+        usable = free_on_dev - reserve - self._buffer
         per_lane = profile.resident_gb + profile.transient_gb  # 一條可並行 lane 的 VRAM 足跡
         useful = int(usable // per_lane) if per_lane > 0 else 1
         # 硬條件已過 → 至少 1 份（即使 usable 因小模型預留而不足一條完整 lane）

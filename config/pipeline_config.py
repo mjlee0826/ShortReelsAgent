@@ -45,10 +45,12 @@ _CPU_COUNT = os.cpu_count() or 4
 MAX_ASSETS_PARALLEL = _read_int_env("MAX_ASSETS_PARALLEL", 16)
 
 # ── 四種 Resource Pool 大小 (ExecutorRegistry) ────────────────────────────────
-# IO Pool:FFmpeg subprocess、檔案讀寫、雲端上傳。高併發可大量,但 FFmpeg 也吃 CPU,封頂 8。
+# IO Pool:FFmpeg subprocess、檔案讀寫、雲端上傳。FFmpeg 吃 CPU、上傳/讀寫偏 IO-bound,
+# 封頂以 _CPU_COUNT 為準（你的機器 → 80;偏猛時看 CPU% 再回調）。
 IO_POOL_MAX_WORKERS = min(128, _CPU_COUNT)
-# CPU Pool:cv2、KMeans、MediaPipe、SceneDetect。numpy/cv2 釋放 GIL,thread 有效,取半數核心。
-CPU_POOL_MAX_WORKERS = max(128, _CPU_COUNT)
+# CPU Pool:cv2、KMeans、MediaPipe、SceneDetect。numpy/cv2 釋放 GIL,thread 有效;但屬 compute-bound,
+# 超過實體核報酬遞減,封頂 64（你的 80 緒機 → 64;原 max(128,..) 會強制 ≥128 反而 oversubscribe,已修正）。
+CPU_POOL_MAX_WORKERS = min(64, _CPU_COUNT)
 # GPU Pool:實際大小於 runtime 由 GPU 數動態算(gpu_count × multiplier);GPU Gate 仍限同卡單一 forward,
 # multiplier 大只是讓 CPU 預處理重疊,效益遞減。
 GPU_POOL_MULTIPLIER = 3
@@ -106,3 +108,11 @@ MUSIQ_BATCH_ENABLED     = _read_bool_env("MUSIQ_BATCH_ENABLED", True)
 LAION_BATCH_ENABLED     = _read_bool_env("LAION_BATCH_ENABLED", True)
 WHISPER_BATCH_ENABLED   = _read_bool_env("WHISPER_BATCH_ENABLED", True)
 AUDIO_ENV_BATCH_ENABLED = _read_bool_env("AUDIO_ENV_BATCH_ENABLED", True)
+
+# ── 卡住偵測 Watchdog (Week 3b 觀測性) ─────────────────────────────────────────
+# 背景 daemon 每隔 heartbeat 秒印出「目前進行中的 stage + 已執行秒數」，超過 stall_warn 秒標 ⚠。
+# 只在「有進行中 stage」時才印（idle 不洗版）；processor 疑似卡住時用來看卡在哪個 stage、
+# 是否在等 VRAM（borrow 的 RESOURCE_WAIT）。純觀測、不改流水線；要關閉設 WATCHDOG_ENABLED=false。
+WATCHDOG_ENABLED        = _read_bool_env("WATCHDOG_ENABLED", True)
+WATCHDOG_HEARTBEAT_SEC  = _read_int_env("WATCHDOG_HEARTBEAT_SEC", 30)
+WATCHDOG_STALL_WARN_SEC = _read_int_env("WATCHDOG_STALL_WARN_SEC", 120)
