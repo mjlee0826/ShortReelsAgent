@@ -15,6 +15,7 @@ from config.pipeline_config import (
     GPU_POOL_MIN_WORKERS,
     GPU_POOL_MULTIPLIER,
     IO_POOL_MAX_WORKERS,
+    MAX_ASSETS_PARALLEL
 )
 from media_processor.pipeline.executor.gpu_detect import detect_gpu_count
 from media_processor.pipeline.executor.resource_executor import (
@@ -42,7 +43,7 @@ class ExecutorRegistry:
             gpu_count: 明示 GPU 數(主要供測試);``None`` 時自動偵測。
         """
         resolved_gpu_count = detect_gpu_count() if gpu_count is None else gpu_count
-        gpu_pool_size = max(GPU_POOL_MIN_WORKERS, resolved_gpu_count * GPU_POOL_MULTIPLIER)
+        gpu_pool_size = max(GPU_POOL_MIN_WORKERS, MAX_ASSETS_PARALLEL, resolved_gpu_count * GPU_POOL_MULTIPLIER)
 
         # 一次建好四個池,之後依 ResourceType 查表路由
         self._executors: dict[ResourceType, ResourceExecutor] = {

@@ -42,20 +42,20 @@ _CPU_COUNT = os.cpu_count() or 4
 # 故要讓 MUSIQ batch 填得滿,本值需逼近 batch_size(預設 16);GPU-pool 類 stage 的批量則受
 # GPU_POOL_MULTIPLIER 影響。預設 8 兼顧 RAM 與合批;壓測時可用 env 調到 16。
 # 設為 1 等同序列化整條框架,可作為 rollback / 除錯安全閥。
-MAX_ASSETS_PARALLEL = _read_int_env("MAX_ASSETS_PARALLEL", 8)
+MAX_ASSETS_PARALLEL = _read_int_env("MAX_ASSETS_PARALLEL", 16)
 
 # ── 四種 Resource Pool 大小 (ExecutorRegistry) ────────────────────────────────
 # IO Pool:FFmpeg subprocess、檔案讀寫、雲端上傳。高併發可大量,但 FFmpeg 也吃 CPU,封頂 8。
-IO_POOL_MAX_WORKERS = min(8, _CPU_COUNT)
+IO_POOL_MAX_WORKERS = min(128, _CPU_COUNT)
 # CPU Pool:cv2、KMeans、MediaPipe、SceneDetect。numpy/cv2 釋放 GIL,thread 有效,取半數核心。
-CPU_POOL_MAX_WORKERS = max(1, _CPU_COUNT // 2)
+CPU_POOL_MAX_WORKERS = max(128, _CPU_COUNT)
 # GPU Pool:實際大小於 runtime 由 GPU 數動態算(gpu_count × multiplier);GPU Gate 仍限同卡單一 forward,
 # multiplier 大只是讓 CPU 預處理重疊,效益遞減。
-GPU_POOL_MULTIPLIER = 2
+GPU_POOL_MULTIPLIER = 3
 # 單卡環境(或無 GPU)時 GPU pool 的最低 worker 數,確保 pool 至少能運作
 GPU_POOL_MIN_WORKERS = 2
 # API Pool(Gemini):Semaphore 控 RPS。Free tier 15 RPM → 1–2 並發;此處給保守預設 4。
-API_POOL_MAX_WORKERS = 4
+API_POOL_MAX_WORKERS = 16
 
 # ── Stage 提交逾時 ────────────────────────────────────────────────────────────
 # 將 Stage 提交到 ResourceExecutor 後等待結果的最長秒數;None 表示無限等待。
