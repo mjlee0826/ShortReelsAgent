@@ -20,7 +20,13 @@ import gc
 from PIL import Image
 import torchvision.transforms as transforms
 import pyiqa
-from model.base_model_manager import BaseModelManager, synchronized_inference
+from model.base_model_manager import (
+    BaseModelManager,
+    synchronized_inference,
+    oom_resilient,
+    is_cuda_oom,
+)
+from config.media_processor_config import MUSIQ_TRANSIENT_VRAM_GB
 from config.model_config import (
     MUSIQ_METRIC_NAME,
     MUSIQ_MAX_SHORT_SIDE,
@@ -33,6 +39,9 @@ from config.model_config import (
 class MusiqModelManager(BaseModelManager):
     """技術畫質評估大腦 (MUSIQ)，精準辨別手震廢片與唯美景深。"""
 
+    # Week 3b：單次 forward 暫態峰值 → BudgetGate 記帳（INFERENCE_PRIORITY 維持預設 0）
+    INFERENCE_VRAM_COST_GB = MUSIQ_TRANSIENT_VRAM_GB
+
     def _initialize(self, device_id: int = 0):
         """透過 PyIQA 載入 MUSIQ 模型，權重自動下載。"""
         self.device = torch.device(self.get_device_str(device_id))
@@ -40,6 +49,7 @@ class MusiqModelManager(BaseModelManager):
             self.metric_network = pyiqa.create_metric(MUSIQ_METRIC_NAME, device=self.device)
             self.transform = transforms.ToTensor()
 
+    @oom_resilient
     @synchronized_inference
     def get_technical_score(self, pil_image: Image.Image) -> float:
         """輸入 PIL 圖片，回傳 0~100 的技術畫質分數。"""
@@ -56,6 +66,9 @@ class MusiqModelManager(BaseModelManager):
             return self._clamp_score(float(raw_score))
 
         except Exception as e:
+            # CUDA OOM 往上拋給 @oom_resilient 重試；其餘維持 Null Object（保底分數）
+            if is_cuda_oom(e):
+                raise
             print(f"[Technical Scorer Error] 畫質評估失敗: {e}")
             return DEFAULT_FALLBACK_SCORE
         finally:
@@ -63,6 +76,7 @@ class MusiqModelManager(BaseModelManager):
                 torch.cuda.empty_cache()
             gc.collect()
 
+    @oom_resilient
     @synchronized_inference
     def score_batch(self, pil_images: list[Image.Image]) -> list[float]:
         """
@@ -101,8 +115,10 @@ class MusiqModelManager(BaseModelManager):
             return [self._clamp_score(float(s)) for s in raw_scores.flatten().tolist()]
 
         except Exception as e:
+            # CUDA OOM 往上拋給 @oom_resilient 重試；其餘整批回保底分數（不阻擋下游）
+            if is_cuda_oom(e):
+                raise
             print(f"[Technical Scorer Batch Error] 畫質批次評估失敗: {e}")
-            # 失敗整批回填預設分數，保持「不阻擋下游」的契約
             return [DEFAULT_FALLBACK_SCORE] * len(pil_images)
         finally:
             if torch.cuda.is_available():

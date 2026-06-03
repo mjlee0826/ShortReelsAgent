@@ -29,6 +29,7 @@ BaseModelManager：執行緒安全的多 GPU Singleton 基底類別。
 跨槽位 / 跨 device 則允許併發（受 L2 GpuGate 策略控制）。
 """
 import re
+import gc
 import json
 import time
 import threading
@@ -37,11 +38,23 @@ from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from typing import Callable, Iterator
 
-from model.gpu_gate import GpuGate, BinaryGate
+from config.media_processor_config import OOM_RETRY_MAX_ATTEMPTS, OOM_RETRY_BACKOFF_SEC
+from model.gpu_gate import GpuGate, BinaryGate, NO_PRIORITY
 
 
 # 預設槽位 id：呼叫端未指定時用此值，向後相容既有「一卡一 instance」配置
 _DEFAULT_SLOT_ID = 0
+
+
+def _default_gate_factory(device_id: int) -> GpuGate:
+    """
+    預設 Gate 工廠：每張 GPU 一個 ``BinaryGate``（Week 1 行為）。
+
+    簽名收 ``device_id`` 以對齊 Week 3b ``BudgetGate`` 需要的 per-device 預算
+    （``BinaryGate`` 不需要 device_id，單純忽略），讓 :meth:`register_gate_factory`
+    的工廠簽名統一為 ``Callable[[int], GpuGate]``。
+    """
+    return BinaryGate()
 
 
 def synchronized_inference(method):
@@ -60,6 +73,62 @@ def synchronized_inference(method):
     return wrapper
 
 
+def is_cuda_oom(exc: Exception) -> bool:
+    """
+    判斷例外是否為 CUDA 顯存不足 (Week 3b OOM 重試用)。
+
+    同時涵蓋 ``torch.cuda.OutOfMemoryError`` 與部分版本只丟「訊息含 out of memory」的
+    ``RuntimeError``，讓 OOM 重試不漏接;非 OOM 例外回 False 由呼叫端原樣處理。
+    """
+    try:
+        import torch
+        oom_cls = getattr(torch.cuda, "OutOfMemoryError", None)
+        if oom_cls is not None and isinstance(exc, oom_cls):
+            return True
+    except ImportError:
+        # 理論上不會發生於本專案;無 torch 即無 CUDA OOM
+        pass
+    return isinstance(exc, RuntimeError) and "out of memory" in str(exc).lower()
+
+
+def oom_resilient(method):
+    """
+    裝飾器：推論方法遇 CUDA OOM 時釋放 VRAM + backoff 後重試，耗盡仍 OOM 才往上拋 (Week 3b)。
+
+    **必須套在 ``@synchronized_inference`` 外層**（寫在其上方），使每次重試都在鎖外
+    先釋放 VRAM、再重新取得 L2 GpuGate / L3 model lock，讓同卡其他 forward 或鄰居 process
+    有機會把 VRAM 排空（plan §5.3 note 1：優先「等待 / 重試」而非「卸載重載」以避免 thrash）。
+
+    耗盡 ``OOM_RETRY_MAX_ATTEMPTS`` 次後 re-raise（由 Pipeline 隔離成 asset error），
+    刻意**不**靜默吞成 null object —— OOM 失敗的 asset 應顯式標記 error。
+    """
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        last_oom: Exception | None = None
+        for attempt in range(1, OOM_RETRY_MAX_ATTEMPTS + 1):
+            try:
+                return method(self, *args, **kwargs)
+            except Exception as exc:
+                if not is_cuda_oom(exc):
+                    # 非 OOM 不在本裝飾器職責內，原樣往上拋（仍由方法內既有 except 決定 null object）
+                    raise
+                last_oom = exc
+                # 鎖此刻已隨例外往外釋放，於鎖外釋放 VRAM 讓他人騰出空間
+                BaseModelManager._release_gpu_memory()
+                if attempt < OOM_RETRY_MAX_ATTEMPTS:
+                    print(
+                        f"[OOM Retry] {type(self).__name__} 第 {attempt}/{OOM_RETRY_MAX_ATTEMPTS} "
+                        f"次遇 CUDA OOM，釋放 VRAM 後重試：{exc}"
+                    )
+                    # 線性 backoff：給同卡其他 forward / 鄰居 process 時間釋放 VRAM
+                    time.sleep(OOM_RETRY_BACKOFF_SEC * attempt)
+        print(
+            f"[OOM Retry] {type(self).__name__} 連續 {OOM_RETRY_MAX_ATTEMPTS} 次 CUDA OOM，放棄重試"
+        )
+        raise last_oom
+    return wrapper
+
+
 class BaseModelManager(ABC):
     """執行緒安全、多 GPU、多槽位的 Singleton 基底。"""
 
@@ -68,12 +137,18 @@ class BaseModelManager(ABC):
     _GPU_GATES: dict[int, GpuGate] = {}
     # 建立新 Gate 時的互斥鎖（與 _instances 的建立鎖分開，避免不必要爭用）
     _GPU_GATES_LOCK = threading.Lock()
-    # Gate 工廠：Week 1 預設 BinaryGate，Week 3b 由 Capacity Manager 換 BudgetGate
-    _gate_factory: Callable[[], GpuGate] = BinaryGate
+    # Gate 工廠：Week 1 預設 per-device BinaryGate，Week 3b 由 Capacity Manager 換 BudgetGate。
+    # 簽名為 Callable[[int], GpuGate]（收 device_id），讓 BudgetGate 能依卡別給不同預算。
+    _gate_factory: Callable[[int], GpuGate] = _default_gate_factory
 
-    # 子類別可 override 提供 per-model VRAM 預算（單位 GB），
-    # Week 1 預設 0（BinaryGate 忽略），Week 3b BudgetGate 才會使用
+    # 子類別可 override 提供 per-model「單次 forward 暫態峰值」VRAM 成本（單位 GB），
+    # Week 1 預設 0（BinaryGate 忽略），Week 3b BudgetGate 以此做預算記帳。
+    # ⚠️ 應填 forward 暫態峰值（activation/KV cache/workspace），非常駐權重大小。
     INFERENCE_VRAM_COST_GB: float = 0.0
+
+    # 子類別可 override 提供推論優先序（數值越大越優先）。Qwen 等主瓶頸設正值，
+    # BudgetGate 會讓「有高優先在等」時低優先請求讓路，避免 Qwen 被小模型串流餓死。
+    INFERENCE_PRIORITY: int = NO_PRIORITY
 
     def __init_subclass__(cls, **kwargs):
         """每個子類別擁有獨立的實例字典與建構鎖，避免不同 Manager 間互相干擾。"""
@@ -115,14 +190,17 @@ class BaseModelManager(ABC):
 
     # ── L2 GPU Gate 管理（class method） ─────────────────────────────────────
     @classmethod
-    def register_gate_factory(cls, factory: Callable[[], GpuGate]) -> None:
+    def register_gate_factory(cls, factory: Callable[[int], GpuGate]) -> None:
         """
         替換全域 Gate 工廠，並清空既有 Gate 快取（Week 3b 升級 BudgetGate 用）。
 
-        典型用法（Week 3b GPU Capacity Manager 啟動時呼叫一次）::
+        工廠簽名為 ``Callable[[int], GpuGate]``（收 ``device_id``），讓每張卡能拿到
+        依自身 free VRAM 算出的不同預算。典型用法（Week 3b GPU Capacity Manager 啟動時）::
 
             BaseModelManager.register_gate_factory(
-                lambda: BudgetGate(total_gb=24.0, safety_buffer_gb=1.5)
+                lambda device_id: BudgetGate(
+                    total_gb=per_device_budget[device_id], safety_buffer_gb=1.5
+                )
             )
 
         既有 Manager 子類完全不需修改即可享受新策略。
@@ -134,13 +212,14 @@ class BaseModelManager(ABC):
 
     @classmethod
     def _get_gpu_gate(cls, device_id: int) -> GpuGate:
-        """Double-checked locking 取得 device 對應 Gate，無則用 _gate_factory 建立。"""
+        """Double-checked locking 取得 device 對應 Gate，無則用 _gate_factory 依卡別建立。"""
         gate = cls._GPU_GATES.get(device_id)
         if gate is None:
             with cls._GPU_GATES_LOCK:
                 gate = cls._GPU_GATES.get(device_id)
                 if gate is None:
-                    gate = cls._gate_factory()
+                    # 工廠收 device_id，BudgetGate 依該卡預算建立、BinaryGate 則忽略
+                    gate = cls._gate_factory(device_id)
                     cls._GPU_GATES[device_id] = gate
         return gate
 
@@ -155,6 +234,18 @@ class BaseModelManager(ABC):
         except ImportError:
             pass
         return "cpu"
+
+    @staticmethod
+    def _release_gpu_memory() -> None:
+        """釋放 CUDA 快取 + 觸發 gc，供 :func:`oom_resilient` 在 OOM 重試前騰出 VRAM。"""
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            # 無 torch 即無 CUDA 快取可釋放
+            pass
+        gc.collect()
 
     @contextmanager
     def _log_load(self, model_name: str) -> Iterator[None]:
@@ -195,8 +286,11 @@ class BaseModelManager(ABC):
         確保鎖序一致，結構上不可能形成循環等待。CPU/API 模型自動跳過 L2。
         """
         if self._uses_gpu():
-            # GPU 路徑：依 device_id 取 Gate，預算成本由子類 INFERENCE_VRAM_COST_GB 提供
-            with self._get_gpu_gate(self._device_id).acquire(self.INFERENCE_VRAM_COST_GB):
+            # GPU 路徑：依 device_id 取 Gate，預算成本與優先序由子類屬性提供
+            # （BudgetGate 用成本記帳 + 優先序反餓死；BinaryGate 兩者皆忽略）
+            with self._get_gpu_gate(self._device_id).acquire(
+                self.INFERENCE_VRAM_COST_GB, self.INFERENCE_PRIORITY
+            ):
                 with self._inference_lock:
                     yield
         else:

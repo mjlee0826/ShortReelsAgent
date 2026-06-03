@@ -21,7 +21,13 @@ from prompt_manager.base_prompt_manager import BasePromptManager
 from prompt_manager.default_prompt_manager import DefaultPromptManager
 from prompt_manager.task_mode import TaskMode
 from prompt_manager.prompt_factory import PromptFactory
-from model.base_model_manager import BaseModelManager, synchronized_inference
+from model.base_model_manager import (
+    BaseModelManager,
+    synchronized_inference,
+    oom_resilient,
+    is_cuda_oom,
+)
+from config.media_processor_config import QWEN_TRANSIENT_VRAM_GB, QWEN_INFERENCE_PRIORITY
 from config.model_config import (
     QWEN_MODEL_ID,
     QWEN_PROCESSOR_ID,
@@ -41,6 +47,10 @@ _ATTN_FALLBACK = "sdpa"
 
 class QwenModelManager(BaseModelManager):
     """統一的本地視覺大腦 (Qwen3-VL)，bitsandbytes 4-bit 為主路徑、8-bit 為品質回歸路徑。"""
+
+    # Week 3b：單次 generate 暫態峰值 → BudgetGate 記帳;高優先 → 反餓死(Qwen 是主瓶頸)
+    INFERENCE_VRAM_COST_GB = QWEN_TRANSIENT_VRAM_GB
+    INFERENCE_PRIORITY = QWEN_INFERENCE_PRIORITY
 
     def _initialize(self, device_id: int = 0):
         """
@@ -133,6 +143,7 @@ class QwenModelManager(BaseModelManager):
         """替換 Prompt Manager（Strategy Pattern）。"""
         self.prompt_manager = prompt_manager
 
+    @oom_resilient
     @synchronized_inference
     def analyze_media(self, media_input, media_type: str = "image", mode: TaskMode = TaskMode.GLOBAL_ANALYSIS) -> dict:
         """輸入圖片或影片路徑，回傳模型推論的 JSON 結果。"""
@@ -180,6 +191,9 @@ class QwenModelManager(BaseModelManager):
             return self._parse_json_output(output_text)
 
         except Exception as e:
+            # CUDA OOM 往上拋給 @oom_resilient 重試（耗盡才標 asset error）；其餘錯誤維持 null object
+            if is_cuda_oom(e):
+                raise
             print(f"[Qwen VLM Error] 推理失敗: {str(e)}")
             return {"error": "Analysis failed", "raw_output": str(e)}
         finally:

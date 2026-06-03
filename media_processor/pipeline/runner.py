@@ -48,19 +48,25 @@ class PipelineRunner:
                        讓開發期可肉眼看到多 asset 事件交錯(驗收條件#2)。
             eager_models: 是否啟動期預載模型;Week 2a 僅保留旗標,實際 warm up 留 Week 3b。
         """
+        # observers 需先就緒,供 ModelPoolRegistry 的 warm up / borrow 等待事件廣播(Week 3b)
+        self._observers = observers if observers is not None else [PrintProgressObserver()]
         # Layer 2 資源管理:跨請求長存的資源池與模型池
         self._registry = ExecutorRegistry()
-        # Week 2a 建好但不接 LegacyStage,僅偵測 + log(驗收條件#3 基礎建設層)
-        self._model_pool_registry = ModelPoolRegistry()
+        # Week 3b:ModelPoolRegistry 接 GpuCapacityManager,規劃多卡放置 + 每卡 BudgetGate 預算,
+        # 並把自己註冊為 process 級共享實例(stage / batch_fn 經 instance() 借出模型)
+        self._model_pool_registry = ModelPoolRegistry(observers=self._observers)
+        # 套用 per-device BudgetGate(依各卡 free VRAM 預算;無 CUDA 時 no-op,維持 BinaryGate)
+        self._model_pool_registry.apply_capacity_policy()
         # Layer 3 排程:Builder + HybridScheduler
         self._builder = PipelineBuilder()
         self._scheduler = HybridScheduler(self._registry, self._builder, max_assets_parallel)
-        self._observers = observers if observers is not None else [PrintProgressObserver()]
 
         print(f"[PipelineRunner] {self._registry.describe()}")
         if eager_models:
-            # 決策 A:Week 2a 維持 lazy,warm up 留 Week 3b GPU Capacity Manager
-            print("[PipelineRunner] EAGER_MODELS=true,但 Week 2a 未實作 warm up,維持 lazy 載入")
+            # Week 3b:依 capacity 規劃的優先序預載熱門模型(Qwen 多卡常駐、VRAM 不足自動降 lazy),
+            # 讓第一個 asset 不再卡載入;無 CUDA 時 warm_up 自動 no-op
+            print("[PipelineRunner] EAGER_MODELS=true,啟動期依 capacity 規劃預載熱門模型...")
+            self._model_pool_registry.warm_up()
 
     def run(
         self,

@@ -25,9 +25,10 @@ _LAION_SPEC = BatchSpec(
 
 
 def _laion_batch(images: list) -> list:
-    """BatchCollector 合批函式:lazy 取得 LAION singleton 後一次評分多張(順序一致)。"""
+    """BatchCollector 合批函式:從多卡 pool 借出 LAION(或 singleton)一次評分多張(順序一致)。"""
     from model.laion_model_manager import LaionModelManager
-    return LaionModelManager().score_batch(images)
+    from media_processor.pipeline.executor.model_pool_registry import borrow_for_batch
+    return borrow_for_batch(LaionModelManager, _STAGE_NAME, lambda m: m.score_batch(images))
 
 
 class AesScoreStage(Stage):

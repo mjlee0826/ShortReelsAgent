@@ -19,7 +19,13 @@ import torch.nn as nn
 import gc
 from PIL import Image
 from transformers import CLIPProcessor, CLIPModel
-from model.base_model_manager import BaseModelManager, synchronized_inference
+from model.base_model_manager import (
+    BaseModelManager,
+    synchronized_inference,
+    oom_resilient,
+    is_cuda_oom,
+)
+from config.media_processor_config import LAION_TRANSIENT_VRAM_GB
 from config.model_config import (
     LAION_CLIP_MODEL_ID,
     LAION_MLP_INPUT_SIZE,
@@ -61,6 +67,9 @@ class LAIONAestheticMLP(nn.Module):
 class LaionModelManager(BaseModelManager):
     """美學打分大腦 (LAION Aesthetic Predictor + CLIP)，評估畫面美感與構圖。"""
 
+    # Week 3b：CLIP + MLP 單次 forward 暫態峰值 → BudgetGate 記帳（INFERENCE_PRIORITY 維持預設 0）
+    INFERENCE_VRAM_COST_GB = LAION_TRANSIENT_VRAM_GB
+
     def _initialize(self, device_id: int = 0):
         """初始化 CLIP 特徵提取器與 LAION MLP 評分器，必要時自動下載權重。"""
         self.device = self.get_device_str(device_id)
@@ -85,6 +94,7 @@ class LaionModelManager(BaseModelManager):
         clamped = max(LAION_SCORE_MIN, min(LAION_SCORE_MAX, raw_score))
         return (clamped - LAION_SCORE_MIN) / (LAION_SCORE_MAX - LAION_SCORE_MIN) * 100.0
 
+    @oom_resilient
     @synchronized_inference
     def get_aesthetic_score(self, pil_image: Image.Image) -> float:
         """輸入 PIL 圖片，回傳 0~100 的美學分數。"""
@@ -98,6 +108,9 @@ class LaionModelManager(BaseModelManager):
             return self._final_score(raw_score)
 
         except Exception as e:
+            # CUDA OOM 往上拋給 @oom_resilient 重試；其餘維持 Null Object（保底分數）
+            if is_cuda_oom(e):
+                raise
             print(f"[Aesthetic Scorer Error] 美學評估失敗: {e}")
             return DEFAULT_FALLBACK_SCORE
         finally:
@@ -105,6 +118,7 @@ class LaionModelManager(BaseModelManager):
                 torch.cuda.empty_cache()
             gc.collect()
 
+    @oom_resilient
     @synchronized_inference
     def score_batch(self, pil_images: list[Image.Image]) -> list[float]:
         """
@@ -129,6 +143,9 @@ class LaionModelManager(BaseModelManager):
             return [self._final_score(s) for s in raw_scores]
 
         except Exception as e:
+            # CUDA OOM 往上拋給 @oom_resilient 重試；其餘整批回保底分數
+            if is_cuda_oom(e):
+                raise
             print(f"[Aesthetic Scorer Batch Error] 美學批次評估失敗: {e}")
             return [DEFAULT_FALLBACK_SCORE] * len(pil_images)
         finally:

@@ -14,10 +14,14 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from media_processor.image_strategy import ImageStrategy
 from media_processor.video_strategy import VideoStrategy
+
+if TYPE_CHECKING:
+    # 僅型別檢查時 import,執行期不依賴(配合 from __future__ import annotations),避免低階模組耦合
+    from media_processor.pipeline.progress import ProgressTracker
 
 
 # ── 媒體類型 ──────────────────────────────────────────────────────────────────
@@ -75,6 +79,9 @@ class AssetContext:
     image_strategy: ImageStrategy = ImageStrategy.SIMPLE
     # Week 2a 恆為 0(LegacyStage 用 device-0 singleton);Week 3b 才依 Pool 借出實際裝置
     device_id: int = 0
+    # Week 3b:driver 注入本次 run 的 ProgressTracker,讓 GPU stage 的 borrow 即時 VRAM 等待
+    # 能發出帶 asset_id 的 RESOURCE_WAIT / RESOURCE_ACQUIRED 事件(無 tracker 時為 None,事件略過)
+    tracker: Optional["ProgressTracker"] = None
 
     # ── 產出(Stage 執行後填入)────────────────────────────────────────────
     status: str = STATUS_PENDING

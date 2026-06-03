@@ -82,27 +82,39 @@ thread Y: GPU_GATES[0].acquire() ✗ 阻塞等 X 完成
 ```
 保證同卡一次最多一條 forward。**代價:VRAM 夠也只能序列**。
 
-### Week 3b BudgetGate
+### Week 3b BudgetGate（✅ 已實作）
 
 ```
-GPU_GATES[0] = BudgetGate(total=24GB, buffer=1.5GB)
-thread X: acquire(cost=4)  ✓ used=4
-thread Y: acquire(cost=3)  ✓ used=7   ← 同卡並行!
-thread Z: acquire(cost=18) ✗ block,預算不夠
+GPU_GATES[0] = BudgetGate(total=24GB, buffer=1.5GB)   # total = free − 已常駐權重
+thread X: acquire(cost=4, prio=0)  ✓ used=4
+thread Y: acquire(cost=3, prio=0)  ✓ used=7   ← 同卡並行!
+thread Z: acquire(cost=18,prio=0)  ✗ block,預算不夠
           ↓ X release
-thread Z: acquire(cost=18) ✓ used=21
+thread Z: acquire(cost=18,prio=0)  ✓ used=21
 ```
-**VRAM 夠時同卡併發,夠不夠由 cost 決定**。
+**VRAM 夠時同卡併發,夠不夠由 cost 決定**;`cost > 整卡預算` 時於 `in_flight==0` 仍單獨放行(避免永久阻塞)。
 
-### 一行升級
+### priority 反餓死（Week 3b 新增）
+
+`acquire(cost_gb, priority)` 多了 `priority`:**只要有高優先(Qwen,`INFERENCE_PRIORITY>0`)在等,
+低優先(其餘模型恆 0)一律不放行** —— 讓在飛的小 forward 排空、預算騰給 Qwen,避免 MUSIQ/LAION
+串流把主瓶頸 Qwen 的大塊請求無限延後。子類用 class 屬性 `INFERENCE_PRIORITY` 宣告,`inference_guard`
+經 `gate.acquire(self.INFERENCE_VRAM_COST_GB, self.INFERENCE_PRIORITY)` 帶入。
+
+### 一行升級（實際簽名帶 device_id）
 
 ```python
-# Week 3b GPU Capacity Manager 啟動時:
+# Week 3b GpuCapacityManager.apply() 啟動時(每卡 free 不同 → per-device 預算):
 BaseModelManager.register_gate_factory(
-    lambda: BudgetGate(total_gb=detect_free_vram(), safety_buffer_gb=1.5)
+    lambda device_id: BudgetGate(
+        total_gb=per_device_budget[device_id],   # = 該卡 free − 已放置常駐權重
+        safety_buffer_gb=1.5,
+    )
 )
 ```
-全域 L2 替換,所有 Manager 子類繼續用 `inference_guard()`,零修改。
+工廠簽名為 `Callable[[int], GpuGate]`(收 `device_id`,`BinaryGate` 忽略);全域 L2 替換,
+所有 Manager 子類繼續用 `inference_guard()`,零修改。`INFERENCE_VRAM_COST_GB` 須填**forward 暫態峰值**
+(非常駐權重);常駐權重已在 `total_gb` 扣除,填錯成權重會重複扣、gate 過度保守。
 
 ---
 
@@ -206,4 +218,4 @@ BatchCollector worker thread(達 batch_size 或 timeout_ms):
 
 ---
 
-*文件最後更新:2026-05-30*
+*文件最後更新:2026-06-03(Week 3b:BudgetGate 實作 + priority 反餓死 + gate factory 簽名帶 device_id)*

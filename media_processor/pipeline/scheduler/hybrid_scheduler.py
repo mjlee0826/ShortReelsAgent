@@ -78,6 +78,8 @@ class HybridScheduler:
         tracker: ProgressTracker | None,
     ) -> AssetContext:
         """單一 asset 的 driver:建 Pipeline → 執行 → 發 pipeline 起訖事件。"""
+        # Week 3b:把本次 run 的 tracker 掛到 context,讓 GPU stage 的 borrow VRAM 等待能發帶 asset_id 的事件
+        context.tracker = tracker
         if tracker is not None:
             tracker.emit_pipeline_start(asset_id=context.asset_id)
 

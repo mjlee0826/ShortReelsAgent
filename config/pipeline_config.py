@@ -63,10 +63,18 @@ API_POOL_MAX_WORKERS = 4
 STAGE_SUBMIT_TIMEOUT_SEC: float | None = None
 
 # ── 模型載入策略 ──────────────────────────────────────────────────────────────
-# Eager Warm Up 開關。Week 2a 預設 False(維持既有 lazy 載入,行為與 Week 1 一致、啟動快);
-# 真正的啟動期預載 + VRAM 不足自動降級 lazy,留待 Week 3b GPU Capacity Manager 實作。
-EAGER_MODELS_DEFAULT = False
+# Eager Warm Up 開關。Week 3b 起預設 True:啟動時依 GpuCapacityManager 的優先序 + check-before-load
+# 預載熱門模型(Qwen 一定常駐、VRAM 不足的自動降級 lazy),讓第一個 asset 不再卡 20–60s 等載入
+# (plan §5.2 對齊 vLLM/Triton 慣例)。開發 / 單卡迭代想啟動快可設 EAGER_MODELS=false 關閉。
+EAGER_MODELS_DEFAULT = True
 EAGER_MODELS = _read_bool_env("EAGER_MODELS", EAGER_MODELS_DEFAULT)
+
+# ── 多 GPU ModelPool 借出開關 (Week 3b) ────────────────────────────────────────
+# True(預設):semantic stage 與 GPU batch_fn 走 ModelPoolRegistry.instance().get_pool().borrow(),
+#   把推論分散到 capacity 規劃的多張卡(Qwen 多卡、其餘最寬鬆卡),並享 borrow 即時 VRAM 重檢。
+# False:緊急 rollback 回 Week 3a 行為 —— 直接用 device-0 singleton(不經 pool / 不重檢),
+#   仍受 BudgetGate(L2)保護。供逐欄一致 A/B 與多 GPU 出問題時快速退回。
+GPU_POOL_ENABLED = _read_bool_env("GPU_POOL_ENABLED", True)
 
 # ── 圖片 Pipeline 拆 Stage 切換 (Week 2b) ──────────────────────────────────────
 # False(預設):走 Week 2b 新拆的細粒度 Stage 編排(Decode → Tech → Reject → 平行群 → Assembly)。

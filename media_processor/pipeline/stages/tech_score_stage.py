@@ -26,9 +26,10 @@ _MUSIQ_SPEC = BatchSpec(
 
 
 def _musiq_batch(images: list) -> list:
-    """BatchCollector 合批函式:lazy 取得 MUSIQ singleton 後一次評分多張(順序一致)。"""
+    """BatchCollector 合批函式:從多卡 pool 借出 MUSIQ(或 singleton)一次評分多張(順序一致)。"""
     from model.musiq_model_manager import MusiqModelManager
-    return MusiqModelManager().score_batch(images)
+    from media_processor.pipeline.executor.model_pool_registry import borrow_for_batch
+    return borrow_for_batch(MusiqModelManager, _STAGE_NAME, lambda m: m.score_batch(images))
 
 
 class TechScoreStage(Stage):

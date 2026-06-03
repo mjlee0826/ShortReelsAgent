@@ -13,7 +13,13 @@ import torch
 import librosa
 import numpy as np
 import gc
-from model.base_model_manager import BaseModelManager, synchronized_inference
+from model.base_model_manager import (
+    BaseModelManager,
+    synchronized_inference,
+    oom_resilient,
+    is_cuda_oom,
+)
+from config.media_processor_config import AUDIO_ENV_TRANSIENT_VRAM_GB
 from config.model_config import AUDIO_ENV_TOP_K, AUDIO_SAMPLING_RATE, AUDIO_ENV_MIN_SCORE
 
 
@@ -29,6 +35,9 @@ class AudioEnvModelManager(BaseModelManager):
     輸出 top-k 分類標籤與信心分數，結構化且易於下游 LLM 理解。
     """
 
+    # Week 3b：PANNs CNN14 單次 forward 暫態峰值 → BudgetGate 記帳（INFERENCE_PRIORITY 維持預設 0）
+    INFERENCE_VRAM_COST_GB = AUDIO_ENV_TRANSIENT_VRAM_GB
+
     def _initialize(self, device_id: int = 0):
         """載入 PANNs CNN14 模型（panns_inference 套件）。"""
         from panns_inference import AudioTagging
@@ -37,6 +46,7 @@ class AudioEnvModelManager(BaseModelManager):
             # AudioTagging 內部自動處理 GPU/CPU 分配
             self._tagger = AudioTagging(checkpoint_path=None, device=self.device)
 
+    @oom_resilient
     @synchronized_inference
     def classify_environment(self, audio_path: str) -> list:
         """
@@ -59,6 +69,9 @@ class AudioEnvModelManager(BaseModelManager):
             return self._topk_labels(clipwise_output[0])
 
         except Exception as e:
+            # CUDA OOM 往上拋給 @oom_resilient 重試；其餘維持 Null Object（空列表）
+            if is_cuda_oom(e):
+                raise
             print(f"[AudioEnv Error] 環境音分類失敗: {e}")
             return []
         finally:
@@ -66,6 +79,7 @@ class AudioEnvModelManager(BaseModelManager):
                 torch.cuda.empty_cache()
             gc.collect()
 
+    @oom_resilient
     @synchronized_inference
     def classify_environment_batch(self, audio_paths: list[str]) -> list[list]:
         """
@@ -97,8 +111,10 @@ class AudioEnvModelManager(BaseModelManager):
             return [self._topk_labels(clipwise_output[i]) for i in range(len(audio_paths))]
 
         except Exception as e:
+            # CUDA OOM 往上拋給 @oom_resilient 重試；其餘整批回等長 Null Object（下游 zip 不錯位）
+            if is_cuda_oom(e):
+                raise
             print(f"[AudioEnv Batch Error] 環境音批次分類失敗: {e}")
-            # 整批失敗仍回等長 list，下游 zip 對齊不錯位
             return [[] for _ in audio_paths]
         finally:
             if torch.cuda.is_available():

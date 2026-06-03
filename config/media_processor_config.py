@@ -60,6 +60,51 @@ BATCH_COLLECT_TIMEOUT_MS = 50
 # 預留給系統 / 共用 GPU 的其他使用者的 VRAM，不納入 BudgetGate 預算
 GPU_SAFETY_BUFFER_GB = 1.5
 
+# ── 各模型 VRAM 估值 (Week 3b Capacity Manager / BudgetGate) ────────────────────
+# ⚠️ 以下皆為「估值」，實機請以 torch.cuda.reset_peak_memory_stats() +
+#    max_memory_allocated() 包一次 forward 校準。GpuCapacityManager 會組成
+#    {ModelClass: ModelVramProfile} 對照表（對照表本身在 capacity manager，因需 import 模型類別）。
+# - resident：模型常駐權重（載入後一直佔著，決定一張卡放得下幾份模型）。
+# - transient：單次 forward 暫態峰值（activation/KV cache/workspace），即 INFERENCE_VRAM_COST_GB，
+#   給 BudgetGate 記帳「在飛行中 forward 成本總和 ≤ 預算」。
+# Qwen 4-bit NF4 實測常駐 ~6.4GB（見 roadmap §3）；transient 為含影像 token 的 generate 暫態估值。
+QWEN_RESIDENT_VRAM_GB       = 6.5
+QWEN_TRANSIENT_VRAM_GB      = 4.0
+WHISPER_RESIDENT_VRAM_GB    = 3.0
+WHISPER_TRANSIENT_VRAM_GB   = 2.0
+MUSIQ_RESIDENT_VRAM_GB      = 0.5
+MUSIQ_TRANSIENT_VRAM_GB     = 1.5
+LAION_RESIDENT_VRAM_GB      = 1.7
+LAION_TRANSIENT_VRAM_GB     = 1.0
+AUDIO_ENV_RESIDENT_VRAM_GB  = 0.3
+AUDIO_ENV_TRANSIENT_VRAM_GB = 0.5
+
+# Qwen 推論優先序（>0）：BudgetGate 在「有 Qwen 在等」時讓低優先（其餘模型恆 0）讓路，
+# 避免 MUSIQ/LAION 等小模型串流把主瓶頸 Qwen 的大塊 VRAM 請求無限延後（餓死）。
+QWEN_INFERENCE_PRIORITY = 10
+
+# 同卡 Qwen instance 份數上限（同卡多 slot ⇒ 同卡可並行多條 Qwen forward；需 VRAM 充裕）。
+#   0（預設，= QWEN_SLOTS_AUTO）：自動 —— GpuCapacityManager 依該卡 free VRAM 算「能真正並行的份數」：
+#     floor((free − 單卡模型常駐總和 − GPU_SAFETY_BUFFER_GB) / (QWEN_RESIDENT + QWEN_TRANSIENT))，
+#     常駐放得下至少 1 份。會預留其餘單卡模型常駐，故雙卡環境通常仍每卡 1 份（安全），單張大卡才放到多份。
+#   >0：手動上限 —— 取 min(本值, 自動值)；例如 1 = 強制每卡單份（Week 3b 原行為）、2 = 上限每卡 2 份。
+# 代價：每多 1 份多吃 ~QWEN_RESIDENT_VRAM_GB 常駐權重；同卡多條 forward 共用 SM，報酬遞減（約 1.2–1.5x）。
+QWEN_SLOTS_AUTO = 0
+QWEN_MAX_SLOTS_PER_GPU = QWEN_SLOTS_AUTO
+
+# ── OOM 容錯重試 (Week 3b oom_resilient) ───────────────────────────────────────
+# 推論遇 CUDA OOM 時釋放 VRAM + backoff 後重試的最大次數；耗盡仍 OOM 則 re-raise 標 asset error。
+OOM_RETRY_MAX_ATTEMPTS = 3
+# 線性 backoff 基數（秒）：第 k 次重試前睡 OOM_RETRY_BACKOFF_SEC * k，給鄰居 / 同卡 forward 排空時間。
+OOM_RETRY_BACKOFF_SEC = 1.0
+
+# ── borrow 即時 VRAM 重檢 (Week 3b ModelPool.borrow) ───────────────────────────
+# 借出 GPU 模型前以 mem_get_info 重檢真實 free VRAM（含鄰居 process）；不足時每隔本秒數輪詢一次。
+BORROW_VRAM_POLL_INTERVAL_SEC = 0.5
+# 等待 VRAM 的上限秒數；逾時仍不足則「盡力放行」（讓 forward 去試，OOM 由 oom_resilient 兜底），
+# 避免鄰居長期佔用造成 driver thread 永久卡死（plan §5.3 note 1：優先等待，但不可無限等）。
+BORROW_VRAM_MAX_WAIT_SEC = 30.0
+
 # ── Qwen VLM 量化切換 ─────────────────────────────────────────────────────────
 # 啟動時 env var QWEN_USE_4BIT 未設定時的預設值
 # True： bitsandbytes 4-bit(NF4) 量化（主路徑，runtime ~6.4GB）

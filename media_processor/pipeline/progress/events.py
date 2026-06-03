@@ -25,8 +25,13 @@ class ProgressEventType(str, Enum):
     PIPELINE_FINISH = "pipeline_finish"
 
     # ── 啟動期 ────────────────────────────────────────────────────────────────
-    # Eager warm up 模型載入事件，Week 2a 才實際發送，本檔提早定義
+    # Eager warm up 模型載入事件，Week 3b 由 ModelPoolRegistry.warm_up 實際發送
     MODEL_WARMUP = "model_warmup"
+
+    # ── 資源等待（Week 3b ModelPool.borrow 即時 VRAM 重檢） ──────────────────────
+    # 借出 GPU 模型前真實 free VRAM 不足而阻塞 / 騰出，讓前端顯示「等待 GPU 資源」
+    RESOURCE_WAIT     = "resource_wait"
+    RESOURCE_ACQUIRED = "resource_acquired"
 
 
 class ProgressEvent(BaseModel):

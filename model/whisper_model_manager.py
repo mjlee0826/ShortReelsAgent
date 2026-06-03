@@ -14,7 +14,13 @@ Week 1 變動
 """
 import torch
 from transformers import pipeline
-from model.base_model_manager import BaseModelManager, synchronized_inference
+from model.base_model_manager import (
+    BaseModelManager,
+    synchronized_inference,
+    oom_resilient,
+    is_cuda_oom,
+)
+from config.media_processor_config import WHISPER_TRANSIENT_VRAM_GB
 from config.model_config import (
     WHISPER_MODEL_ID,
     WHISPER_CHUNK_LENGTH_SEC,
@@ -31,6 +37,9 @@ _GENERATE_KWARGS = {
 
 class WhisperModelManager(BaseModelManager):
     """Whisper 語音辨識大腦（含幻覺防跳針過濾器）。"""
+
+    # Week 3b：單次轉錄暫態峰值 → BudgetGate 記帳（INFERENCE_PRIORITY 維持預設 0）
+    INFERENCE_VRAM_COST_GB = WHISPER_TRANSIENT_VRAM_GB
 
     def _initialize(self, device_id: int = 0):
         """載入 Whisper pipeline，使用 FP16 加速並啟用時間戳記。"""
@@ -79,6 +88,7 @@ class WhisperModelManager(BaseModelManager):
         final_text = " ".join([c["text"].strip() for c in cleaned_chunks])
         return {"text": final_text, "chunks": cleaned_chunks}
 
+    @oom_resilient
     @synchronized_inference
     def transcribe(self, audio_path: str) -> dict:
         """輸入音檔路徑，回傳乾淨且無幻覺的逐字稿。"""
@@ -86,10 +96,13 @@ class WhisperModelManager(BaseModelManager):
             raw_result = self.transcriber(audio_path, generate_kwargs=_GENERATE_KWARGS)
             return self._filter_hallucination(raw_result)
         except Exception as e:
-            # 與其他 Manager 一致：吞錯回 Null Object 前先印出，避免轉錄失敗無聲無息
+            # CUDA OOM 往上拋給 @oom_resilient 重試；其餘錯誤維持吞成 Null Object（先印出）
+            if is_cuda_oom(e):
+                raise
             print(f"[Whisper Error] 轉錄失敗: {e}")
             return {"text": "", "error": str(e)}
 
+    @oom_resilient
     @synchronized_inference
     def transcribe_batch(self, audio_paths: list[str]) -> list[dict]:
         """
@@ -111,6 +124,8 @@ class WhisperModelManager(BaseModelManager):
             return [self._filter_hallucination(r) for r in normalized]
 
         except Exception as e:
-            # 整批失敗仍須回傳等長 list，下游 zip 對齊不會錯位
+            # CUDA OOM 往上拋給 @oom_resilient 重試；其餘整批回等長 Null Object（下游 zip 不錯位）
+            if is_cuda_oom(e):
+                raise
             print(f"[Whisper Batch Error] 批次轉錄失敗: {e}")
             return [{"text": "", "error": str(e)} for _ in audio_paths]

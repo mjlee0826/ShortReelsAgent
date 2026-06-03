@@ -149,3 +149,48 @@ class ProgressTracker:
             duration_ms=duration_ms,
             payload=payload or {},
         ))
+
+    # ── Week 3b：啟動期 warm up 與借出 VRAM 等待事件 ──────────────────────────
+    def emit_model_warmup(
+        self,
+        model_name: str,
+        device: str,
+        payload: Optional[dict] = None,
+    ) -> None:
+        """送出 MODEL_WARMUP 事件（Eager Warm Up 預載熱門模型；stage_name 借用為模型名）。"""
+        self.publish(ProgressEvent(
+            event_type=ProgressEventType.MODEL_WARMUP,
+            job_id=self._job_id,
+            stage_name=model_name,
+            payload={**(payload or {}), "device": device},
+        ))
+
+    def emit_resource_wait(
+        self,
+        asset_id: Optional[str],
+        stage_name: Optional[str],
+        payload: Optional[dict] = None,
+    ) -> None:
+        """送出 RESOURCE_WAIT 事件（borrow 因即時 free VRAM 不足而等待）。"""
+        self.publish(ProgressEvent(
+            event_type=ProgressEventType.RESOURCE_WAIT,
+            job_id=self._job_id,
+            asset_id=asset_id,
+            stage_name=stage_name,
+            payload=payload or {},
+        ))
+
+    def emit_resource_acquired(
+        self,
+        asset_id: Optional[str],
+        stage_name: Optional[str],
+        payload: Optional[dict] = None,
+    ) -> None:
+        """送出 RESOURCE_ACQUIRED 事件（等待後 VRAM 騰出、即將借出）。"""
+        self.publish(ProgressEvent(
+            event_type=ProgressEventType.RESOURCE_ACQUIRED,
+            job_id=self._job_id,
+            asset_id=asset_id,
+            stage_name=stage_name,
+            payload=payload or {},
+        ))

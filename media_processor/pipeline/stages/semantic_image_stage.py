@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
 
+from config.pipeline_config import GPU_POOL_ENABLED
 from media_processor.image_strategy import ImageStrategy
 from media_processor.pipeline.context import AssetContext
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
@@ -62,6 +63,25 @@ class SemanticImageStage(Stage):
                 work.frame.pil_image, media_type=_MEDIA_TYPE_IMAGE, mode=TaskMode.COMPLEX_IMAGE_ANALYSIS
             )
         else:
-            work.vlm_result = self._qwen_engine().analyze_media(
-                work.frame.pil_image, media_type=_MEDIA_TYPE_IMAGE, mode=TaskMode.GLOBAL_ANALYSIS
+            work.vlm_result = self._analyze_with_qwen(work.frame.pil_image, context)
+
+    def _analyze_with_qwen(self, pil_image, context: AssetContext) -> dict:
+        """
+        SIMPLE 本地 Qwen 全局分析:``GPU_POOL_ENABLED`` 時從 capacity 規劃的多卡 pool 借出
+        (享多卡分散 + borrow 即時 VRAM 重檢事件),否則回退 device-0 singleton(Week 3a 行為)。
+        """
+        if not GPU_POOL_ENABLED:
+            return self._qwen_engine().analyze_media(
+                pil_image, media_type=_MEDIA_TYPE_IMAGE, mode=TaskMode.GLOBAL_ANALYSIS
+            )
+        # lazy import 避免模組載入期耦合(與既有 _qwen_engine 的 lazy 風格一致)
+        from model.qwen_model_manager import QwenModelManager
+        from media_processor.pipeline.executor.model_pool_registry import ModelPoolRegistry
+
+        observer = ModelPoolRegistry.make_borrow_observer(
+            context.tracker, context.asset_id, self.meta.name
+        )
+        with ModelPoolRegistry.instance().get_pool(QwenModelManager).borrow(observer=observer) as qwen:
+            return qwen.analyze_media(
+                pil_image, media_type=_MEDIA_TYPE_IMAGE, mode=TaskMode.GLOBAL_ANALYSIS
             )

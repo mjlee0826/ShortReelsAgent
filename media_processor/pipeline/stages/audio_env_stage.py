@@ -25,9 +25,10 @@ _AUDIO_ENV_SPEC = BatchSpec(
 
 
 def _audio_env_batch(audio_paths: list[str]) -> list[list]:
-    """BatchCollector 合批函式:lazy 取得 AudioEnv singleton 後一次分類多檔(順序一致)。"""
+    """BatchCollector 合批函式:從多卡 pool 借出 AudioEnv(或 singleton)一次分類多檔(順序一致)。"""
     from model.audio_env_model_manager import AudioEnvModelManager
-    return AudioEnvModelManager().classify_environment_batch(audio_paths)
+    from media_processor.pipeline.executor.model_pool_registry import borrow_for_batch
+    return borrow_for_batch(AudioEnvModelManager, _STAGE_NAME, lambda m: m.classify_environment_batch(audio_paths))
 
 
 class AudioEnvStage(Stage):
