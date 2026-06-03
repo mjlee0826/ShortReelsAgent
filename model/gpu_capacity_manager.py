@@ -43,8 +43,6 @@ from config.media_processor_config import (
     LAION_TRANSIENT_VRAM_GB,
     AUDIO_ENV_RESIDENT_VRAM_GB,
     AUDIO_ENV_TRANSIENT_VRAM_GB,
-    SALIENCY_RESIDENT_VRAM_GB,
-    SALIENCY_TRANSIENT_VRAM_GB,
 )
 from model.base_model_manager import BaseModelManager
 from model.gpu_gate import BudgetGate
@@ -426,13 +424,12 @@ class GpuCapacityManager:
         預設模型規格 ``(class, resident_gb, transient_gb, multi_card, max_slots_per_card)``，依 eager 優先序。
 
         - Qwen：``multi_card=True``、``max_slots=0``（= 用全域 QWEN_MAX_SLOTS_PER_GPU，同卡可塞多份）。
-        - Saliency：``multi_card=True``、``max_slots=1``（每張放得下的卡剛好一份 → 真多卡分散、不過量）；
-          排在 Qwen 之後（Qwen 仍優先佔卡）。
         - 其餘小模型：``multi_card=False``（單卡 best-fit，集中到 small_host）。
-        lazy import 各 Manager，避免「import 本模組」就把 transformers/pyiqa/panns/onnxruntime 一併拉進來。
+        - **Saliency 不在此列**（Option 3）：U²-Net 已改為純 CPU（見 model.saliency_model_manager），
+          由 model_pool_registry 的獨立 CPU pool 管理、在 _warm_up_auxiliary 預熱，不佔任何 GPU 預算。
+        lazy import 各 Manager，避免「import 本模組」就把 transformers/pyiqa/panns 一併拉進來。
         """
         from model.qwen_model_manager import QwenModelManager
-        from model.saliency_model_manager import SaliencyModelManager
         from model.whisper_model_manager import WhisperModelManager
         from model.laion_model_manager import LaionModelManager
         from model.musiq_model_manager import MusiqModelManager
@@ -440,7 +437,6 @@ class GpuCapacityManager:
 
         return [
             (QwenModelManager, QWEN_RESIDENT_VRAM_GB, QWEN_TRANSIENT_VRAM_GB, True, 0),
-            (SaliencyModelManager, SALIENCY_RESIDENT_VRAM_GB, SALIENCY_TRANSIENT_VRAM_GB, True, 1),
             (WhisperModelManager, WHISPER_RESIDENT_VRAM_GB, WHISPER_TRANSIENT_VRAM_GB, False, 0),
             (LaionModelManager, LAION_RESIDENT_VRAM_GB, LAION_TRANSIENT_VRAM_GB, False, 0),
             (MusiqModelManager, MUSIQ_RESIDENT_VRAM_GB, MUSIQ_TRANSIENT_VRAM_GB, False, 0),

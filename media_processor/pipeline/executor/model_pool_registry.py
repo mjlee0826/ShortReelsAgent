@@ -23,7 +23,7 @@ from queue import Queue
 from typing import Callable, Iterator, Optional, TypeVar
 
 from config.media_processor_config import GPU_SAFETY_BUFFER_GB
-from config.pipeline_config import GPU_POOL_ENABLED, MEDIAPIPE_POOL_SIZE
+from config.pipeline_config import GPU_POOL_ENABLED, MEDIAPIPE_POOL_SIZE, SALIENCY_POOL_SIZE
 from media_processor.pipeline.executor.gpu_detect import detect_gpu_ids
 from media_processor.pipeline.progress import ProgressObserver, ProgressTracker
 from model.base_model_manager import BaseModelManager
@@ -34,11 +34,25 @@ from model.model_pool import ModelPool, PoolBorrowObserver
 _M = TypeVar("_M", bound=BaseModelManager)
 _R = TypeVar("_R")
 
-# ── MediaPipe pool（模組級，線程安全）────────────────────────────────────────────
-# MEDIAPIPE_POOL_SIZE 個 FaceDetector instance，borrow_mediapipe() 從此借出
+# ── MediaPipe pool（模組級，CPU；真平行）──────────────────────────────────────────
+# 與 saliency pool 同構：放「MEDIAPIPE_POOL_SIZE 個 *不同 slot_id* 的 instance」，每個是獨立的
+# FaceDetector singleton、各有自己的 L3 _inference_lock，借出後才能真正多路 CPU 併發
+# （MediaPipe Tasks 的 detect() 在 C++ graph 內執行會釋放 GIL，與 saliency 的 onnxruntime
+# CPU EP 同理）。borrow_mediapipe() 從此借出。
+# ⚠️ 不可改回 N 個無參數 MediaPipeModelManager()：那會全部命中同一 (0,0) singleton、共用單一
+#    L3 lock，被 @synchronized_inference 序列化 → pool 形同虛設、退回單路。
 _mediapipe_pool: Queue = Queue()
 _mediapipe_pool_initialized = False
 _mediapipe_pool_init_lock = threading.Lock()
+
+# ── Saliency pool（模組級，CPU；Option 3）─────────────────────────────────────────
+# U²-Net 已移出 GPU capacity、改純 CPU（見 model.saliency_model_manager），由此獨立 pool 管併發。
+# 與 mediapipe pool 同構：放「SALIENCY_POOL_SIZE 個 *不同 slot_id* 的 instance」，每個有獨立的
+# onnxruntime CPU session 與 L3 _inference_lock，才能真正多路 CPU 併發（saliency CPU 推論較重，
+# 需要真平行）。run_saliency() 從此借出。
+_saliency_pool: Queue = Queue()
+_saliency_pool_initialized = False
+_saliency_pool_init_lock = threading.Lock()
 
 # 無 GPU 時 ModelPool 仍需至少一個 slot;device 0 經 get_device_str 會對應到 'cpu'
 _CPU_FALLBACK_DEVICE_ID = 0
@@ -203,11 +217,11 @@ class ModelPoolRegistry:
 
     def _warm_up_auxiliary(self) -> None:
         """
-        預載未納入 capacity/pool 的本地 CPU 模型：VAD(Silero)、MediaPipe pool。
+        預載未納入 GPU capacity/pool 的本地 CPU 模型：VAD(Silero)、MediaPipe pool、Saliency pool。
 
-        Saliency 已納入 capacity(走上面的 pool 迴圈、多卡每卡一份),不在此重複。
-        MediaPipe 改走 MEDIAPIPE_POOL_SIZE 個 instance 的 pool（_warm_up_mediapipe_pool），
-        不再是單一 singleton。
+        Saliency（Option 3 起）已從 GPU capacity 移除、改純 CPU（見 model.saliency_model_manager），
+        與 MediaPipe 一樣走獨立 CPU pool 在此預熱（_warm_up_saliency_pool），不再走 eager GPU pool 迴圈。
+        MediaPipe 走 MEDIAPIPE_POOL_SIZE 個 instance 的 pool（_warm_up_mediapipe_pool）。
         Gemini **刻意不預載**:它是雲端 API client、無本地權重;且未設 GEMINI_API_KEY 時 ``_initialize``
         會 raise,warm 它會讓啟動直接失敗;又只有 COMPLEX 用 → 維持 lazy。
         任一模型載入失敗(缺套件等)只告警、不中斷其餘 warmup(stage 首次用到仍會 lazy 再試)。
@@ -229,6 +243,15 @@ class ModelPoolRegistry:
         except Exception as exc:
             print(f"[ModelPoolRegistry] MediaPipe pool warmup 失敗({exc});降級為 lazy 單例")
             self._startup_tracker.emit_model_warmup("MediaPipeModelManager", "cpu×1", payload={"status": "lazy_fallback"})
+        # Saliency pool 獨立預熱（Option 3：U²-Net 已改純 CPU，SALIENCY_POOL_SIZE 個獨立 instance）
+        saliency_label = f"cpu×{SALIENCY_POOL_SIZE}"
+        self._startup_tracker.emit_model_warmup("SaliencyModelManager", saliency_label, payload={"status": "loading"})
+        try:
+            _warm_up_saliency_pool()
+            self._startup_tracker.emit_model_warmup("SaliencyModelManager", saliency_label, payload={"status": "ready"})
+        except Exception as exc:
+            print(f"[ModelPoolRegistry] Saliency pool warmup 失敗({exc});改為 lazy 載入")
+            self._startup_tracker.emit_model_warmup("SaliencyModelManager", saliency_label, payload={"status": "lazy_fallback"})
 
     @staticmethod
     def _auxiliary_loaders() -> list[tuple[str, Callable[[], object]]]:
@@ -295,13 +318,17 @@ def borrow_for_batch(
 
 def _warm_up_mediapipe_pool() -> None:
     """
-    warmup 時建立 MEDIAPIPE_POOL_SIZE 個 FaceDetector instance 並放進 pool。
+    warmup 時建立 MEDIAPIPE_POOL_SIZE 個「不同 slot_id」的 MediaPipeModelManager instance 放進 pool。
+
+    與 _warm_up_saliency_pool 同構：用不同 slot_id（(0,0)、(0,1)…）取得彼此獨立的 singleton，
+    每個各有自己的 FaceDetector 與 L3 _inference_lock → 借出後可真正多路 CPU 併發（不像共用單一
+    (0,0) instance 會被 @synchronized_inference 的 L3 lock 序列化成單路）。
     pool 預熱後 _mediapipe_pool_initialized 置 True，borrow_mediapipe 不再 lazy 初始化。
     """
     global _mediapipe_pool_initialized
     from model.mediapipe_model_manager import MediaPipeModelManager
-    for _ in range(MEDIAPIPE_POOL_SIZE):
-        _mediapipe_pool.put(MediaPipeModelManager())
+    for slot_id in range(MEDIAPIPE_POOL_SIZE):
+        _mediapipe_pool.put(MediaPipeModelManager(slot_id=slot_id))
     _mediapipe_pool_initialized = True
 
 
@@ -309,32 +336,55 @@ def _warm_up_mediapipe_pool() -> None:
 def borrow_mediapipe() -> Iterator:
     """
     借用一個 MediaPipe FaceDetector instance（blocking queue），用完自動歸還。
-    pool 未預熱時（warmup 失敗 / 未呼叫）lazy 建單例，避免永久阻塞。
+
+    與 run_saliency 同構：pool 未預熱時（warmup 失敗 / 未呼叫）以雙重檢查鎖 lazy 建滿整池
+    （_warm_up_mediapipe_pool，含不同 slot_id），確保 lazy 路徑同樣具備真平行、且避免永久阻塞。
     """
     global _mediapipe_pool_initialized
-    # pool 未預熱（warmup 失敗或未呼叫）→ 雙重鎖定 lazy 建一個
+    # pool 未預熱（warmup 失敗或未呼叫）→ 雙重檢查鎖 lazy 建滿整池（不同 slot_id → 真平行）
     if not _mediapipe_pool_initialized:
         with _mediapipe_pool_init_lock:
             if not _mediapipe_pool_initialized:
-                from model.mediapipe_model_manager import MediaPipeModelManager
-                _mediapipe_pool.put(MediaPipeModelManager())
-                _mediapipe_pool_initialized = True
+                _warm_up_mediapipe_pool()
     mgr = _mediapipe_pool.get()
     try:
         yield mgr
     finally:
+        # finally 確保異常路徑也歸還 instance，避免 pool 被慢慢耗盡
         _mediapipe_pool.put(mgr)
+
+
+def _warm_up_saliency_pool() -> None:
+    """
+    warmup 時建立 SALIENCY_POOL_SIZE 個「不同 slot_id」的 SaliencyModelManager instance 放進 pool。
+
+    用不同 slot_id（(0,0)、(0,1)…）取得彼此獨立的 singleton，使每個 instance 各有自己的
+    L3 _inference_lock → 借出後可真正多路 CPU 併發（不像共用單一 instance 會被 L3 序列化）。
+    pool 預熱後 _saliency_pool_initialized 置 True，run_saliency 不再 lazy 初始化。
+    """
+    global _saliency_pool_initialized
+    from model.saliency_model_manager import SaliencyModelManager
+    for slot_id in range(SALIENCY_POOL_SIZE):
+        _saliency_pool.put(SaliencyModelManager(slot_id=slot_id))
+    _saliency_pool_initialized = True
 
 
 def run_saliency(fn: Callable[[_M], _R]) -> _R:
     """
-    供 saliency stage 使用:從多卡 pool 借出 ``SaliencyModelManager`` 執行 ``fn``(含跨卡 OOM failover)。
+    供 saliency stage 使用：從 CPU pool 借一個 ``SaliencyModelManager`` 執行 ``fn``，用完自動歸還。
 
-    saliency 已納入 capacity(每卡一份),故與 Qwen 一樣享多卡分散 + ``run_with_failover`` 換卡。
-    ``GPU_POOL_ENABLED=false`` 時回退「最空卡 singleton」(不經 pool;仍避開滿載的 cuda:0)。
+    Option 3 起 saliency 為純 CPU 模型（見 model.saliency_model_manager），不再走 GPU capacity
+    pool / 跨卡 OOM failover —— CPU 不會 CUDA OOM、也無卡可換。pool 未預熱（warmup 失敗 / 未呼叫）
+    時以雙重檢查鎖 lazy 建滿整池，避免永久阻塞。
     """
-    from model.saliency_model_manager import SaliencyModelManager
-    if not GPU_POOL_ENABLED:
-        from model.base_model_manager import BaseModelManager
-        return fn(SaliencyModelManager(device_id=BaseModelManager.most_free_cuda_device()))
-    return ModelPoolRegistry.instance().get_pool(SaliencyModelManager).run_with_failover(fn)
+    global _saliency_pool_initialized
+    if not _saliency_pool_initialized:
+        with _saliency_pool_init_lock:
+            if not _saliency_pool_initialized:
+                _warm_up_saliency_pool()
+    saliency = _saliency_pool.get()
+    try:
+        return fn(saliency)
+    finally:
+        # finally 確保異常路徑也歸還 instance，避免 pool 被慢慢耗盡
+        _saliency_pool.put(saliency)

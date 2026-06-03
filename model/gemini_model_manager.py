@@ -1,3 +1,24 @@
+"""
+GeminiModelManager：雲端視覺大腦 (Gemini)，透過 google.genai SDK 完成影片分析與 Agentic 推論。
+
+設計模式
+--------
+- **Template Method**：繼承 ``BaseModelManager``，鎖序與 Singleton 由基底類別提供；
+  子類只需實作 ``_initialize`` 與業務方法。
+- **Strategy**：``PromptManager`` 可由外部注入（``set_prompt_manager``），
+  不同 Task Mode 切換不同提示策略，符合開放封閉原則。
+- **Null Object**：推論失敗時回傳含 ``error`` 欄位的 dict，下游無需特例處理。
+
+上傳流程
+--------
+每次 :meth:`analyze_media` 均「上傳 → 輪詢 → generate_content → 刪除」；
+``finally`` 保證雲端暫存檔必被清除（隱私保護 + API 配額管理）。
+
+GPU 策略
+--------
+雲端 API 模型不佔本地 GPU；``_uses_gpu()`` 自動回 False，
+forward 跳過 L2 GpuGate 與 ModelPool VRAM 重檢。
+"""
 import os
 import time
 from google import genai
@@ -15,7 +36,12 @@ from config.model_config import (
 
 
 class GeminiModelManager(BaseModelManager):
-    """統一的雲端大腦 (Gemini)。已遷移至最新 google.genai 架構。"""
+    """
+    統一的雲端大腦 (Gemini)：影片語意分析（analyze_media）與 Agentic 導演規劃（generate_director_plan）。
+
+    已遷移至 ``google.genai`` 最新架構（google-genai SDK）。
+    ``device_id`` 對雲端 API 無意義，``self.device`` 未設置，``_uses_gpu()`` 自動回 False。
+    """
 
     def _initialize(self, device_id: int = 0):
         """初始化 Gemini Client。device_id 對雲端 API 無效，保留簽名一致性。"""
@@ -34,7 +60,12 @@ class GeminiModelManager(BaseModelManager):
 
     @synchronized_inference
     def analyze_media(self, media_input: str, media_type: str = "video", mode: TaskMode = TaskMode.TIMECODED_ACTION_INDEX) -> dict:
-        """上傳媒體至 Gemini 並取得語意推論結果。"""
+        """
+        上傳媒體至 Gemini API，輪詢等待後台處理完成，並回傳語意推論 JSON 結果。
+
+        流程：upload → 輪詢（最多 ``GEMINI_POLL_MAX_COUNT`` 次）→ generate_content → delete（finally 保證）。
+        失敗時回傳含 ``error`` 欄位的 Null Object dict；上傳的雲端暫存檔無論結果如何必被清除。
+        """
         prompt_text = PromptFactory.create_prompt(mode, self.prompt_manager)
         video_file = None
 
@@ -77,7 +108,12 @@ class GeminiModelManager(BaseModelManager):
 
     @synchronized_inference
     def generate_director_plan(self, prompt: str, tools: list = None) -> str:
-        """Agentic 核心：建立對話 Session 並傳送指令。"""
+        """
+        Agentic 模式：建立 Gemini Chat Session 並傳送導演規劃指令，回傳純文字回應。
+
+        採用 ``strong_model``（較大容量的 Gemini 模型），適合需要複雜推理的 Agentic 工作流。
+        ``tools`` 為 Gemini Function Calling 工具列表；``None`` 時建立無工具的純對話 Session。
+        """
         chat = self.client.chats.create(
             model=self.strong_model,
             config={'tools': tools} if tools else None

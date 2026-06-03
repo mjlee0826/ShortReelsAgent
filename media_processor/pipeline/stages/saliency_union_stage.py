@@ -1,4 +1,4 @@
-"""SaliencyUnionStage:頭/中/尾三幀 saliency bbox 取聯集(GPU,Simple)。"""
+"""SaliencyUnionStage:頭/中/尾三幀 saliency bbox 取聯集(CPU,Simple)。"""
 from __future__ import annotations
 
 from config.media_processor_config import SALIENCY_SAMPLE_POSITIONS
@@ -18,12 +18,13 @@ class SaliencyUnionStage(Stage):
 
     聯集 bbox 代表整段影片主體曾出現的最大安全區域,確保 9:16 裁切不截斷主體(對齊原 ``_get_saliency_bbox_union``)。
     僅 Simple 影片需要(Complex 以逐 event bbox 取代)。每幀內部「saliency mask → bbox → 有臉覆蓋」由
-    ``compute_saliency_bbox_at_time`` 處理。GPU 資源(U2-Net)；MediaPipe 從 pool 借出（borrow_mediapipe）。
+    ``compute_saliency_bbox_at_time`` 處理。CPU 資源(Option 3：U²-Net 改純 CPU onnxruntime)；MediaPipe 從 pool 借出（borrow_mediapipe）。
     """
 
     def __init__(self):
         """設定 Stage 描述。"""
-        self.meta = StageMeta(name=_STAGE_NAME, resource_type=ResourceType.GPU)
+        # Option 3：saliency 已改純 CPU，改走 cpu pool（不再佔用較小的 GPU pool）
+        self.meta = StageMeta(name=_STAGE_NAME, resource_type=ResourceType.CPU)
 
     def run(self, context: AssetContext) -> None:
         """頭/中/尾三幀各算 bbox,取聯集寫入 VideoWork.subject_bbox。"""

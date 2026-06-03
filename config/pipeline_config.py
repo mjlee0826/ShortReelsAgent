@@ -114,6 +114,14 @@ AUDIO_ENV_BATCH_ENABLED = _read_bool_env("AUDIO_ENV_BATCH_ENABLED", True)
 # 超過 MAX_ASSETS_PARALLEL 個 instance 不會帶來額外並行收益，故以此為上限避免浪費記憶體。
 MEDIAPIPE_POOL_SIZE: int = MAX_ASSETS_PARALLEL
 
+# ── Saliency Pool (Option 3：U²-Net 移出 GPU、改純 CPU) ─────────────────────────
+# saliency 已從 GpuCapacityManager 移除、改由 model_pool_registry 的獨立 CPU pool 管理併發。
+# 與 MediaPipe pool 不同：這裡每個 instance 是一份**獨立**的 u2net onnxruntime CPU session
+# （各 ~170MB RAM + 自己的 thread pool），故**不**直接取 MAX_ASSETS_PARALLEL，預設給較保守的 4：
+# saliency 非端到端瓶頸（Qwen 才是），4 路 CPU 併發通常已足夠跟上。
+# 若 saliency 成為佇列瓶頸可調高；若 RAM / CPU 緒吃緊可調低（env: SALIENCY_POOL_SIZE）。
+SALIENCY_POOL_SIZE: int = _read_int_env("SALIENCY_POOL_SIZE", 4)
+
 # ── 卡住偵測 Watchdog (Week 3b 觀測性) ─────────────────────────────────────────
 # 背景 daemon 每隔 heartbeat 秒印出「目前進行中的 stage + 已執行秒數」，超過 stall_warn 秒標 ⚠。
 # 只在「有進行中 stage」時才印（idle 不洗版）；processor 疑似卡住時用來看卡在哪個 stage、

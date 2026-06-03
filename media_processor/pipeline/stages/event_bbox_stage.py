@@ -1,4 +1,4 @@
-"""EventBboxStage:為 Gemini 每個多模態事件算精準畫面 bbox(GPU,Complex)。"""
+"""EventBboxStage:為 Gemini 每個多模態事件算精準畫面 bbox(CPU,Complex)。"""
 from __future__ import annotations
 
 from media_processor.pipeline.context import AssetContext
@@ -18,13 +18,14 @@ class EventBboxStage(Stage):
 
     僅 Complex 影片需要。key_timestamp 優先採模型指定的高潮秒數;缺失或超出區段範圍時退回區間中點
     (逐字對齊原 ComplexVideoProcessor 後處理)。每個事件的 bbox 以 ``compute_saliency_bbox_at_time`` 對
-    **原始**影片抓幀計算,結果 ``model_dump()`` 寫回 ``event["subject_bbox"]``。GPU 資源(U2-Net)；
+    **原始**影片抓幀計算,結果 ``model_dump()`` 寫回 ``event["subject_bbox"]``。CPU 資源(Option 3：U²-Net 改純 CPU onnxruntime)；
     MediaPipe 從 pool 借出（borrow_mediapipe）。
     """
 
     def __init__(self):
         """設定 Stage 描述。"""
-        self.meta = StageMeta(name=_STAGE_NAME, resource_type=ResourceType.GPU)
+        # Option 3：saliency 已改純 CPU，改走 cpu pool（不再佔用較小的 GPU pool）
+        self.meta = StageMeta(name=_STAGE_NAME, resource_type=ResourceType.CPU)
 
     def run(self, context: AssetContext) -> None:
         """逐事件決定高潮秒數 → 算 bbox → 就地寫回 event["subject_bbox"]。"""
