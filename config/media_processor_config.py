@@ -78,6 +78,12 @@ LAION_RESIDENT_VRAM_GB      = 1.7
 LAION_TRANSIENT_VRAM_GB     = 1.0
 AUDIO_ENV_RESIDENT_VRAM_GB  = 0.3
 AUDIO_ENV_TRANSIENT_VRAM_GB = 0.5
+# Saliency（U²-Net via rembg/onnxruntime）：常駐 + 單次推論暫態。
+# Week 3b 起 saliency 納入 GpuCapacityManager（每卡一份的多卡）並走 pool，故需 resident（規劃放置）
+# 與 transient（INFERENCE_VRAM_COST_GB，forward 經 L2 BudgetGate 記帳）。resident 為 onnxruntime
+# CUDA session 常駐估值（含 context 開銷）。
+SALIENCY_RESIDENT_VRAM_GB   = 0.5
+SALIENCY_TRANSIENT_VRAM_GB  = 1.5
 
 # Qwen 推論優先序（>0）：BudgetGate 在「有 Qwen 在等」時讓低優先（其餘模型恆 0）讓路，
 # 避免 MUSIQ/LAION 等小模型串流把主瓶頸 Qwen 的大塊 VRAM 請求無限延後（餓死）。

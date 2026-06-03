@@ -17,6 +17,7 @@ from config.pipeline_config import (
     EAGER_MODELS,
     MAX_ASSETS_PARALLEL,
     WATCHDOG_ENABLED,
+    WATCHDOG_FREEZE_DUMP_SEC,
     WATCHDOG_HEARTBEAT_SEC,
     WATCHDOG_STALL_WARN_SEC,
 )
@@ -115,7 +116,9 @@ class PipelineRunner:
 
         # Week 3b:卡住偵測 watchdog(背景 daemon,定期印進行中 stage;本次 run 結束即收工)
         watchdog = (
-            StallWatchdog(WATCHDOG_HEARTBEAT_SEC, WATCHDOG_STALL_WARN_SEC)
+            StallWatchdog(
+                WATCHDOG_HEARTBEAT_SEC, WATCHDOG_STALL_WARN_SEC, WATCHDOG_FREEZE_DUMP_SEC
+            )
             if WATCHDOG_ENABLED else None
         )
         if watchdog is not None:

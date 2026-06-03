@@ -173,22 +173,53 @@ class ModelPoolRegistry:
 
     def warm_up(self) -> None:
         """
-        依 capacity 規劃的優先序預載 eager 模型(觸發各槽位 singleton 載入),逐一發 MODEL_WARMUP。
+        預載 capacity 規劃的 eager pool 模型(Qwen / Saliency 多卡、其餘小模型),並一併預載未走 pool 的
+        本地 CPU singleton(VAD / MediaPipe),逐一發 MODEL_WARMUP。
 
-        無 CUDA 時 ``eager_models()`` 為空 → no-op(維持 lazy,開發 / CPU 環境啟動快)。
+        pool 模型無 CUDA 時為空 → 跳過;aux(CPU)模型則不論有無 CUDA 都預載。Gemini 不預載(見 _warm_up_auxiliary)。
         """
         eager = self._capacity.eager_models()
-        if not eager:
-            print("[ModelPoolRegistry] 無 eager 模型可預載(無 CUDA 或 VRAM 不足),維持 lazy 載入")
-            return
-        for model_class in eager:
-            slots = self._capacity.plan_slots(model_class)
-            device = ",".join(f"cuda:{s.device_id}" for s in slots)
-            name = model_class.__name__
-            self._startup_tracker.emit_model_warmup(name, device, payload={"status": "loading"})
-            # 建立 pool 即觸發各槽位 Manager singleton 的 _initialize(載入權重)
-            self.get_pool(model_class)
-            self._startup_tracker.emit_model_warmup(name, device, payload={"status": "ready"})
+        if eager:
+            for model_class in eager:
+                slots = self._capacity.plan_slots(model_class)
+                device = ",".join(f"cuda:{s.device_id}#{s.slot_id}" for s in slots)
+                name = model_class.__name__
+                self._startup_tracker.emit_model_warmup(name, device, payload={"status": "loading"})
+                # 建立 pool 即觸發各槽位 Manager singleton 的 _initialize(載入權重)
+                self.get_pool(model_class)
+                self._startup_tracker.emit_model_warmup(name, device, payload={"status": "ready"})
+        else:
+            print("[ModelPoolRegistry] 無 eager pool 模型(無 CUDA 或 VRAM 不足),pool 模型維持 lazy")
+        # 不論 pool 模型有無,都預載「沒走 capacity/pool」的本地 CPU singleton(VAD / MediaPipe)
+        self._warm_up_auxiliary()
+
+    def _warm_up_auxiliary(self) -> None:
+        """
+        預載未納入 capacity/pool 的本地 CPU singleton:VAD(Silero)、MediaPipe。
+
+        Saliency 已納入 capacity(走上面的 pool 迴圈、多卡每卡一份),不在此重複。
+        Gemini **刻意不預載**:它是雲端 API client、無本地權重;且未設 GEMINI_API_KEY 時 ``_initialize``
+        會 raise,warm 它會讓啟動直接失敗;又只有 COMPLEX 用 → 維持 lazy。
+        任一模型載入失敗(缺套件等)只告警、不中斷其餘 warmup(stage 首次用到仍會 lazy 再試)。
+        """
+        for name, loader in self._auxiliary_loaders():
+            self._startup_tracker.emit_model_warmup(name, "cpu", payload={"status": "loading"})
+            try:
+                loader()
+                self._startup_tracker.emit_model_warmup(name, "cpu", payload={"status": "ready"})
+            except Exception as exc:
+                print(f"[ModelPoolRegistry] aux warmup {name} 失敗({exc});改為 lazy 載入")
+                self._startup_tracker.emit_model_warmup(name, "cpu", payload={"status": "lazy_fallback"})
+
+    @staticmethod
+    def _auxiliary_loaders() -> list[tuple[str, Callable[[], object]]]:
+        """回傳 aux(CPU)模型的 (名稱, 載入函式);lazy import 避免模組載入期拉重依賴。"""
+        from model.vad_model_manager import VadModelManager
+        from model.mediapipe_model_manager import MediaPipeModelManager
+        return [
+            ("VadModelManager", lambda: VadModelManager()),
+            ("MediaPipeModelManager", lambda: MediaPipeModelManager()),
+        ]
 
     def startup_borrow_observer(self, stage_name: Optional[str] = None) -> PoolBorrowObserver:
         """
@@ -243,3 +274,17 @@ def borrow_for_batch(
     observer = registry.startup_borrow_observer(stage_name)
     # run_with_failover:多卡 pool 在某卡持續 OOM 時自動換卡;單卡 pool 退化為單次借出(無回歸)
     return registry.get_pool(model_class).run_with_failover(fn, observer=observer)
+
+
+def run_saliency(fn: Callable[[_M], _R]) -> _R:
+    """
+    供 saliency stage 使用:從多卡 pool 借出 ``SaliencyModelManager`` 執行 ``fn``(含跨卡 OOM failover)。
+
+    saliency 已納入 capacity(每卡一份),故與 Qwen 一樣享多卡分散 + ``run_with_failover`` 換卡。
+    ``GPU_POOL_ENABLED=false`` 時回退「最空卡 singleton」(不經 pool;仍避開滿載的 cuda:0)。
+    """
+    from model.saliency_model_manager import SaliencyModelManager
+    if not GPU_POOL_ENABLED:
+        from model.base_model_manager import BaseModelManager
+        return fn(SaliencyModelManager(device_id=BaseModelManager.most_free_cuda_device()))
+    return ModelPoolRegistry.instance().get_pool(SaliencyModelManager).run_with_failover(fn)

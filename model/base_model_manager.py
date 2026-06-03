@@ -236,6 +236,28 @@ class BaseModelManager(ABC):
         return "cpu"
 
     @staticmethod
+    def most_free_cuda_device() -> int:
+        """
+        回傳當下 free VRAM 最多的 CUDA device id（共用 GPU 上避開被鄰居佔住的卡）。
+
+        給「不走 capacity pool、卻又要挑卡」的模型（如 Saliency 的 onnxruntime session）在載入時
+        選最空的卡，避免硬撞滿載的 cuda:0。無 CUDA / 偵測異常一律回 0（``get_device_str`` 對應到 cpu）。
+        """
+        try:
+            import torch
+            if not torch.cuda.is_available():
+                return 0
+            best_dev, best_free = 0, -1
+            for dev in range(torch.cuda.device_count()):
+                free_b, _total_b = torch.cuda.mem_get_info(dev)
+                if free_b > best_free:
+                    best_free, best_dev = free_b, dev
+            return best_dev
+        except Exception:
+            # 任何偵測異常都不該擋住模型載入，退回 0
+            return 0
+
+    @staticmethod
     def _release_gpu_memory() -> None:
         """釋放 CUDA 快取 + 觸發 gc，供 :func:`oom_resilient` 在 OOM 重試前騰出 VRAM。"""
         try:

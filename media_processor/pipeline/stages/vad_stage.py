@@ -20,12 +20,13 @@ class VadStage(Stage):
 
     Week 3a 由 ``AudioInferenceStage`` 全拆而來:VAD 底層不支援 batch(plan §4.2),維持單張呼叫。
     音訊檔不存在 / 過小(靜音)時跳過、保留預設(無語音),對齊原 ``_analyze_audio`` 短路。
-    GPU 推論(``@synchronized_inference`` 經 L2 GpuGate),標記為 GPU 資源;singleton 延遲載入。
+    Silero VAD 在 **CPU** 推論(模型極輕、ms 級;搬上 GPU 的 H2D/D2H 開銷反而更慢、又佔 VRAM 跟
+    Qwen 搶),故標記為 **CPU 資源**(走 CPU pool、不佔 GPU 槽);singleton 由啟動 warmup 預載、否則延遲載入。
     """
 
     def __init__(self):
         """設定 Stage 描述並預備 lazy manager 欄位。"""
-        self.meta = StageMeta(name=_STAGE_NAME, resource_type=ResourceType.GPU)
+        self.meta = StageMeta(name=_STAGE_NAME, resource_type=ResourceType.CPU)
         self._vad: Optional["VadModelManager"] = None
 
     def _engine(self) -> "VadModelManager":

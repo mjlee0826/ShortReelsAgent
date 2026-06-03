@@ -9,9 +9,12 @@ class VadModelManager(BaseModelManager):
     def _initialize(self, device_id: int = 0):
         """
         透過 Torch Hub 載入 Silero VAD，免安裝額外套件。
-        Silero VAD 內部自行管理 device，device_id 保留以維持簽名一致性。
+
+        Silero VAD 極輕量、本就在 CPU 跑（ms 級），顯式標記 ``self.device='cpu'`` 讓 L2 BudgetGate
+        依 ``_uses_gpu`` 自動跳過 —— 它不該佔 GPU 預算，也不該成為共用卡上的 VRAM 變數。
         """
         with self._log_load("VAD"):
+            self.device = "cpu"
             self.model, utils = torch.hub.load(
                 repo_or_dir=VAD_REPO,
                 model='silero_vad',

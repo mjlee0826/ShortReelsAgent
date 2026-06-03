@@ -116,3 +116,6 @@ AUDIO_ENV_BATCH_ENABLED = _read_bool_env("AUDIO_ENV_BATCH_ENABLED", True)
 WATCHDOG_ENABLED        = _read_bool_env("WATCHDOG_ENABLED", True)
 WATCHDOG_HEARTBEAT_SEC  = _read_int_env("WATCHDOG_HEARTBEAT_SEC", 30)
 WATCHDOG_STALL_WARN_SEC = _read_int_env("WATCHDOG_STALL_WARN_SEC", 120)
+# C 層 dead-man:心跳停止推進(GIL 被 C 擴充如 onnxruntime/CUDA 凍住)達此秒數 → 從 C 層 dump
+# 全部 thread 堆疊到 stderr(Python watchdog 抓不到 GIL-holding hang,靠這個兜)。需 > heartbeat。
+WATCHDOG_FREEZE_DUMP_SEC = _read_int_env("WATCHDOG_FREEZE_DUMP_SEC", 90)

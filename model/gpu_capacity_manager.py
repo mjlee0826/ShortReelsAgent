@@ -43,6 +43,8 @@ from config.media_processor_config import (
     LAION_TRANSIENT_VRAM_GB,
     AUDIO_ENV_RESIDENT_VRAM_GB,
     AUDIO_ENV_TRANSIENT_VRAM_GB,
+    SALIENCY_RESIDENT_VRAM_GB,
+    SALIENCY_TRANSIENT_VRAM_GB,
 )
 from model.base_model_manager import BaseModelManager
 from model.gpu_gate import BudgetGate
@@ -98,6 +100,7 @@ class GpuCapacityManager:
         eager_order: Optional[list[type]] = None,
         safety_buffer_gb: float = GPU_SAFETY_BUFFER_GB,
         max_slots_per_gpu: int = QWEN_MAX_SLOTS_PER_GPU,
+        max_slots_by_model: Optional[dict[type, int]] = None,
         mem_scan: Optional[Callable[[int], tuple[float, float]]] = None,
     ):
         """
@@ -108,22 +111,31 @@ class GpuCapacityManager:
             profiles / multi_card_models / eager_order: 模型規格；任一為 ``None`` 時才 lazy 組預設值
                 （預設值需 import 各 Manager 類別，故注入完整三者即可完全避開重依賴）。
             safety_buffer_gb: 每卡預留給系統 / 鄰居的 VRAM。
-            max_slots_per_gpu: 多卡模型（Qwen）同卡 instance 份數上限；``0``（預設）= 依該卡 free VRAM
-                自動算「可真正並行的份數」，``>0`` = 取 min(本值, 自動值) 當上限。對應 config ``QWEN_MAX_SLOTS_PER_GPU``。
+            max_slots_per_gpu: 多卡模型「同卡 instance 份數」的**預設**上限（主要給 Qwen）；``0``（預設）
+                = 依該卡 free VRAM 自動算可並行份數，``>0`` = 取 min(本值, 自動值)。對應 config ``QWEN_MAX_SLOTS_PER_GPU``。
+            max_slots_by_model: per-model 覆寫上限（例如 ``{SaliencyManager: 1}`` 表示「每卡剛好一份」）；
+                未列入者用 ``max_slots_per_gpu``。``None`` 時用預設規格內建的對照（注入完整規格時為空）。
             mem_scan: ``device_id → (free_gb, total_gb)`` 掃描函式；``None`` 時用真 ``mem_get_info``。
         """
         self._gpu_ids = list(gpu_ids) if gpu_ids is not None else self._detect_cuda_ids()
         # 任一規格缺失才 lazy 組預設（避免測試注入時仍 import 重依賴）
+        default_max_slots: dict[type, int] = {}
         if profiles is None or multi_card_models is None or eager_order is None:
             specs = self._default_model_specs()
-            default_profiles = {c: ModelVramProfile(r, t) for c, r, t, _m in specs}
-            default_order = [c for c, _r, _t, _m in specs]
-            default_multi = {c for c, _r, _t, m in specs if m}
+            default_profiles = {c: ModelVramProfile(r, t) for c, r, t, _m, _ms in specs}
+            default_order = [c for c, _r, _t, _m, _ms in specs]
+            default_multi = {c for c, _r, _t, m, _ms in specs if m}
+            # 只收「有特殊上限（ms>0）」的多卡模型，例如 Saliency=1；Qwen（ms=0）落到 _max_slots_per_gpu
+            default_max_slots = {c: ms for c, _r, _t, m, ms in specs if m and ms > 0}
         self._profiles = profiles if profiles is not None else default_profiles
         self._eager_order = eager_order if eager_order is not None else default_order
         self._multi_card = multi_card_models if multi_card_models is not None else default_multi
         self._buffer = safety_buffer_gb
         self._max_slots_per_gpu = max_slots_per_gpu
+        # per-model 每卡上限覆寫表（Saliency=1 等）；未列入者 _place_model 會回退 _max_slots_per_gpu
+        self._max_slots_by_model = (
+            max_slots_by_model if max_slots_by_model is not None else default_max_slots
+        )
         self._mem_scan = mem_scan or self._real_mem_scan
         # 規劃結果快取（首次 plan 計算後固定，跨 get_pool / apply 共用同一份）
         self._plan: Optional[CapacityPlan] = None
@@ -297,11 +309,13 @@ class GpuCapacityManager:
         """
         need = profile.resident_gb + self._buffer
         if model in self._multi_card:
-            # 多卡模型（Qwen）：每張卡依 free VRAM 算同卡份數（同卡多 slot ⇒ 同卡可並行多條 forward）
+            # 多卡模型：每張卡依 free VRAM 算同卡份數。max_slots 為 per-model 上限
+            # （Qwen=全域；Saliency=1 → 每卡一份）。
             placed = []
+            max_slots = self._max_slots_by_model.get(model, self._max_slots_per_gpu)
             for dev in gpu_ids:
                 count = self._multi_card_slot_count(
-                    profile, remaining[dev], reserve_small=(dev == small_host)
+                    profile, remaining[dev], reserve_small=(dev == small_host), max_slots=max_slots
                 )
                 for slot_id in range(count):
                     placed.append(GpuSlot(device_id=dev, slot_id=slot_id))
@@ -336,7 +350,9 @@ class GpuCapacityManager:
         # 沒有多卡模型 / 沒有單卡模型 → small_host 不影響 Qwen 規劃，回最空卡（維持簡單）
         if not multi or small_total <= 0:
             return max(gpu_ids, key=lambda dev: free_by_dev[dev])
-        qwen_profile = self._profiles[multi[0]]
+        qwen_class = multi[0]
+        qwen_profile = self._profiles[qwen_class]
+        qwen_max_slots = self._max_slots_by_model.get(qwen_class, self._max_slots_per_gpu)
         # 放得下全部小模型（+buffer）的卡才有資格當 host；都放不下則退回最空卡盡力
         candidates = [dev for dev in gpu_ids if free_by_dev[dev] >= small_total + self._buffer]
         if not candidates:
@@ -346,43 +362,45 @@ class GpuCapacityManager:
             """放小模型在此卡會被排擠掉的 Qwen lane 數（不預留 vs 預留小模型的 lane 差）。"""
             free = free_by_dev[dev]
             return (
-                self._multi_card_slot_count(qwen_profile, free, reserve_small=False)
-                - self._multi_card_slot_count(qwen_profile, free, reserve_small=True)
+                self._multi_card_slot_count(qwen_profile, free, reserve_small=False, max_slots=qwen_max_slots)
+                - self._multi_card_slot_count(qwen_profile, free, reserve_small=True, max_slots=qwen_max_slots)
             )
 
         # 損失最少 Qwen lane 者；平手取較緊（free 較小）的卡，把空卡留給 Qwen
         return min(candidates, key=lambda dev: (displaced_lanes(dev), free_by_dev[dev]))
 
     def _multi_card_slot_count(
-        self, profile: ModelVramProfile, free_on_dev: float, reserve_small: bool
+        self, profile: ModelVramProfile, free_on_dev: float, reserve_small: bool, max_slots: int
     ) -> int:
         """
-        算多卡模型（Qwen）在單張卡上要放幾份 instance（同卡多 slot）。
+        算多卡模型在單張卡上要放幾份 instance（同卡多 slot）。
 
         每條「能真正並行的 lane」需 resident（常駐權重）+ transient（forward 暫態）才有意義：
         只塞得下額外 resident、塞不下其 transient 的 instance 只會在 L2 BudgetGate 空等，純浪費 VRAM。
 
         ``reserve_small``：此卡是否為「小模型會落腳的卡」（small_host）。
-        - True：預留所有單卡模型常駐，避免 Qwen 多 slot 擠掉小模型 / 撐爆同卡併發暫態預算。
-        - False：小模型不會放這張，整張拿去算 Qwen 份數（解掉空卡只放得下 1 個 Qwen 的浪費）。
+        - True：預留所有單卡模型常駐，避免多卡 slot 擠掉小模型 / 撐爆同卡併發暫態預算。
+        - False：小模型不會放這張，整張拿去算份數（解掉空卡只放得下 1 份的浪費）。
 
-        自動份數 = ``floor((free − 預留 − buffer) / (resident + transient))``，
-        只要常駐放得下就至少 1 份（單份 transient 不足由 ``BudgetGate`` 的 ``in_flight==0`` over-budget 兜底）。
-        ``self._max_slots_per_gpu > 0`` 時作為「上限」再夾住自動值（取 min）；``≤ 0``（預設）時純自動。
+        ``max_slots``：per-model 每卡上限。``0`` = 自動（依 VRAM 算可並行份數，Qwen 用）；
+        ``>0`` = 取 min 當上限（Saliency=1 → 每卡剛好一份）。
+        自動份數 = ``floor((free − 預留 − buffer) / (resident + transient))``。
         """
-        # 硬條件：連一份常駐（+buffer）都放不下 → 此卡不放（與單卡分支的 need 判準一致）
-        if free_on_dev < profile.resident_gb + self._buffer:
-            return 0
-        # 只有 small_host 卡預留小模型常駐；其餘卡 reserve=0，整張算 Qwen
+        # 只有 small_host 卡預留小模型常駐；其餘卡 reserve=0，整張算份數
         reserve = self._single_card_resident_total() if reserve_small else 0.0
-        usable = free_on_dev - reserve - self._buffer
         per_lane = profile.resident_gb + profile.transient_gb  # 一條可並行 lane 的 VRAM 足跡
+        # 硬條件：扣掉要預留的小模型後，要放得下「常駐 + 一次 forward 暫態 + buffer」才放 Qwen。
+        # 只塞得下權重、塞不下暫態的卡（尤其共用機被鄰居佔走 VRAM 的卡）放了也跑不動 → forward
+        # 直接 OOM/hang，故不放（回 0、降 lazy / 改放別卡）。這也移除了舊「min-1 強制至少 1 份」
+        # 在瀕死卡上硬塞一個跑不動的 Qwen 的問題（實機共用 GPU hang 的根因之一）。
+        if free_on_dev - reserve < per_lane + self._buffer:
+            return 0
+        usable = free_on_dev - reserve - self._buffer
+        # 硬條件已保證 usable ≥ per_lane → useful ≥ 1（不再需要 max(1,...) 硬撐）
         useful = int(usable // per_lane) if per_lane > 0 else 1
-        # 硬條件已過 → 至少 1 份（即使 usable 因小模型預留而不足一條完整 lane）
-        useful = max(1, useful)
-        # 手動上限（>0）再夾；≤0 為自動不夾
-        if self._max_slots_per_gpu > 0:
-            return min(self._max_slots_per_gpu, useful)
+        # per-model 上限（>0）再夾；≤0 為自動不夾
+        if max_slots > 0:
+            return min(max_slots, useful)
         return useful
 
     def _single_card_resident_total(self) -> float:
@@ -403,25 +421,30 @@ class GpuCapacityManager:
     # ── 預設規格 / 掃描（未注入時才用，含 lazy import） ────────────────────────
 
     @staticmethod
-    def _default_model_specs() -> list[tuple[type, float, float, bool]]:
+    def _default_model_specs() -> list[tuple[type, float, float, bool, int]]:
         """
-        預設模型規格 ``(class, resident_gb, transient_gb, multi_card)``，依 eager 優先序排列。
+        預設模型規格 ``(class, resident_gb, transient_gb, multi_card, max_slots_per_card)``，依 eager 優先序。
 
-        Qwen 第一且 ``multi_card=True``（鋪滿可放下的每張卡）；其餘小模型單卡、依重要性排序。
-        lazy import 各 Manager 類別，避免「import 本模組」就把 transformers/pyiqa/panns 一併拉進來。
+        - Qwen：``multi_card=True``、``max_slots=0``（= 用全域 QWEN_MAX_SLOTS_PER_GPU，同卡可塞多份）。
+        - Saliency：``multi_card=True``、``max_slots=1``（每張放得下的卡剛好一份 → 真多卡分散、不過量）；
+          排在 Qwen 之後（Qwen 仍優先佔卡）。
+        - 其餘小模型：``multi_card=False``（單卡 best-fit，集中到 small_host）。
+        lazy import 各 Manager，避免「import 本模組」就把 transformers/pyiqa/panns/onnxruntime 一併拉進來。
         """
         from model.qwen_model_manager import QwenModelManager
+        from model.saliency_model_manager import SaliencyModelManager
         from model.whisper_model_manager import WhisperModelManager
         from model.laion_model_manager import LaionModelManager
         from model.musiq_model_manager import MusiqModelManager
         from model.audio_env_model_manager import AudioEnvModelManager
 
         return [
-            (QwenModelManager, QWEN_RESIDENT_VRAM_GB, QWEN_TRANSIENT_VRAM_GB, True),
-            (WhisperModelManager, WHISPER_RESIDENT_VRAM_GB, WHISPER_TRANSIENT_VRAM_GB, False),
-            (LaionModelManager, LAION_RESIDENT_VRAM_GB, LAION_TRANSIENT_VRAM_GB, False),
-            (MusiqModelManager, MUSIQ_RESIDENT_VRAM_GB, MUSIQ_TRANSIENT_VRAM_GB, False),
-            (AudioEnvModelManager, AUDIO_ENV_RESIDENT_VRAM_GB, AUDIO_ENV_TRANSIENT_VRAM_GB, False),
+            (QwenModelManager, QWEN_RESIDENT_VRAM_GB, QWEN_TRANSIENT_VRAM_GB, True, 0),
+            (SaliencyModelManager, SALIENCY_RESIDENT_VRAM_GB, SALIENCY_TRANSIENT_VRAM_GB, True, 1),
+            (WhisperModelManager, WHISPER_RESIDENT_VRAM_GB, WHISPER_TRANSIENT_VRAM_GB, False, 0),
+            (LaionModelManager, LAION_RESIDENT_VRAM_GB, LAION_TRANSIENT_VRAM_GB, False, 0),
+            (MusiqModelManager, MUSIQ_RESIDENT_VRAM_GB, MUSIQ_TRANSIENT_VRAM_GB, False, 0),
+            (AudioEnvModelManager, AUDIO_ENV_RESIDENT_VRAM_GB, AUDIO_ENV_TRANSIENT_VRAM_GB, False, 0),
         ]
 
     @staticmethod

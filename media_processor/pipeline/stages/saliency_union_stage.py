@@ -12,7 +12,6 @@ from media_processor.pipeline.stages.video_work import get_video_work
 
 if TYPE_CHECKING:
     from model.mediapipe_model_manager import MediaPipeModelManager
-    from model.saliency_model_manager import SaliencyModelManager
 
 _STAGE_NAME = "saliency_union"
 
@@ -29,15 +28,7 @@ class SaliencyUnionStage(Stage):
     def __init__(self):
         """設定 Stage 描述並預備 saliency / mediapipe 兩個 lazy manager。"""
         self.meta = StageMeta(name=_STAGE_NAME, resource_type=ResourceType.GPU)
-        self._saliency: Optional["SaliencyModelManager"] = None
         self._mediapipe: Optional["MediaPipeModelManager"] = None
-
-    def _saliency_engine(self) -> "SaliencyModelManager":
-        """延遲取得 U2-Net saliency singleton。"""
-        if self._saliency is None:
-            from model.saliency_model_manager import SaliencyModelManager
-            self._saliency = SaliencyModelManager()
-        return self._saliency
 
     def _mediapipe_engine(self) -> "MediaPipeModelManager":
         """延遲取得 MediaPipe singleton。"""
@@ -49,11 +40,14 @@ class SaliencyUnionStage(Stage):
     def run(self, context: AssetContext) -> None:
         """頭/中/尾三幀各算 bbox,取聯集寫入 VideoWork.subject_bbox。"""
         work = get_video_work(context)
-        saliency = self._saliency_engine()
         mediapipe = self._mediapipe_engine()
         sample_times = [work.duration * position for position in SALIENCY_SAMPLE_POSITIONS]
-        bboxes = [
-            compute_saliency_bbox_at_time(context.file_path, t, saliency, mediapipe)
-            for t in sample_times
-        ]
+        # 借一個 saliency（多卡 pool + 跨卡 failover）跑完頭/中/尾三幀
+        from media_processor.pipeline.executor.model_pool_registry import run_saliency
+        bboxes = run_saliency(
+            lambda s: [
+                compute_saliency_bbox_at_time(context.file_path, t, s, mediapipe)
+                for t in sample_times
+            ]
+        )
         work.subject_bbox = MediaStrategy._union_bboxes(bboxes)
