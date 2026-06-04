@@ -19,11 +19,17 @@ from __future__ import annotations
 
 import threading
 from contextlib import contextmanager
+from dataclasses import dataclass
 from queue import Queue
 from typing import Callable, Iterator, Optional, TypeVar
 
 from config.media_processor_config import GPU_SAFETY_BUFFER_GB
-from config.pipeline_config import GPU_POOL_ENABLED, MEDIAPIPE_POOL_SIZE, SALIENCY_POOL_SIZE
+from config.pipeline_config import (
+    GPU_POOL_ENABLED,
+    MEDIAPIPE_POOL_SIZE,
+    SALIENCY_POOL_SIZE,
+    VAD_INSTANCE_COUNT,
+)
 from media_processor.pipeline.executor.gpu_detect import detect_gpu_ids
 from media_processor.pipeline.progress import ProgressObserver, ProgressTracker
 from model.base_model_manager import BaseModelManager
@@ -103,6 +109,22 @@ class _TrackerBorrowObserver:
                 "free_gb": round(free_gb, 2),
             },
         )
+
+
+@dataclass(frozen=True)
+class AuxPoolRow:
+    """
+    未納入 GPU capacity 規劃的本地 CPU 模型佈局列(VAD / MediaPipe / Saliency),供 StartupReporter 顯示。
+
+    這些模型不佔 GPU 預算、不在 ``GpuCapacityManager.placement_rows()`` 內,故需獨立一份描述。
+    ``instances`` 為常駐 instance 份數(非 VRAM GB);``status`` 預設 ``eager``(三者皆於
+    ``_warm_up_auxiliary`` 啟動期預熱)。
+    """
+
+    name: str
+    instances: int
+    placement: str
+    status: str = "eager"
 
 
 class ModelPoolRegistry:
@@ -214,6 +236,27 @@ class ModelPoolRegistry:
             print("[ModelPoolRegistry] 無 eager pool 模型(無 CUDA 或 VRAM 不足),pool 模型維持 lazy")
         # 不論 pool 模型有無,都預載「沒走 capacity/pool」的本地 CPU singleton(VAD / MediaPipe)
         self._warm_up_auxiliary()
+
+    def aux_pool_rows(self) -> list[AuxPoolRow]:
+        """
+        回傳未納入 GPU capacity 的本地 CPU 模型(VAD / MediaPipe / Saliency)佈局列,供 StartupReporter 顯示。
+
+        份數取自 config 常數(單一資料來源、無 magic number);三者皆於 _warm_up_auxiliary 啟動期 eager 預熱,
+        故 status 統一為 AuxPoolRow 預設的 ``eager``(個別載入失敗的降級已由 _warm_up_auxiliary 另行 log)。
+        """
+        return [
+            AuxPoolRow(name="VadModelManager", instances=VAD_INSTANCE_COUNT, placement="cpu"),
+            AuxPoolRow(
+                name="MediaPipeModelManager",
+                instances=MEDIAPIPE_POOL_SIZE,
+                placement=f"cpu×{MEDIAPIPE_POOL_SIZE}",
+            ),
+            AuxPoolRow(
+                name="SaliencyModelManager",
+                instances=SALIENCY_POOL_SIZE,
+                placement=f"cpu×{SALIENCY_POOL_SIZE}",
+            ),
+        ]
 
     def _warm_up_auxiliary(self) -> None:
         """

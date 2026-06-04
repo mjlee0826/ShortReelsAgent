@@ -91,6 +91,34 @@ class FFmpegAdapter:
             pass
         return metadata
 
+    def probe_dimensions(self, input_path: str) -> tuple[int, int]:
+        """
+        以 ffprobe 讀取第一條視訊串流的像素寬高，回傳 (width, height)。
+        供 MediaStandardizer 判斷 .mp4 是否需降解析度轉檔（例如 4K）。
+        讀取失敗（無 ffprobe、無視訊串流、檔案損壞）時靜默回傳 (0, 0)，
+        由呼叫端視為「不需轉檔」安全降級，不阻斷主流程。
+        """
+        try:
+            result = subprocess.run(
+                [
+                    "ffprobe", "-v", "quiet",
+                    "-select_streams", "v:0",
+                    "-show_entries", "stream=width,height",
+                    "-print_format", "json",
+                    input_path,
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+            if result.returncode != 0:
+                return (0, 0)
+            streams = json.loads(result.stdout).get("streams", [])
+            if not streams:
+                return (0, 0)
+            return (int(streams[0].get("width", 0)), int(streams[0].get("height", 0)))
+        except (json.JSONDecodeError, OSError, KeyError, ValueError):
+            return (0, 0)
+
     def strip_audio_fast(self, input_path: str, output_path: str) -> None:
         """無損快速剝離音軌，僅保留影像（Stream Copy，速度極快）。"""
         print(f"[FFmpeg] 正在執行無損畫面剝離: {os.path.basename(output_path)}")

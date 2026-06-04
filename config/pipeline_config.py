@@ -122,6 +122,11 @@ MEDIAPIPE_POOL_SIZE: int = MAX_ASSETS_PARALLEL
 # 若 saliency 成為佇列瓶頸可調高；若 RAM / CPU 緒吃緊可調低（env: SALIENCY_POOL_SIZE）。
 SALIENCY_POOL_SIZE: int = _read_int_env("SALIENCY_POOL_SIZE", 4)
 
+# ── VAD（Silero）─────────────────────────────────────────────────────────────
+# VAD 為單一 CPU 常駐 instance（非 pool）；此常數僅供 StartupReporter 顯示「常駐份數」，
+# 消除 magic number。與 MEDIAPIPE_POOL_SIZE / SALIENCY_POOL_SIZE 並列為 aux CPU 模型份數來源。
+VAD_INSTANCE_COUNT: int = 1
+
 # ── 卡住偵測 Watchdog (Week 3b 觀測性) ─────────────────────────────────────────
 # 背景 daemon 每隔 heartbeat 秒印出「目前進行中的 stage + 已執行秒數」，超過 stall_warn 秒標 ⚠。
 # 只在「有進行中 stage」時才印（idle 不洗版）；processor 疑似卡住時用來看卡在哪個 stage、

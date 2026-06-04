@@ -16,6 +16,7 @@ from typing import Optional
 import cv2
 from PIL import Image
 
+from config.media_processor_config import INFERENCE_MAX_SHORT_SIDE
 from media_processor.media_strategy import MediaStrategy
 from media_processor.models import SubjectBbox
 from media_tools.ffmpeg_adapter import FFmpegAdapter
@@ -25,6 +26,24 @@ _ASPECT_RATIO_NDIGITS = 4
 _FPS_NDIGITS = 2
 # 抓幀失敗 / 無顯著區域時退回的全畫面安全區 (x1,y1,x2,y2)
 _FULL_FRAME_BBOX = (0.0, 0.0, 100.0, 100.0)
+
+
+def cap_pil_resolution(
+    img: Image.Image, max_short_side: int = INFERENCE_MAX_SHORT_SIDE
+) -> Image.Image:
+    """
+    短邊超過 max_short_side 時等比縮放後回傳新圖;否則原圖直接回傳(推論用,不影響輸出品質)。
+
+    純記憶體運算、不回寫檔案。所有模型推論幀的共用降解析度入口,主要修復 4K 幀的 GIL-freeze
+    (MediaPipe tflite / Saliency ONNX 在 ~8M px 幀推論時不釋放 GIL)。
+    """
+    width, height = img.size
+    short_side = min(width, height)
+    if short_side <= max_short_side:
+        return img
+    # 以短邊為基準等比縮放,長邊同步縮小,維持原始長寬比
+    scale = max_short_side / short_side
+    return img.resize((int(width * scale), int(height * scale)), Image.LANCZOS)
 
 
 def extract_video_metadata(file_path: str, ffmpeg: FFmpegAdapter) -> dict:
@@ -67,7 +86,10 @@ def grab_frame_at_time(file_path: str, time_sec: float) -> Optional[Image.Image]
         ret, frame = cap.read()
         cap.release()
         if ret:
-            return Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            # cv2→PIL 後立即降解析度:此函式是代表幀 / SaliencyUnion 三幀 / EventBbox N 幀的共用出口,
+            # 改一處即覆蓋所有下游模型推論幀(metadata 另由 cv2 CAP_PROP 讀取,不受影響)
+            pil_image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            return cap_pil_resolution(pil_image)
     except Exception as e:
         # 抓幀失敗不致命(下游退預設 / 安全區),印警告協助定位
         print(f"[VideoFrameUtils Warning] 抓幀失敗 (t={time_sec:.1f}s): {e}")

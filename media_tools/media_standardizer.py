@@ -1,6 +1,18 @@
 import os
 import subprocess
+
+from config.media_processor_config import STANDARDIZE_MAX_LONG_SIDE
 from media_tools.ffmpeg_adapter import FFmpegAdapter
+
+# 一律轉檔的視訊容器副檔名（非 .mp4：含 iPhone .mov HEVC 與其他非網頁友善容器）
+_TRANSCODE_ALWAYS_VIDEO_EXT = (".mov", ".avi", ".mkv", ".webm")
+# 需閘控的視訊副檔名（.mp4 已是網頁友善，僅在超過解析度上限時才轉，避免重編碼已合規檔案）
+_GATED_VIDEO_EXT = ".mp4"
+# HEIC/HEIF 圖片副檔名（瀏覽器不支援，需轉 JPG）
+_HEIC_IMAGE_EXT = (".heic", ".heif")
+# 標準化輸出檔名標記（已含此標記者跳過，避免 _std_std）
+_STD_MARKER = "_std."
+
 
 class MediaStandardizer:
     """
@@ -26,8 +38,8 @@ class MediaStandardizer:
             file_path = os.path.join(folder_path, filename)
             ext = os.path.splitext(filename)[1].lower()
 
-            # 策略：如果不是 .mp4 或是 iPhone 的 .mov (HEVC)，統一轉成 H.264 .mp4
-            if ext in [".mov", ".avi", ".mkv", ".webm"]:
+            # 策略：非 .mp4 容器一律轉 H.264 .mp4；.mp4 僅在長邊超過上限（4K）時才轉（見 _needs_video_standardize）
+            if self._needs_video_standardize(ext, filename, file_path):
                 new_file_path = os.path.join(folder_path, os.path.splitext(filename)[0] + "_std.mp4")
                 if not os.path.exists(new_file_path):
                     print(f"   🎥 正在標準化影片: {filename} -> H.264")
@@ -35,9 +47,9 @@ class MediaStandardizer:
                     if self._convert_to_h264(file_path, new_file_path):
                         standardized_count += 1
                         # 建議保留原檔或標註，此處我們讓後續流程改用新檔案
-            
+
             # 策略：將 HEIC 轉為 JPG (瀏覽器才看得見)
-            elif ext in [".heic", ".heif"]:
+            elif ext in _HEIC_IMAGE_EXT:
                 new_file_path = os.path.join(folder_path, os.path.splitext(filename)[0] + "_std.jpg")
                 if not os.path.exists(new_file_path):
                     print(f"   📸 正在標準化圖片: {filename} -> JPG")
@@ -45,6 +57,22 @@ class MediaStandardizer:
                         standardized_count += 1
 
         print(f"✅ [Standardizer] 標準化完成，處理了 {standardized_count} 個檔案。")
+
+    def _needs_video_standardize(self, ext: str, filename: str, file_path: str) -> bool:
+        """
+        判斷影片是否需要標準化轉檔（Strategy：依容器與解析度決定）。
+
+        - 非 .mp4 容器（.mov/.avi/.mkv/.webm）：一律轉（HEVC/HDR/容器正規化，網頁與 Remotion 相容）。
+        - .mp4：僅在長邊超過 STANDARDIZE_MAX_LONG_SIDE（4K 等）時才轉，避免重編碼已合規的 1080p
+          造成世代品質損失與上傳延遲；解析度由 ffprobe 讀取，讀不到（回 0）時視為不需轉。
+        - 已是 _std 標準化版本：跳過（避免 _std_std）。
+        """
+        if ext in _TRANSCODE_ALWAYS_VIDEO_EXT:
+            return True
+        if ext == _GATED_VIDEO_EXT and _STD_MARKER not in filename:
+            width, height = self.ffmpeg.probe_dimensions(file_path)
+            return max(width, height) > STANDARDIZE_MAX_LONG_SIDE
+        return False
 
     def _convert_to_h264(self, input_path: str, output_path: str) -> bool:
         """呼叫 FFmpeg 進行標準 H.264/AAC 轉檔（Web-safe + Remotion 友善 + HDR→SDR 正規化）"""
@@ -67,7 +95,8 @@ class MediaStandardizer:
                     #      `decrease` 只縮不放，原本就 ≤ 1920 的素材保留原樣
                     #   7. format=yuv420p：最終降成 8-bit yuv420p
                     # 對 SDR 來源也安全（BT.709→linear→back 近似 no-op）。
-                    "-vf", "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,scale=1920:1920:force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p",
+                    # scale 長邊上限與 _needs_video_standardize 的閘控門檻同源（STANDARDIZE_MAX_LONG_SIDE），避免漂移
+                    "-vf", f"zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,scale={STANDARDIZE_MAX_LONG_SIDE}:{STANDARDIZE_MAX_LONG_SIDE}:force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p",
                     "-c:v", "libx264",
                     # CFR：把 iPhone 慣用的 VFR 拉成 CFR，避免 Remotion 因時序錯亂解碼失敗
                     # （沿用 source 平均 FPS，不硬寫數值，60 fps 慢動作素材也不會被砍掉一半畫面）

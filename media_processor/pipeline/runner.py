@@ -85,6 +85,7 @@ class PipelineRunner:
             capacity_manager=self._model_pool_registry.capacity,
             executor_registry=self._registry,
             max_assets_parallel=max_assets_parallel,
+            aux_rows=self._model_pool_registry.aux_pool_rows(),
         ).render())
 
     def run(

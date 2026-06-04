@@ -8,6 +8,7 @@ from media_processor.pipeline.context import AssetContext
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
 from media_processor.pipeline.stages.frame_analysis import FrameAnalysis
 from media_processor.pipeline.stages.image_work import IMAGE_WORK_KEY, ImageWork
+from media_processor.pipeline.stages.video_frame_utils import cap_pil_resolution
 
 # HEIC/HEIF 支援:與既有 processor 一致,在模組載入時註冊(idempotent)
 pillow_heif.register_heif_opener()
@@ -35,6 +36,10 @@ class DecodeImageStage(Stage):
         width, height = pil_image.size
         # 與原版一致:height 為 0 時 aspect_ratio 退 0.0,避免除零
         aspect_ratio = round(width / height, _ASPECT_RATIO_NDIGITS) if height > 0 else 0.0
+
+        # width/height/aspect_ratio 已自上方原圖取得;此處才降解析度供推論,
+        # 確保 ImageWork.width/height 仍反映原始解析度(不受 cap 影響)
+        pil_image = cap_pil_resolution(pil_image)
 
         # 整張圖即「代表幀」,放入共用的 FrameAnalysis;尺寸等圖片專有欄位留在 ImageWork
         context.scratch[IMAGE_WORK_KEY] = ImageWork(

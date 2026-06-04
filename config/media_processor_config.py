@@ -11,6 +11,17 @@ TECHNICAL_SCORE_FILTER_THRESHOLD = 40.0
 # 推論前 PIL 圖片的最大短邊長度（過大會吃 VRAM 且分數震盪）
 MUSIQ_MAX_INPUT_SIZE = 512
 
+# ── 推論幀解析度上限 (video_frame_utils.cap_pil_resolution) ─────────────────────
+# 所有模型推論幀在送入模型前，短邊超過此值即等比縮放（純記憶體 PIL 物件，不回寫檔案）。
+# 主要修復 4K 幀的 GIL-freeze：MediaPipe tflite / Saliency ONNX 在 ~8M px 幀推論時不釋放 GIL，
+# 會凍住 Python watchdog 心跳與 faulthandler re-arm。720 保留足夠細節讓人臉/主體偵測準確。
+INFERENCE_MAX_SHORT_SIDE = 720
+
+# ── 媒體標準化 (MediaStandardizer / FFmpegAdapter._convert_to_h264) ─────────────
+# 影片標準化的長邊上限：超過此值（4K 等）才轉檔縮放。同時作為 _convert_to_h264 的 scale 目標
+# 與 .mp4 是否需轉檔的閘控門檻（已合規的 1080p 不重編碼，避免世代品質損失與上傳延遲）。
+STANDARDIZE_MAX_LONG_SIDE = 1920
+
 # ── 音訊暫存檔驗證 (AbstractVideoProcessor) ──────────────────────────────────
 # ffmpeg 對靜音影片輸出幾乎空的 wav，小於此 bytes 視為無效音訊
 MINIMUM_AUDIO_FILE_BYTES = 1000
