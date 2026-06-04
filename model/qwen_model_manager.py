@@ -125,7 +125,7 @@ class QwenModelManager(BaseModelManager):
         load_kwargs: dict = {"device_map": {"": self.device}}
         if QWEN_USE_4BIT:
             # 4-bit 主路徑：bitsandbytes NF4。權重在 runtime 保持 4-bit（不解壓），
-            # 8B 模型約 5-6GB；compute dtype 用 bf16、double quant 再壓 scale 記憶體
+            # 4B 模型約 2.5-3GB；compute dtype 用 bf16、double quant 再壓 scale 記憶體
             load_kwargs["torch_dtype"] = torch.bfloat16
             load_kwargs["quantization_config"] = BitsAndBytesConfig(
                 load_in_4bit=True,

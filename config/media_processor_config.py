@@ -82,11 +82,13 @@ GPU_SAFETY_BUFFER_GB = 1.5
 # - resident：模型常駐權重（載入後一直佔著，決定一張卡放得下幾份模型）。
 # - transient：單次 forward 暫態峰值（activation/KV cache/workspace），即 INFERENCE_VRAM_COST_GB，
 #   給 BudgetGate 記帳「在飛行中 forward 成本總和 ≤ 預算」。
-# Qwen 4-bit NF4 實測常駐 ~6.4GB（見 roadmap §3）；transient 為含影像 token 的 generate 暫態估值。
-QWEN_RESIDENT_VRAM_GB       = 6.5
-QWEN_TRANSIENT_VRAM_GB      = 4.0
-WHISPER_RESIDENT_VRAM_GB    = 3.0
-WHISPER_TRANSIENT_VRAM_GB   = 2.0
+# Qwen3-VL-4B 4-bit NF4 常駐估值 ~3.5GB（8B 時實測 ~6.4GB，4B 約其半；待實機 reset_peak_memory 校準）；
+# transient 為含影像 token 的 generate 暫態估值（4B 層數/隱藏維較小，較 8B 低）。
+QWEN_RESIDENT_VRAM_GB       = 3.5
+QWEN_TRANSIENT_VRAM_GB      = 2.5
+# Whisper 改 faster-whisper(CTranslate2) large-v3-turbo：CT2 float16 常駐遠小於 HF large-v3（~3GB → ~1.6GB）
+WHISPER_RESIDENT_VRAM_GB    = 1.6
+WHISPER_TRANSIENT_VRAM_GB   = 1.0
 MUSIQ_RESIDENT_VRAM_GB      = 0.5
 MUSIQ_TRANSIENT_VRAM_GB     = 1.5
 LAION_RESIDENT_VRAM_GB      = 1.7

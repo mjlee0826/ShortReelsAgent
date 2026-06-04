@@ -30,16 +30,19 @@ __all__ = [
     # Qwen
     "QWEN_MODEL_ID",
     "QWEN_PROCESSOR_ID",
-    "QWEN_LEGACY_MODEL_ID",
+    "QWEN_BASE_MODEL_ID",
     "QWEN_USE_4BIT",
     "QWEN_USE_FLASH_ATTN",
     "QWEN_MAX_NEW_TOKENS",
     "QWEN_MAX_PIXELS",
     "QWEN_FPS_TIMECODED",
     "QWEN_FPS_DEFAULT",
-    # Whisper
+    # Whisper (faster-whisper / CTranslate2)
     "WHISPER_MODEL_ID",
-    "WHISPER_CHUNK_LENGTH_SEC",
+    "WHISPER_CUDA_COMPUTE_TYPE",
+    "WHISPER_CPU_COMPUTE_TYPE",
+    "WHISPER_BEAM_SIZE",
+    "WHISPER_VAD_FILTER",
     # Audio Env
     "AUDIO_ENV_TOP_K",
     "AUDIO_SAMPLING_RATE",
@@ -79,12 +82,13 @@ GEMINI_DEFAULT_MODEL = 'gemini-2.5-flash'
 GEMINI_STRONG_MODEL  = 'gemini-3.1-pro-preview'
 
 # ── Qwen3-VL ─────────────────────────────────────────────────────────────────
+# 改用 4B-Instruct：semantic_stage 的 Qwen 只負責 SIMPLE / 全局分析（COMPLEX 與時間碼走 Gemini），
+# 任務單純，4B 已足夠且推論更快、VRAM 更省；8B 的腦力在此用不到。
 # 模型一律從官方 base 載入，再由 bitsandbytes 即時量化（4-bit 主、8-bit 後備）。
-# 原社群 compressed-tensors AWQ（cyankiwi）在 transformers 推理時會解壓成 bf16、
-# runtime 不省 VRAM，已棄用。
-QWEN_LEGACY_MODEL_ID = "Qwen/Qwen3-VL-8B-Instruct"
+# 原社群 compressed-tensors AWQ（cyankiwi）在 transformers 推理時會解壓成 bf16、runtime 不省 VRAM，已棄用。
+QWEN_BASE_MODEL_ID = "Qwen/Qwen3-VL-4B-Instruct"
 # Processor (tokenizer + image preprocessor) 從官方 base model 載入
-QWEN_PROCESSOR_ID    = QWEN_LEGACY_MODEL_ID
+QWEN_PROCESSOR_ID  = QWEN_BASE_MODEL_ID
 
 
 def _read_bool_env(env_name: str, default: bool) -> bool:
@@ -100,10 +104,9 @@ QWEN_USE_4BIT        = _read_bool_env("QWEN_USE_4BIT", QWEN_USE_4BIT_DEFAULT)
 # Flash Attention 2 開關，安裝失敗時 QwenModelManager 內部會 fallback 到 sdpa
 QWEN_USE_FLASH_ATTN = _read_bool_env("QWEN_USE_FLASH_ATTN", True)
 # 量化改用 bitsandbytes（4-bit/8-bit 皆即時量化官方 base model），不再用 cyankiwi
-# compressed-tensors AWQ —— 後者在 transformers 推理時會整包解壓成 bf16、runtime 不省
-# VRAM（實測載入 7.5GB → 推理 18GB；真正的 4-bit kernel 僅 vLLM 有）。
-# 故 model id 一律指向官方 base，由 BitsAndBytesConfig 即時量化。
-QWEN_MODEL_ID       = QWEN_LEGACY_MODEL_ID
+# compressed-tensors AWQ —— 後者在 transformers 推理時會整包解壓成 bf16、runtime 不省 VRAM
+# （真正的 4-bit kernel 僅 vLLM 有）。故 model id 一律指向官方 base，由 BitsAndBytesConfig 即時量化。
+QWEN_MODEL_ID       = QWEN_BASE_MODEL_ID
 
 QWEN_MAX_NEW_TOKENS = 512
 # 限制影像解析度以節省 VRAM（pixel 數上限）
@@ -112,9 +115,21 @@ QWEN_MAX_PIXELS     = 100352
 QWEN_FPS_TIMECODED  = 2.0
 QWEN_FPS_DEFAULT    = 1.0
 
-# ── Whisper ───────────────────────────────────────────────────────────────────
-WHISPER_MODEL_ID        = "openai/whisper-large-v3"
-WHISPER_CHUNK_LENGTH_SEC = 30
+# ── Whisper (faster-whisper / CTranslate2) ────────────────────────────────────
+# 改用 faster-whisper（CTranslate2 後端）跑 large-v3-turbo：turbo decoder 僅 4 層（large-v3 為 32 層），
+# 多語保留、速度數倍；CT2 再以量化 kernel（CUDA float16 / CPU int8）加速並降 VRAM。
+# WHISPER_MODEL_ID 可為 faster-whisper 認得的尺寸名或 HF 上的 CT2 repo；turbo 由 faster-whisper 自官方
+# CT2 轉檔下載，download_root 指到本地熱資料目錄（避免 NFS）。
+WHISPER_MODEL_ID          = os.environ.get("WHISPER_MODEL_ID", "large-v3-turbo")
+# CTranslate2 計算精度：CUDA 預設 float16（準度/速度平衡，要更快可改 int8_float16）；
+# CPU 強制 int8（CPU 不支援 float16 推論）。
+WHISPER_CUDA_COMPUTE_TYPE = os.environ.get("WHISPER_CUDA_COMPUTE_TYPE", "float16")
+WHISPER_CPU_COMPUTE_TYPE  = "int8"
+# beam search 寬度：5 為品質/速度平衡（要更快可降為 1=greedy）
+WHISPER_BEAM_SIZE         = 5
+# 是否以 faster-whisper 內建 Silero VAD 再修剪段內靜音以抑制幻覺；預設關——上游已有 VadStage 閘門
+# 與 _filter_hallucination 後處理，關閉可省一次額外 onnxruntime VAD 載入/開銷。要更強過濾可設 True。
+WHISPER_VAD_FILTER        = _read_bool_env("WHISPER_VAD_FILTER", False)
 
 # ── Audio Env (PANNs CNN14) ───────────────────────────────────────────────────
 # 回傳信心分數前 K 高的分類標籤（AudioSet 527 類）
