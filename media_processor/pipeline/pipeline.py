@@ -30,6 +30,7 @@ from media_processor.pipeline.context import (
 from media_processor.pipeline.node import StageNode
 from media_processor.pipeline.progress import ProgressTracker
 from media_processor.pipeline.stage import Stage
+from model.resource_wait_clock import ResourceWaitClock
 
 if TYPE_CHECKING:
     # 僅型別檢查時 import,執行期不依賴,避免不必要的耦合與 import 順序問題
@@ -197,15 +198,21 @@ class Pipeline:
         if tracker is not None:
             tracker.emit_stage_start(asset_id=context.asset_id, stage_name=stage_name)
 
+        # 每個 stage 開跑前歸零本 thread 的「等資源」累加器，結束時讀回以把等待從總耗時拆出
+        ResourceWaitClock.reset()
         start = time.perf_counter()
         try:
             stage.run(context)
             duration_ms = (time.perf_counter() - start) * 1000.0
             if tracker is not None:
+                # wait = 卡在 borrow / GpuGate / 合批 等資源關卡的時間；compute = 總耗時 − wait（夾非負）
+                waited_ms = min(ResourceWaitClock.waited_ms(), duration_ms)
+                compute_ms = max(0.0, duration_ms - waited_ms)
                 tracker.emit_stage_finish(
                     asset_id=context.asset_id,
                     stage_name=stage_name,
                     duration_ms=duration_ms,
+                    payload={"wait_ms": round(waited_ms, 1), "compute_ms": round(compute_ms, 1)},
                 )
         except Exception as exc:  # noqa: BLE001 - 刻意攔截所有例外做隔離
             # 錯誤寫進 context,asset 標記 error,流水線其他部分照常運作

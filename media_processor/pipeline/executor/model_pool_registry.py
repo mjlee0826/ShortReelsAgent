@@ -35,6 +35,7 @@ from media_processor.pipeline.progress import ProgressObserver, ProgressTracker
 from model.base_model_manager import BaseModelManager
 from model.gpu_capacity_manager import GpuCapacityManager
 from model.model_pool import ModelPool, PoolBorrowObserver
+from model.resource_wait_clock import ResourceWaitClock
 
 # borrow_for_batch 的 Manager / 回傳型別提示
 _M = TypeVar("_M", bound=BaseModelManager)
@@ -393,7 +394,9 @@ def borrow_mediapipe() -> Iterator:
         with _mediapipe_pool_init_lock:
             if not _mediapipe_pool_initialized:
                 _warm_up_mediapipe_pool()
-    mgr = _mediapipe_pool.get()
+    # 借 instance 的阻塞（pool 全借出時）計入本 thread 的「等資源」累加，供 stage 拆分 compute/wait
+    with ResourceWaitClock.measure():
+        mgr = _mediapipe_pool.get()
     try:
         yield mgr
     finally:
@@ -429,7 +432,9 @@ def run_saliency(fn: Callable[[_M], _R]) -> _R:
         with _saliency_pool_init_lock:
             if not _saliency_pool_initialized:
                 _warm_up_saliency_pool()
-    saliency = _saliency_pool.get()
+    # 借 instance 的阻塞（pool 全借出時）計入本 thread 的「等資源」累加，供 stage 拆分 compute/wait
+    with ResourceWaitClock.measure():
+        saliency = _saliency_pool.get()
     try:
         return fn(saliency)
     finally:

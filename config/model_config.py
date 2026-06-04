@@ -99,6 +99,28 @@ def _read_bool_env(env_name: str, default: bool) -> bool:
     return raw.strip().lower() in {"true", "1", "yes", "on"}
 
 
+def _read_int_env(env_name: str, default: int) -> int:
+    """讀取 env var 並轉為 int；未設定或格式錯誤時回 default（壞值不炸啟動）。"""
+    raw = os.environ.get(env_name)
+    if raw is None:
+        return default
+    try:
+        return int(raw.strip())
+    except ValueError:
+        return default
+
+
+def _read_float_env(env_name: str, default: float) -> float:
+    """讀取 env var 並轉為 float；未設定或格式錯誤時回 default（壞值不炸啟動）。"""
+    raw = os.environ.get(env_name)
+    if raw is None:
+        return default
+    try:
+        return float(raw.strip())
+    except ValueError:
+        return default
+
+
 # 啟動時決定走哪條 Qwen 路徑（Feature Toggle）；rollback 時設 false
 QWEN_USE_4BIT        = _read_bool_env("QWEN_USE_4BIT", QWEN_USE_4BIT_DEFAULT)
 # Flash Attention 2 開關，安裝失敗時 QwenModelManager 內部會 fallback 到 sdpa
@@ -108,12 +130,22 @@ QWEN_USE_FLASH_ATTN = _read_bool_env("QWEN_USE_FLASH_ATTN", True)
 # （真正的 4-bit kernel 僅 vLLM 有）。故 model id 一律指向官方 base，由 BitsAndBytesConfig 即時量化。
 QWEN_MODEL_ID       = QWEN_BASE_MODEL_ID
 
-QWEN_MAX_NEW_TOKENS = 512
-# 限制影像解析度以節省 VRAM（pixel 數上限）
-QWEN_MAX_PIXELS     = 100352
-# 時間碼模式需要較高採樣率以捕捉動作切換點
-QWEN_FPS_TIMECODED  = 2.0
-QWEN_FPS_DEFAULT    = 1.0
+# ── Qwen 單次 forward 成本旋鈕（皆可由 env 覆寫，便於不改碼 A/B 品質 vs 速度）─────────
+# semantic（Qwen）是整條 pipeline 的長板：單次 forward 成本 ≈ 影格數 × 每格 token × 輸出 token，
+# 三者都直接決定 GPU 佔用時間。共用卡序列化時，Qwen 拖多久、其餘 stage 就被卡多久，故這裡把
+# 三個旋鈕都下修並開放 env 覆寫（品質回歸時用 env 調回 512 / 100352 / 1.0 比對）。
+#
+# 輸出 token 上限：512→384。GLOBAL_ANALYSIS 產的是結構化 JSON 描述，384 步通常已足夠，
+# 但 autoregressive 每 token 一次 forward，省 25% 步數直接省 25% decode 時間（影響最大、品質風險最低）。
+QWEN_MAX_NEW_TOKENS = _read_int_env("QWEN_MAX_NEW_TOKENS", 384)
+# 每格影像 pixel 數上限：100352→81920（≈320×256）。對「多影格的影片」是 prefill token 的主要來源，
+# 降 ~18% 直接省同比例的影片 token；對全局理解的細節影響有限（細節敏感任務可用 env 調回 100352）。
+QWEN_MAX_PIXELS     = _read_int_env("QWEN_MAX_PIXELS", 81920)
+# 時間碼模式採樣率（此模式走 Gemini，不影響本地 Qwen forward 成本）：保留 2.0，需要時 env 覆寫。
+QWEN_FPS_TIMECODED  = _read_float_env("QWEN_FPS_TIMECODED", 2.0)
+# 全局分析影片採樣率（Qwen 影片路徑實際用值）：影格數 = fps × 片長，是影片 forward 成本的關鍵旋鈕。
+# 預設維持 1.0（已偏低）；影片偏長、想再降成本時設 QWEN_FPS_DEFAULT=0.5（每秒半格）。
+QWEN_FPS_DEFAULT    = _read_float_env("QWEN_FPS_DEFAULT", 1.0)
 
 # ── Whisper (faster-whisper / CTranslate2) ────────────────────────────────────
 # 改用 faster-whisper（CTranslate2 後端）跑 large-v3-turbo：turbo decoder 僅 4 層（large-v3 為 32 層），

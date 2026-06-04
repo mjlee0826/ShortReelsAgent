@@ -24,6 +24,7 @@ from typing import Callable, Optional
 
 from media_processor.pipeline.progress.events import ProgressEvent, ProgressEventType
 from media_processor.pipeline.progress.observer import ProgressObserver
+from media_processor.pipeline.progress.system_health import SystemHealthProbe
 
 # stop() 等待背景執行緒結束的上限(秒),避免收工時卡住主流程
 _THREAD_JOIN_TIMEOUT_SEC = 2.0
@@ -64,6 +65,8 @@ class StallWatchdog(ProgressObserver):
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        # 機器健康探針：每次心跳與起跑基線都印一行 CPU/RAM/swap/GPU，辨別「程式卡住 vs 機器很糟」
+        self._health_probe = SystemHealthProbe()
         # 啟用 C 層故障處理 + 手動 SIGUSR1 dump(GIL 凍住也有效)
         self._enable_fault_dump()
 
@@ -115,6 +118,10 @@ class StallWatchdog(ProgressObserver):
         self._stop.clear()
         # 先武裝一次,涵蓋「第一個心跳前就凍住」的情況
         self._rearm_freeze_dump()
+        # 印一次機器健康基線，讓即使很快跑完的 run 也有「起跑當下機器狀態」可對照
+        baseline = self._health_probe.render()
+        if baseline:
+            print(baseline)
         self._thread = threading.Thread(target=self._loop, name="StallWatchdog", daemon=True)
         self._thread.start()
 
@@ -144,6 +151,10 @@ class StallWatchdog(ProgressObserver):
             waiting = dict(self._waiting)
         if not items:
             return  # idle:無進行中 stage 就不輸出,避免洗版
+        # 有進行中 stage 才連帶印機器健康，讓「卡住」當下能直接判斷是程式卡住還是機器很糟
+        health = self._health_probe.render()
+        if health:
+            print(health)
         lines = [f"[Watchdog +{self._heartbeat_sec:.0f}s] 進行中 {len(items)} 個 stage："]
         for (asset_id, stage_name), started_at in items:
             elapsed = now - started_at

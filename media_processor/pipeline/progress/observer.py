@@ -33,7 +33,7 @@ class PrintProgressObserver(ProgressObserver):
     """
 
     def on_event(self, event: ProgressEvent) -> None:
-        """以「[type] asset/stage – duration」格式印出事件。"""
+        """以「[type] asset/stage – duration」格式印出事件；STAGE_FINISH 另附 compute/wait 拆分。"""
         # 將 None 欄位以「-」顯示，避免訊息中出現「None」混淆
         asset    = event.asset_id  or "-"
         stage    = event.stage_name or "-"
@@ -41,5 +41,15 @@ class PrintProgressObserver(ProgressObserver):
         suffix   = f" err={event.error}" if event.error else ""
         print(
             f"[Progress] {event.event_type.value:<16} "
-            f"asset={asset:<24} stage={stage:<24} dur={duration}{suffix}"
+            f"asset={asset:<24} stage={stage:<24} dur={duration}{self._breakdown(event)}{suffix}"
         )
+
+    @staticmethod
+    def _breakdown(event: ProgressEvent) -> str:
+        """STAGE_FINISH 帶 compute_ms / wait_ms 時組出「(compute=X wait=Y)」字串，否則回空字串。"""
+        # 讓「等資源 vs 真正運算」在同一行一眼可辨：小模型被 Qwen 餓死時 wait 會遠大於 compute
+        wait_ms = event.payload.get("wait_ms")
+        compute_ms = event.payload.get("compute_ms")
+        if wait_ms is None or compute_ms is None:
+            return ""
+        return f" (compute={compute_ms:.0f}ms wait={wait_ms:.0f}ms)"

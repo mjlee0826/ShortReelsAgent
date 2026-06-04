@@ -41,6 +41,7 @@ from config.media_processor_config import (
     GPU_SAFETY_BUFFER_GB,
 )
 from model.base_model_manager import BaseModelManager, is_cuda_oom
+from model.resource_wait_clock import ResourceWaitClock
 
 T = TypeVar("T", bound=BaseModelManager)
 
@@ -177,10 +178,13 @@ class ModelPool(Generic[T]):
         Raises:
             queue.Empty: 等待超過 timeout 仍無可用實例
         """
-        idx = self._available.get(timeout=timeout)
+        # L1 借出佇列阻塞 + 即時 VRAM 重檢都是「等資源」，計入本 thread 的等待累加（供拆分 compute/wait）
+        with ResourceWaitClock.measure():
+            idx = self._available.get(timeout=timeout)
         try:
             # 借出前即時重檢該槽位所在卡的 free VRAM（不足則阻塞等待 / 逾時盡力放行）
-            self._await_vram(self._instances[idx], observer)
+            with ResourceWaitClock.measure():
+                self._await_vram(self._instances[idx], observer)
             yield self._instances[idx]
         finally:
             # finally 確保異常路徑下實例仍會歸還，避免池子被慢慢耗盡
@@ -260,11 +264,14 @@ class ModelPool(Generic[T]):
         tried_devices: set = set()
         last_oom: Optional[Exception] = None
         for _ in range(len(distinct_devices)):
-            idx = self._acquire_preferring(tried_devices, timeout)
+            # 借槽位（L1 佇列阻塞）計入「等資源」累加
+            with ResourceWaitClock.measure():
+                idx = self._acquire_preferring(tried_devices, timeout)
             instance = self._instances[idx]
             try:
-                # 借出前同樣做即時 VRAM 重檢（換到的新卡也要確認 free 夠）
-                self._await_vram(instance, observer)
+                # 借出前同樣做即時 VRAM 重檢（換到的新卡也要確認 free 夠）；此等待亦計入累加
+                with ResourceWaitClock.measure():
+                    self._await_vram(instance, observer)
                 return fn(instance)
             except Exception as exc:
                 if not is_cuda_oom(exc):

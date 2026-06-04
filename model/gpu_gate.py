@@ -18,6 +18,9 @@ from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from typing import Iterator
 
+from config.media_processor_config import BUDGET_GATE_LOW_PRIORITY_RESERVE_RATIO
+from model.resource_wait_clock import ResourceWaitClock
+
 # 無優先權的預設等級：數值越大優先序越高（Qwen 等主瓶頸設正值，其餘維持 0）
 NO_PRIORITY = 0
 
@@ -71,12 +74,14 @@ class BudgetGate(GpuGate):
     本類別再扣掉 ``safety_buffer_gb`` 得到可分配給「在飛行中 forward 暫態峰值總和」的預算。
     放行條件：``in_flight + cost ≤ budget``。
 
-    Qwen 反餓死 (priority)
-    ----------------------
-    小模型（MUSIQ inline 可多條、LAION/Whisper/AudioEnv）會與 Qwen 搶同卡預算；
-    若貪婪放行，Qwen 的大塊 cost 會一直被小請求插隊而餓死。故規則：
-    **只要有高優先請求在等，低優先請求一律不放行** —— 讓在飛的小 forward 自然排空、
-    預算騰給 Qwen，Qwen 進場後小模型再恢復。
+    Qwen 反餓死 vs 低優先保留車道 (priority + reserve lane)
+    ------------------------------------------------------
+    小模型（MUSIQ inline 可多條、LAION/Whisper/AudioEnv）會與 Qwen 搶同卡預算；若貪婪放行，
+    Qwen 的大塊 cost 會一直被小請求插隊而餓死。但反過來「只要有高優先在等，低優先一律全擋」
+    又會在 Qwen forward 長達數十秒~數分鐘時，把小模型**餓死整場**（實測 aes 被卡到 91s）。
+    故折衷：**有高優先在等時，低優先仍可走一條「保留車道」**——只要低優先「在飛成本總和
+    ≤ ``budget × reserve_ratio``」就放行（且整體不超預算以防 OOM）。如此 Qwen 仍對大部分預算
+    保有優先權，小模型則能細水長流、不被餓死。``reserve_ratio=0`` 即退回舊的硬餓死規則。
 
     過大請求保險
     ------------
@@ -84,13 +89,22 @@ class BudgetGate(GpuGate):
     避免「cost > budget」造成永久阻塞。
     """
 
-    def __init__(self, total_gb: float, safety_buffer_gb: float = 0.0) -> None:
+    def __init__(
+        self,
+        total_gb: float,
+        safety_buffer_gb: float = 0.0,
+        low_priority_reserve_ratio: float = BUDGET_GATE_LOW_PRIORITY_RESERVE_RATIO,
+    ) -> None:
         """以「free − 常駐權重」總額扣掉安全緩衝得到可分配預算，並初始化記帳狀態。"""
         # 預算下限為 0，避免 free 被鄰居吃光時算出負值
         self._budget = max(0.0, total_gb - safety_buffer_gb)
         # 在飛行中的 forward 暫態成本總和（GB）
         self._in_flight = 0.0
-        # 正在等待的高優先（priority>0）請求數；>0 時低優先讓路
+        # 在飛行中的「低優先」forward 成本總和（GB）；保留車道以此判斷，與總在飛分開記帳
+        self._in_flight_low = 0.0
+        # 低優先保留車道上限（GB）：有高優先在等時，低優先在飛總量 ≤ 此值仍放行（反餓死軟化）
+        self._reserve_gb = max(0.0, self._budget * low_priority_reserve_ratio)
+        # 正在等待的高優先（priority>0）請求數；>0 時低優先改走保留車道而非全擋
         self._waiting_priority = 0
         # 單一 Condition 同時保護記帳狀態與作為等待/喚醒通道
         self._cond = threading.Condition()
@@ -100,32 +114,46 @@ class BudgetGate(GpuGate):
         """阻塞到預算可容納本次 forward 才放行；離開 context 時歸還預算並喚醒等待者。"""
         # 負成本無意義，夾到 0；確保記帳不會因壞值倒退
         cost = max(0.0, cost_gb)
+        is_low = priority <= NO_PRIORITY
         with self._cond:
-            # 標記「有高優先在等」必須在進入 wait 迴圈前，低優先才看得到並讓路
-            if priority > NO_PRIORITY:
+            # 標記「有高優先在等」必須在進入 wait 迴圈前，低優先才看得到並改走保留車道
+            if not is_low:
                 self._waiting_priority += 1
             try:
-                while not self._can_admit(cost, priority):
-                    self._cond.wait()
+                # 等預算放行的阻塞時間計入本 thread 的「等資源」累加（供 stage 拆分 compute/wait）
+                with ResourceWaitClock.measure():
+                    while not self._can_admit(cost, priority):
+                        self._cond.wait()
             finally:
                 # 無論正常取得或例外，等待計數都要還原，避免永久壓住低優先
-                if priority > NO_PRIORITY:
+                if not is_low:
                     self._waiting_priority -= 1
-            # 取得門票：在鎖內累加 in_flight，狀態一致後才離開臨界區
+            # 取得門票：在鎖內累加在飛成本（低優先另記一份供保留車道判斷），狀態一致後才離開臨界區
             self._in_flight += cost
+            if is_low:
+                self._in_flight_low += cost
         try:
             yield
         finally:
             with self._cond:
                 self._in_flight -= cost
+                if is_low:
+                    self._in_flight_low -= cost
                 # 預算釋出，喚醒所有等待者重新評估（含被讓路的低優先）
                 self._cond.notify_all()
 
     def _can_admit(self, cost: float, priority: int) -> bool:
         """判定當前是否可放行本次請求（須在持有 _cond 時呼叫）。"""
-        # 反餓死：低優先請求在「有高優先等待」時一律讓路
+        # 低優先且有高優先在等：不再「全擋」，改走保留車道（reserve lane）避免被餓死整場
         if priority == NO_PRIORITY and self._waiting_priority > 0:
-            return False
+            # 卡全閒就放行（閒置還擋低優先純浪費；此時 Qwen 自己也會在同一輪被放行）
+            if self._in_flight == 0:
+                return True
+            # 否則：低優先在飛總量受保留車道上限約束，且整體不可超預算（防 OOM）
+            return (
+                self._in_flight_low + cost <= self._reserve_gb
+                and self._in_flight + cost <= self._budget
+            )
         # 無人在飛 → 無條件放行（涵蓋 cost > budget 的過大請求單獨跑，避免永久阻塞）
         if self._in_flight == 0:
             return True

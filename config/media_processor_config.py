@@ -106,6 +106,14 @@ SALIENCY_TRANSIENT_VRAM_GB  = 1.5
 # 避免 MUSIQ/LAION 等小模型串流把主瓶頸 Qwen 的大塊 VRAM 請求無限延後（餓死）。
 QWEN_INFERENCE_PRIORITY = 10
 
+# BudgetGate「低優先保留車道」比例（反餓死軟化）：
+# 舊規則「只要有高優先(Qwen)在等，同卡低優先一律全擋」會在 Qwen forward 長達數十秒~數分鐘時，
+# 把同卡小模型(MUSIQ/LAION/AudioEnv/Whisper)餓死整場（log 裡 aes 實算 ~50ms 卻被卡到 91s）。
+# 改為保留一條「低優先車道」：即使有 Qwen 在等，只要低優先「在飛成本總和 ≤ budget × 本比例」就放行
+# （且整體不超預算以防 OOM），讓小模型細水長流不被餓死；Qwen 仍對其餘大部分預算保有優先權。
+# 0.0 = 回到舊的硬餓死規則；1.0 = 等於取消優先序。預設 0.5 折衷（Qwen 仍拿一半，小模型不致全停）。
+BUDGET_GATE_LOW_PRIORITY_RESERVE_RATIO = 0.5
+
 # 同卡 Qwen instance 份數上限（同卡多 slot ⇒ 同卡可並行多條 Qwen forward；需 VRAM 充裕）。
 #   0（預設，= QWEN_SLOTS_AUTO）：自動 —— GpuCapacityManager 依該卡 free VRAM 算「能真正並行的份數」：
 #     floor((free − 單卡模型常駐總和 − GPU_SAFETY_BUFFER_GB) / (QWEN_RESIDENT + QWEN_TRANSIENT))，
