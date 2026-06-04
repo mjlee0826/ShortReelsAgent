@@ -32,6 +32,8 @@ from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import Callable, Generic, TypeVar
 
+from model.resource_wait_clock import ResourceWaitClock
+
 # 合批項目型別 T、批次結果型別 R(供型別提示,讓 submit 的回傳 Future 型別清晰)
 T = TypeVar("T")
 R = TypeVar("R")
@@ -93,6 +95,20 @@ class BatchCollector(Generic[T, R]):
         self._ensure_worker()
         self._queue.put(_BatchRequest(item=item, future=future))
         return future
+
+    def submit_and_wait(self, item: T) -> R:
+        """
+        送件並阻塞等結果,且把等待時間計入「呼叫者 thread」的等資源累加 (ResourceWaitClock)。
+
+        合批的真正運算發生在 collector 自己的 daemon worker thread;送件方(stage thread)只是阻塞在
+        ``future.result()``。因 ResourceWaitClock 是 thread-local,worker thread 上的 borrow / GpuGate
+        等待無法歸給送件 stage,故在此把整段 ``result()`` 計為送件方的「等資源」(其本身 compute≈0)。
+        所有走合批的 stage(tech / aes / whisper / audio_env)統一呼叫本方法,等待歸因才一致,
+        不必各自在 stage 內 sprinkle ``measure()``。
+        """
+        future = self.submit(item)
+        with ResourceWaitClock.measure():
+            return future.result()
 
     def shutdown(self) -> None:
         """送出關閉訊號讓 worker 收工(daemon thread,程序結束本也會自動回收)。"""

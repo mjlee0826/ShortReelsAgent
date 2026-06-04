@@ -28,7 +28,7 @@ from config.pipeline_config import (
     GPU_POOL_ENABLED,
     MEDIAPIPE_POOL_SIZE,
     SALIENCY_POOL_SIZE,
-    VAD_INSTANCE_COUNT,
+    VAD_POOL_SIZE,
 )
 from media_processor.pipeline.executor.gpu_detect import detect_gpu_ids
 from media_processor.pipeline.progress import ProgressObserver, ProgressTracker
@@ -60,6 +60,16 @@ _mediapipe_pool_init_lock = threading.Lock()
 _saliency_pool: Queue = Queue()
 _saliency_pool_initialized = False
 _saliency_pool_init_lock = threading.Lock()
+
+# ── VAD pool（模組級，CPU；真平行）─────────────────────────────────────────────
+# 與 mediapipe / saliency pool 同構：放「VAD_POOL_SIZE 個 *不同 slot_id* 的 Silero instance」，
+# 每個有獨立的 model 與 L3 _inference_lock，借出後多支影片的 VAD 才能真正多路 CPU 併發
+# （read_audio 解碼與 Silero 推論皆釋放 GIL）。run_vad() 從此借出。
+# ⚠️ 不可改回單一 VadModelManager()：那會全部命中同一 (0,0) singleton、共用單一 L3 lock，
+#    被 @synchronized_inference 序列化 → 多影片 VAD 排隊（log 裡卡到 250s+）。
+_vad_pool: Queue = Queue()
+_vad_pool_initialized = False
+_vad_pool_init_lock = threading.Lock()
 
 # 無 GPU 時 ModelPool 仍需至少一個 slot;device 0 經 get_device_str 會對應到 'cpu'
 _CPU_FALLBACK_DEVICE_ID = 0
@@ -249,7 +259,11 @@ class ModelPoolRegistry:
         故 status 統一為 AuxPoolRow 預設的 ``eager``(個別載入失敗的降級已由 _warm_up_auxiliary 另行 log)。
         """
         return [
-            AuxPoolRow(name="VadModelManager", instances=VAD_INSTANCE_COUNT, placement="cpu"),
+            AuxPoolRow(
+                name="VadModelManager",
+                instances=VAD_POOL_SIZE,
+                placement=f"cpu×{VAD_POOL_SIZE}",
+            ),
             AuxPoolRow(
                 name="MediaPipeModelManager",
                 instances=MEDIAPIPE_POOL_SIZE,
@@ -264,50 +278,32 @@ class ModelPoolRegistry:
 
     def _warm_up_auxiliary(self) -> None:
         """
-        預載未納入 GPU capacity/pool 的本地 CPU 模型：VAD(Silero)、MediaPipe pool、Saliency pool。
+        預載未納入 GPU capacity 的本地 CPU pool：VAD(Silero) / MediaPipe / Saliency，三者皆為獨立 CPU pool。
 
-        Saliency（Option 3 起）已從 GPU capacity 移除、改純 CPU（見 model.saliency_model_manager），
-        與 MediaPipe 一樣走獨立 CPU pool 在此預熱（_warm_up_saliency_pool），不再走 eager GPU pool 迴圈。
-        MediaPipe 走 MEDIAPIPE_POOL_SIZE 個 instance 的 pool（_warm_up_mediapipe_pool）。
-        Gemini **刻意不預載**:它是雲端 API client、無本地權重;且未設 GEMINI_API_KEY 時 ``_initialize``
-        會 raise,warm 它會讓啟動直接失敗;又只有 COMPLEX 用 → 維持 lazy。
-        任一模型載入失敗(缺套件等)只告警、不中斷其餘 warmup(stage 首次用到仍會 lazy 再試)。
+        三池同構（各放 N 個「不同 slot_id」instance、各有獨立 L3 lock → 借出後真平行），故用統一的
+        ``_warm_up_cpu_pool`` 預熱（DRY，取代原本三段近乎相同的樣板）。每池 warmup 失敗只降級 lazy、
+        不中斷其餘（stage 首次用到會 lazy 再試）。VAD 改 pool 後，其 torchcodec 預載改在
+        ``_warm_up_vad_pool`` 內逐 instance 觸發（仍是單執行緒、避免執行期並發 dlopen 死結）。
+        Gemini **刻意不預載**：雲端 API client、無本地權重，且未設金鑰時 ``_initialize`` 會 raise。
         """
-        for name, loader in self._auxiliary_loaders():
-            self._startup_tracker.emit_model_warmup(name, "cpu", payload={"status": "loading"})
-            try:
-                # 建立 singleton（載入權重）後，單執行緒預熱首呼叫 lazy import（如 VAD→torchcodec）
-                loader().warmup()
-                self._startup_tracker.emit_model_warmup(name, "cpu", payload={"status": "ready"})
-            except Exception as exc:
-                print(f"[ModelPoolRegistry] aux warmup {name} 失敗({exc});改為 lazy 載入")
-                self._startup_tracker.emit_model_warmup(name, "cpu", payload={"status": "lazy_fallback"})
-        # MediaPipe pool 獨立預熱（MEDIAPIPE_POOL_SIZE 個 instance，zero-queue 並行）
-        pool_label = f"cpu×{MEDIAPIPE_POOL_SIZE}"
-        self._startup_tracker.emit_model_warmup("MediaPipeModelManager", pool_label, payload={"status": "loading"})
-        try:
-            _warm_up_mediapipe_pool()
-            self._startup_tracker.emit_model_warmup("MediaPipeModelManager", pool_label, payload={"status": "ready"})
-        except Exception as exc:
-            print(f"[ModelPoolRegistry] MediaPipe pool warmup 失敗({exc});降級為 lazy 單例")
-            self._startup_tracker.emit_model_warmup("MediaPipeModelManager", "cpu×1", payload={"status": "lazy_fallback"})
-        # Saliency pool 獨立預熱（Option 3：U²-Net 已改純 CPU，SALIENCY_POOL_SIZE 個獨立 instance）
-        saliency_label = f"cpu×{SALIENCY_POOL_SIZE}"
-        self._startup_tracker.emit_model_warmup("SaliencyModelManager", saliency_label, payload={"status": "loading"})
-        try:
-            _warm_up_saliency_pool()
-            self._startup_tracker.emit_model_warmup("SaliencyModelManager", saliency_label, payload={"status": "ready"})
-        except Exception as exc:
-            print(f"[ModelPoolRegistry] Saliency pool warmup 失敗({exc});改為 lazy 載入")
-            self._startup_tracker.emit_model_warmup("SaliencyModelManager", saliency_label, payload={"status": "lazy_fallback"})
+        self._warm_up_cpu_pool("VadModelManager", VAD_POOL_SIZE, _warm_up_vad_pool)
+        self._warm_up_cpu_pool("MediaPipeModelManager", MEDIAPIPE_POOL_SIZE, _warm_up_mediapipe_pool)
+        self._warm_up_cpu_pool("SaliencyModelManager", SALIENCY_POOL_SIZE, _warm_up_saliency_pool)
 
-    @staticmethod
-    def _auxiliary_loaders() -> list[tuple[str, Callable[[], BaseModelManager]]]:
-        """回傳 aux(CPU)模型的 (名稱, 載入函式);MediaPipe 已改走 pool，不在此列。"""
-        from model.vad_model_manager import VadModelManager
-        return [
-            ("VadModelManager", lambda: VadModelManager()),
-        ]
+    def _warm_up_cpu_pool(self, name: str, size: int, warm_fn: Callable[[], None]) -> None:
+        """
+        通用 CPU pool 預熱：發 loading→ready 事件;整池失敗則降級 lazy(個別 instance 的容錯在 warm_fn 內)。
+
+        三個 aux CPU pool(VAD / MediaPipe / Saliency)共用本入口,消除原本三段幾乎相同的樣板。
+        """
+        label = f"cpu×{size}"
+        self._startup_tracker.emit_model_warmup(name, label, payload={"status": "loading"})
+        try:
+            warm_fn()
+            self._startup_tracker.emit_model_warmup(name, label, payload={"status": "ready"})
+        except Exception as exc:
+            print(f"[ModelPoolRegistry] {name} pool warmup 失敗({exc});改為 lazy 載入")
+            self._startup_tracker.emit_model_warmup(name, "cpu×1", payload={"status": "lazy_fallback"})
 
     def startup_borrow_observer(self, stage_name: Optional[str] = None) -> PoolBorrowObserver:
         """
@@ -440,3 +436,44 @@ def run_saliency(fn: Callable[[_M], _R]) -> _R:
     finally:
         # finally 確保異常路徑也歸還 instance，避免 pool 被慢慢耗盡
         _saliency_pool.put(saliency)
+
+
+def _warm_up_vad_pool() -> None:
+    """
+    warmup 時建立 VAD_POOL_SIZE 個「不同 slot_id」的 VadModelManager instance 放進 pool。
+
+    與 _warm_up_saliency_pool 同構:用不同 slot_id 取得彼此獨立的 Silero singleton,各有自己的
+    L3 _inference_lock → 借出後多支影片的 VAD 可真正多路併發。另對每個 instance 呼叫 ``warmup()``
+    單執行緒預載 torchcodec(read_audio 首呼叫的 dlopen),避免執行期多 thread 首呼叫撞動態連結器鎖死結。
+    pool 預熱後 _vad_pool_initialized 置 True,run_vad 不再 lazy 初始化。
+    """
+    global _vad_pool_initialized
+    from model.vad_model_manager import VadModelManager
+    for slot_id in range(VAD_POOL_SIZE):
+        mgr = VadModelManager(slot_id=slot_id)
+        # warmup 為 best-effort（內部吞例外）：預載 torchcodec，杜絕執行期並發 dlopen 死結
+        mgr.warmup()
+        _vad_pool.put(mgr)
+    _vad_pool_initialized = True
+
+
+def run_vad(fn: Callable[[_M], _R]) -> _R:
+    """
+    供 VAD stage 使用:從 CPU pool 借一個 ``VadModelManager`` 執行 ``fn``,用完自動歸還。
+
+    VAD 為純 CPU 單張模型,不走 GPU gate / 跨卡 failover。pool 未預熱(warmup 失敗 / 未呼叫)時以
+    雙重檢查鎖 lazy 建滿整池,避免永久阻塞。借出阻塞計入 ResourceWaitClock(供 stage 拆分 compute/wait)。
+    """
+    global _vad_pool_initialized
+    if not _vad_pool_initialized:
+        with _vad_pool_init_lock:
+            if not _vad_pool_initialized:
+                _warm_up_vad_pool()
+    # 借 instance 的阻塞（pool 全借出時）計入本 thread 的「等資源」累加
+    with ResourceWaitClock.measure():
+        vad = _vad_pool.get()
+    try:
+        return fn(vad)
+    finally:
+        # finally 確保異常路徑也歸還 instance，避免 pool 被慢慢耗盡
+        _vad_pool.put(vad)

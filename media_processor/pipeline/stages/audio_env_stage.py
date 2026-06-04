@@ -9,7 +9,6 @@ from media_processor.pipeline.batch_collector import BatchCollectorRegistry, Bat
 from media_processor.pipeline.context import AssetContext
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
 from media_processor.pipeline.stages.video_work import audio_file_ready, get_video_work
-from model.resource_wait_clock import ResourceWaitClock
 
 if TYPE_CHECKING:
     from model.audio_env_model_manager import AudioEnvModelManager
@@ -60,10 +59,7 @@ class AudioEnvStage(Stage):
             return
         if AUDIO_ENV_BATCH_ENABLED:
             collector = BatchCollectorRegistry.get(_AUDIO_ENV_SPEC, _audio_env_batch)
-            # 合批由獨立 worker thread 在別處算；本 stage thread 只是阻塞等結果（含等合批 + 等 GpuGate），
-            # 故整段 result() 計入「等資源」累加（本 thread 的真正 compute ≈ 0）
-            future = collector.submit(work.audio_path)
-            with ResourceWaitClock.measure():
-                work.environmental_sounds = future.result()
+            # submit_and_wait 把跨 thread 的合批等待計入本 stage 的「等資源」(供 compute/wait 拆分)
+            work.environmental_sounds = collector.submit_and_wait(work.audio_path)
         else:
             work.environmental_sounds = self._engine().classify_environment(work.audio_path)

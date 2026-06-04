@@ -58,6 +58,7 @@ class AesScoreStage(Stage):
             return
         if LAION_BATCH_ENABLED:
             collector = BatchCollectorRegistry.get(_LAION_SPEC, _laion_batch)
-            frame.aes_score = collector.submit(frame.pil_image).result()
+            # submit_and_wait 把跨 thread 的合批等待計入本 stage 的「等資源」(供 compute/wait 拆分)
+            frame.aes_score = collector.submit_and_wait(frame.pil_image)
         else:
             frame.aes_score = self._engine().get_aesthetic_score(frame.pil_image)

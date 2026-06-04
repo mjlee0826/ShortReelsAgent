@@ -60,6 +60,7 @@ class TechScoreStage(Stage):
             return
         if MUSIQ_BATCH_ENABLED:
             collector = BatchCollectorRegistry.get(_MUSIQ_SPEC, _musiq_batch)
-            frame.tech_score = collector.submit(frame.pil_image).result()
+            # submit_and_wait 把跨 thread 的合批等待計入本 stage 的「等資源」(供 compute/wait 拆分)
+            frame.tech_score = collector.submit_and_wait(frame.pil_image)
         else:
             frame.tech_score = self._engine().get_technical_score(frame.pil_image)

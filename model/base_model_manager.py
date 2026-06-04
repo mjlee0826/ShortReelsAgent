@@ -40,6 +40,7 @@ from typing import Callable, Iterator
 
 from config.media_processor_config import OOM_RETRY_MAX_ATTEMPTS, OOM_RETRY_BACKOFF_SEC
 from model.gpu_gate import GpuGate, BinaryGate, NO_PRIORITY
+from model.resource_wait_clock import ResourceWaitClock
 
 
 # 預設槽位 id：呼叫端未指定時用此值，向後相容既有「一卡一 instance」配置
@@ -328,12 +329,32 @@ class BaseModelManager(ABC):
             with self._get_gpu_gate(self._device_id).acquire(
                 self.INFERENCE_VRAM_COST_GB, self.INFERENCE_PRIORITY
             ):
-                with self._inference_lock:
+                with self._acquire_inference_lock():
                     yield
         else:
             # CPU/API 路徑：只取 L3 model lock，不申請 L2
-            with self._inference_lock:
+            with self._acquire_inference_lock():
                 yield
+
+    @contextmanager
+    def _acquire_inference_lock(self) -> Iterator[None]:
+        """
+        取得 L3 model inference lock，且**只把「阻塞等鎖」計入 ResourceWaitClock**（持鎖運算仍算 compute）。
+
+        走 pool 的模型每個 instance 同時只有一個借用者，L3 幾乎不爭用 → 計入趨近 0；但**單例共用**模型
+        （VAD，或關掉合批時的 MUSIQ/LAION/Whisper/AudioEnv）由多條 asset thread 搶同一把 L3 鎖時，
+        「等前一個 asset 用完」這段才會被正確歸為 wait 而非 compute——這正是 VAD 不走 pool、卻仍有
+        序列化等待的歸因缺口。只量 ``acquire()``（阻塞段）；``yield`` 期間（真正推論）屬 compute，
+        故與 compute 不重疊、也不與 L2 Gate 的等待量重複（Gate 的 measure 早在其 acquire 內結束）。
+        """
+        # 只測「等鎖」這段；拿到鎖後的 yield（實際推論）不納入等待
+        with ResourceWaitClock.measure():
+            self._inference_lock.acquire()
+        try:
+            yield
+        finally:
+            # finally 確保異常路徑也釋鎖，避免單例模型被一個失敗的推論永久卡住
+            self._inference_lock.release()
 
     def _parse_json_output(self, text: str) -> dict:
         """

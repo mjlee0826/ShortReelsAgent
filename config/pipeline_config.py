@@ -122,10 +122,12 @@ MEDIAPIPE_POOL_SIZE: int = MAX_ASSETS_PARALLEL
 # 若 saliency 成為佇列瓶頸可調高；若 RAM / CPU 緒吃緊可調低（env: SALIENCY_POOL_SIZE）。
 SALIENCY_POOL_SIZE: int = _read_int_env("SALIENCY_POOL_SIZE", 4)
 
-# ── VAD（Silero）─────────────────────────────────────────────────────────────
-# VAD 為單一 CPU 常駐 instance（非 pool）；此常數僅供 StartupReporter 顯示「常駐份數」，
-# 消除 magic number。與 MEDIAPIPE_POOL_SIZE / SALIENCY_POOL_SIZE 並列為 aux CPU 模型份數來源。
-VAD_INSTANCE_COUNT: int = 1
+# ── VAD pool（Silero）────────────────────────────────────────────────────────
+# VAD 改為獨立 CPU pool（與 MediaPipe / Saliency 同構）：放 VAD_POOL_SIZE 個「不同 slot_id」的 Silero
+# instance，各有獨立 L3 lock，讓多支影片的 VAD 真平行（修正單例序列化：實測 3 片 VAD 排隊到 250s+）。
+# Silero 極輕（權重 ~MB、ms 級推論），但每多一份 warmup 多一次 torch.hub 載入（~0.2–0.6s），
+# 故預設保守給 4（覆蓋常見並行影片數）；批量更大時用 env VAD_POOL_SIZE 調高。
+VAD_POOL_SIZE: int = _read_int_env("VAD_POOL_SIZE", 4)
 
 # ── 卡住偵測 Watchdog (Week 3b 觀測性) ─────────────────────────────────────────
 # 背景 daemon 每隔 heartbeat 秒印出「目前進行中的 stage + 已執行秒數」，超過 stall_warn 秒標 ⚠。

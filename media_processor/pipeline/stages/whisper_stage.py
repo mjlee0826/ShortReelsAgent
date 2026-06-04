@@ -59,7 +59,8 @@ class WhisperStage(Stage):
             return
         if WHISPER_BATCH_ENABLED:
             collector = BatchCollectorRegistry.get(_WHISPER_SPEC, _whisper_batch)
-            transcript = collector.submit(work.audio_path).result()
+            # submit_and_wait 把跨 thread 的合批等待計入本 stage 的「等資源」(供 compute/wait 拆分)
+            transcript = collector.submit_and_wait(work.audio_path)
         else:
             transcript = self._engine().transcribe(work.audio_path)
         work.spoken_language = transcript.get("language", "")
