@@ -4,14 +4,14 @@ import cv2
 import numpy as np
 from abc import ABC, abstractmethod
 from PIL import Image, ExifTags
-from sklearn.cluster import KMeans
 
 from media_processor.models import SubjectBbox
 from config.media_processor_config import (
     MOTION_STATIC_THRESHOLD, MOTION_DYNAMIC_THRESHOLD,
     COLOR_TEMP_THRESHOLD,
     CROP_PARTIAL_THRESHOLD, CROP_NOT_RECOMMENDED_THRESHOLD,
-    DOMINANT_COLORS_K, KMEANS_N_INIT, DOMINANT_COLORS_RESIZE,
+    DOMINANT_COLORS_K, DOMINANT_COLORS_RESIZE,
+    KMEANS_ATTEMPTS, KMEANS_MAX_ITER, KMEANS_EPSILON,
     MOTION_SAMPLE_FRAMES,
 )
 
@@ -106,17 +106,32 @@ class MediaStrategy(ABC):
         pil_image: Image.Image, k: int = DOMINANT_COLORS_K
     ) -> list[str]:
         """
-        K-means 取主色調，回傳 hex 字串列表（由佔比高至低排列）。
-        縮小至 DOMINANT_COLORS_RESIZE 加速計算。
+        K-means 取主色調，回傳 hex 字串列表（由佔比高至低排列）。縮小至 DOMINANT_COLORS_RESIZE 加速。
+
+        以 ``cv2.kmeans`` 取代 ``sklearn.KMeans``：cv2 運算時釋放 GIL，且**不經 threadpoolctl 的
+        ``dl_iterate_phdr`` 掃描共享庫**——後者首次呼叫會持有動態連結器鎖（``dl_load_write_lock``），
+        與其他執行緒正在進行的原生擴充 ``dlopen`` 形成「GIL ↔ 連結器鎖」鎖序倒置而死結
+        （與 ``SaliencyModelManager`` 改 CPU EP 同屬避免 GIL/連結器鎖卡死的修復）。
         """
         img = pil_image.convert("RGB").resize(
             (DOMINANT_COLORS_RESIZE, DOMINANT_COLORS_RESIZE)
         )
-        arr = np.array(img).reshape(-1, 3).astype(np.float32)
+        # cv2.kmeans 要求 float32、(N, 3) 的連續陣列；每列為一個像素的 RGB 樣本
+        arr = np.ascontiguousarray(np.array(img).reshape(-1, 3), dtype=np.float32)
         k = min(k, len(arr))
-        kmeans = KMeans(n_clusters=k, n_init=KMEANS_N_INIT, random_state=0).fit(arr)
-        centers = kmeans.cluster_centers_.astype(int)
-        counts = np.bincount(kmeans.labels_)
+        # 收斂條件：達最大迭代次數「或」中心位移小於 epsilon（兩者擇一先滿足即停）
+        criteria = (
+            cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER,
+            KMEANS_MAX_ITER,
+            KMEANS_EPSILON,
+        )
+        # KMEANS_PP_CENTERS：k-means++ 初始化（對應 sklearn 預設 init）；attempts 次取 compactness 最佳者
+        _compactness, labels, centers = cv2.kmeans(
+            arr, k, None, criteria, KMEANS_ATTEMPTS, cv2.KMEANS_PP_CENTERS
+        )
+        centers = centers.astype(int)
+        # labels shape 為 (N, 1)，攤平後統計各群像素數作為主色佔比，降冪排序讓佔比高的色排前面
+        counts = np.bincount(labels.flatten(), minlength=k)
         sorted_centers = centers[np.argsort(-counts)]
         return [f"#{int(c[0]):02x}{int(c[1]):02x}{int(c[2]):02x}" for c in sorted_centers]
 

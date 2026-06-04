@@ -38,6 +38,21 @@ class VadModelManager(BaseModelManager):
             # 解構官方提供的輔助函式
             self.get_speech_timestamps, _, self.read_audio, _, _ = utils
 
+    def warmup(self) -> None:
+        """
+        啟動單執行緒預載 torchcodec（覆寫 base ``warmup``）。
+
+        ``has_speech`` 首呼叫會經 ``read_audio → torchaudio.load`` 延遲 import ``torchcodec._core``
+        （其 .so 的 dlopen + ``torch.library._register_fake`` 內的 ``inspect.getsource``）。提前在此
+        單執行緒 import，避免執行期多條 worker thread 首呼叫與其他原生 dlopen 撞動態連結器鎖造成死結。
+        """
+        try:
+            import torchaudio  # noqa: F401 — 確保解碼框架本體 .so 已單執行緒載入
+            import torchcodec  # noqa: F401 — 觸發 torchcodec._core 的 dlopen + fake-op 註冊
+        except Exception as exc:
+            # best-effort：缺套件 / 載入異常都不擋啟動，執行期 read_audio 仍會自行 lazy 再試
+            print(f"[VAD] warmup 預載 torchcodec 略過：{exc}")
+
     @synchronized_inference
     def has_speech(self, audio_path: str) -> bool:
         """

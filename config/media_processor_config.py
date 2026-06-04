@@ -43,10 +43,14 @@ COLOR_TEMP_THRESHOLD           = 10.0  # 超過此值判定 warm/cool
 CROP_PARTIAL_THRESHOLD         = 56.0  # >56%（9:16 裁切橫向邊界）→ "partial"
 CROP_NOT_RECOMMENDED_THRESHOLD = 75.0  # >75% → "not_recommended"
 
-# K-means 主色計算參數
+# K-means 主色計算參數（改用 cv2.kmeans：不經 sklearn/threadpoolctl 的 dl_iterate_phdr 掃描，
+# 避免首呼叫持有動態連結器鎖、與其他執行緒原生擴充 dlopen 形成鎖序倒置死結）
 DOMINANT_COLORS_K      = 3    # 取幾個主色
-KMEANS_N_INIT          = 3    # KMeans 初始化次數（穩定性 vs 速度）
 DOMINANT_COLORS_RESIZE = 100  # 縮圖尺寸（像素）加速 k-means 計算
+# cv2.kmeans 收斂條件與重試次數（取代 sklearn 的 n_init / max_iter / tol，全部具名避免 magic number）
+KMEANS_ATTEMPTS        = 3    # 不同初始中心的嘗試次數，取 compactness 最佳者（穩定性 vs 速度）
+KMEANS_MAX_ITER        = 100  # 單次嘗試的最大迭代次數（達上限即停）
+KMEANS_EPSILON         = 0.2  # 中心位移小於此值（像素 0–255 尺度）即視為收斂提早停
 
 # 影片取樣
 MOTION_SAMPLE_FRAMES      = 10               # 動態強度 frame diff 取樣幀數

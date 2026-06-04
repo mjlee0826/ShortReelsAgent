@@ -188,6 +188,21 @@ class BaseModelManager(ABC):
     def _initialize(self, device_id: int = 0):
         """子類別必須實作：完成模型載入並將結果存為 self 屬性。"""
 
+    def warmup(self) -> None:
+        """
+        選用預熱 hook（Template Method）：啟動單執行緒階段，觸發「首次推論才會發生的 lazy import /
+        原生擴充 dlopen」，預設不做事。
+
+        為何需要：部分模型的解碼後端採延遲載入，第一次推論才 import .so（如 librosa→libsndfile、
+        torchaudio→torchcodec）。若延後到執行期由多條 worker thread 同時首呼叫，會與其他執行緒正在
+        進行的函式庫掃描（threadpoolctl 的 ``dl_iterate_phdr`` 持有動態連結器鎖 ``dl_load_write_lock``）
+        形成「GIL ↔ 連結器鎖」鎖序倒置而**死結**（StallWatchdog C 層 dump 的根因之一）。
+        啟動期單執行緒先各跑一次，這些原生擴充即提前 import 完成，執行期不再 dlopen，死結結構性消失。
+
+        合約：**best-effort、不得拋例外**（預載失敗只記錄、不擋啟動，執行期仍會 lazy 再試）。
+        只有「首呼叫才載原生擴充」的子類需要 override。
+        """
+
     # ── L2 GPU Gate 管理（class method） ─────────────────────────────────────
     @classmethod
     def register_gate_factory(cls, factory: Callable[[int], GpuGate]) -> None:

@@ -46,6 +46,22 @@ class AudioEnvModelManager(BaseModelManager):
             # AudioTagging 內部自動處理 GPU/CPU 分配
             self._tagger = AudioTagging(checkpoint_path=None, device=self.device)
 
+    def warmup(self) -> None:
+        """
+        啟動單執行緒預載 librosa 解碼路徑（覆寫 base ``warmup``）。
+
+        ``classify_environment*`` 首呼叫的 ``librosa.load`` 會延遲 import ``librosa.core.audio``
+        （經 lazy_loader → ``inspect.stack``）並 dlopen libsndfile。提前在此單執行緒觸發，避免執行期
+        多條 worker thread 首呼叫與其他原生 dlopen 撞動態連結器鎖造成死結。
+        """
+        try:
+            import soundfile  # noqa: F401 — 觸發 libsndfile 的 dlopen（librosa 主要解碼後端）
+        except Exception:
+            # best-effort：後端缺失不擋啟動，librosa 執行期會自行 fallback 到其他解碼器
+            pass
+        # 存取屬性即經 lazy_loader.__getattr__ 載入 librosa.core.audio（含 inspect.stack 鏈）
+        _ = librosa.load
+
     @oom_resilient
     @synchronized_inference
     def classify_environment(self, audio_path: str) -> list:

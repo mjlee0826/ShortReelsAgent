@@ -1,0 +1,845 @@
+(/data1/cache/mjlee/conda_envs/agent) mjlee@Leibniz:~/ShortReelsAgent$ CUDA_VISIBLE_DEVICES=0,1,4,5 python3 backend/main.py
+[ModelPoolRegistry] 偵測到模型可用裝置: ['cuda:0', 'cuda:1', 'cuda:2', 'cuda:3']
+[ModelPoolRegistry] GpuCapacityManager(gpu_ids=[0, 1, 2, 3], qwen_max_slots/gpu=auto, budget_gb(扣常駐後,Gate 再扣 buffer 1.5)={0: 2.01, 1: 7.56, 2: 7.42, 3: 1.47}, placements=[QwenModelManager→['cuda:2#0'], WhisperModelManager→['cuda:1#0'], LaionModelManager→['cuda:1#0'], MusiqModelManager→['cuda:1#0'], AudioEnvModelManager→['cuda:1#0']], lazy=[])
+[GpuCapacityManager] 已套用 per-device BudgetGate；GpuCapacityManager(gpu_ids=[0, 1, 2, 3], qwen_max_slots/gpu=auto, budget_gb(扣常駐後,Gate 再扣 buffer 1.5)={0: 2.01, 1: 7.56, 2: 7.42, 3: 1.47}, placements=[QwenModelManager→['cuda:2#0'], WhisperModelManager→['cuda:1#0'], LaionModelManager→['cuda:1#0'], MusiqModelManager→['cuda:1#0'], AudioEnvModelManager→['cuda:1#0']], lazy=[])
+[PipelineRunner] ExecutorRegistry(gpu_count=4, io=80, cpu=64, gpu=16, api=16)
+[PipelineRunner] EAGER_MODELS=true,啟動期依 capacity 規劃預載熱門模型...
+[Progress] model_warmup     asset=-                        stage=QwenModelManager         dur=-
+[Qwen] 開始載入模型 (device=cuda:2)
+Fetching 4 files: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 4/4 [00:00<00:00, 2140.77it/s]
+Download complete: : 0.00B [00:00, ?B/s]                                                                                                                         | 0/4 [00:00<?, ?it/s]
+Loading weights: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 750/750 [00:04<00:00, 151.43it/s]
+[Qwen] 模型載入完成，耗時 14.7s
+[Qwen] attn_implementation=flash_attention_2, 量化=4bit-nf4
+[ModelPoolRegistry] 建立 QwenModelManager pool → slots=['cuda:2#0']
+[Progress] model_warmup     asset=-                        stage=QwenModelManager         dur=-
+[Progress] model_warmup     asset=-                        stage=WhisperModelManager      dur=-
+[Whisper] 開始載入模型 (device=cuda:1)
+Loading weights: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1259/1259 [00:00<00:00, 3219.67it/s]
+Passing `generation_config` together with generation-related arguments=({'return_timestamps'}) is deprecated and will be removed in future versions. Please pass either a `generation_config` object OR all generation parameters explicitly, but not both.
+Using `chunk_length_s` is very experimental with seq2seq models. The results will not necessarily be entirely accurate and will have caveats. More information: https://github.com/huggingface/transformers/pull/20104. Ignore this warning with pipeline(..., ignore_warning=True). To use Whisper for long-form transcription, use rather the model's `generate` method directly as the model relies on it's own chunking mechanism (cf. Whisper original paper, section 3.8. Long-form Transcription).
+[Whisper] 模型載入完成，耗時 4.8s
+[ModelPoolRegistry] 建立 WhisperModelManager pool → slots=['cuda:1#0']
+[Progress] model_warmup     asset=-                        stage=WhisperModelManager      dur=-
+[Progress] model_warmup     asset=-                        stage=LaionModelManager        dur=-
+[LAION] 開始載入模型 (device=cuda:1)
+Loading weights: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 590/590 [00:00<00:00, 3162.26it/s]
+CLIPModel LOAD REPORT from: openai/clip-vit-large-patch14
+Key                                  | Status     |  | 
+-------------------------------------+------------+--+-
+text_model.embeddings.position_ids   | UNEXPECTED |  | 
+vision_model.embeddings.position_ids | UNEXPECTED |  | 
+
+Notes:
+- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+[LAION] 模型載入完成，耗時 4.7s
+[ModelPoolRegistry] 建立 LaionModelManager pool → slots=['cuda:1#0']
+[Progress] model_warmup     asset=-                        stage=LaionModelManager        dur=-
+[Progress] model_warmup     asset=-                        stage=MusiqModelManager        dur=-
+[MUSIQ] 開始載入模型 (device=cuda:1)
+Loading pretrained model MUSIQ from /home/nas/mjlee/.cache/torch/hub/pyiqa/musiq_koniq_ckpt-e95806b9.pth
+[MUSIQ] 模型載入完成，耗時 0.4s
+[ModelPoolRegistry] 建立 MusiqModelManager pool → slots=['cuda:1#0']
+[Progress] model_warmup     asset=-                        stage=MusiqModelManager        dur=-
+[Progress] model_warmup     asset=-                        stage=AudioEnvModelManager     dur=-
+[AudioEnv] 開始載入模型 (device=cuda:1)
+Checkpoint path: /home/nas/mjlee/panns_data/Cnn14_mAP=0.431.pth
+Using CPU.
+[AudioEnv] 模型載入完成，耗時 2.2s
+[ModelPoolRegistry] 建立 AudioEnvModelManager pool → slots=['cuda:1#0']
+[Progress] model_warmup     asset=-                        stage=AudioEnvModelManager     dur=-
+[Progress] model_warmup     asset=-                        stage=VadModelManager          dur=-
+[VAD] 開始載入模型 (device=內部管理)
+Using cache found in /home/nas/mjlee/.cache/torch/hub/snakers4_silero-vad_master
+[VAD] 模型載入完成，耗時 0.7s
+[Progress] model_warmup     asset=-                        stage=VadModelManager          dur=-
+[Progress] model_warmup     asset=-                        stage=MediaPipeModelManager    dur=-
+[MediaPipe] 開始載入模型 (device=cpu)
+INFO: Created TensorFlow Lite XNNPACK delegate for CPU.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+W0000 00:00:1780576409.978148  651181 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+[MediaPipe] 模型載入完成，耗時 0.0s
+[MediaPipe] 開始載入模型 (device=cpu)
+W0000 00:00:1780576409.993249  651198 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+[MediaPipe] 模型載入完成，耗時 0.0s
+[MediaPipe] 開始載入模型 (device=cpu)
+W0000 00:00:1780576410.007660  651214 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+[MediaPipe] 模型載入完成，耗時 0.0s
+[MediaPipe] 開始載入模型 (device=cpu)
+W0000 00:00:1780576410.021540  651229 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+[MediaPipe] 模型載入完成，耗時 0.0s
+[MediaPipe] 開始載入模型 (device=cpu)
+W0000 00:00:1780576410.035112  651245 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+[MediaPipe] 模型載入完成，耗時 0.0s
+[MediaPipe] 開始載入模型 (device=cpu)
+W0000 00:00:1780576410.052847  651258 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+[MediaPipe] 模型載入完成，耗時 0.0s
+[MediaPipe] 開始載入模型 (device=cpu)
+W0000 00:00:1780576410.067476  651274 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+[MediaPipe] 模型載入完成，耗時 0.0s
+[MediaPipe] 開始載入模型 (device=cpu)
+W0000 00:00:1780576410.081905  651289 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+[MediaPipe] 模型載入完成，耗時 0.0s
+[MediaPipe] 開始載入模型 (device=cpu)
+W0000 00:00:1780576410.096541  651303 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+[MediaPipe] 模型載入完成，耗時 0.0s
+[MediaPipe] 開始載入模型 (device=cpu)
+W0000 00:00:1780576410.111050  651319 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+[MediaPipe] 模型載入完成，耗時 0.0s
+[MediaPipe] 開始載入模型 (device=cpu)
+W0000 00:00:1780576410.132341  651336 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+[MediaPipe] 模型載入完成，耗時 0.0s
+[MediaPipe] 開始載入模型 (device=cpu)
+W0000 00:00:1780576410.146858  651348 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+[MediaPipe] 模型載入完成，耗時 0.0s
+[MediaPipe] 開始載入模型 (device=cpu)
+W0000 00:00:1780576410.161247  651364 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+[MediaPipe] 模型載入完成，耗時 0.0s
+[MediaPipe] 開始載入模型 (device=cpu)
+W0000 00:00:1780576410.175912  651381 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+[MediaPipe] 模型載入完成，耗時 0.0s
+[MediaPipe] 開始載入模型 (device=cpu)
+W0000 00:00:1780576410.190377  651394 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+[MediaPipe] 模型載入完成，耗時 0.0s
+[MediaPipe] 開始載入模型 (device=cpu)
+W0000 00:00:1780576410.205077  651411 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+[MediaPipe] 模型載入完成，耗時 0.0s
+[Progress] model_warmup     asset=-                        stage=MediaPipeModelManager    dur=-
+[Progress] model_warmup     asset=-                        stage=SaliencyModelManager     dur=-
+[Saliency] 開始載入模型 (device=cpu)
+[Saliency] 模型載入完成，耗時 0.9s
+[Saliency] 開始載入模型 (device=cpu)
+[Saliency] 模型載入完成，耗時 0.9s
+[Saliency] 開始載入模型 (device=cpu)
+[Saliency] 模型載入完成，耗時 0.8s
+[Saliency] 開始載入模型 (device=cpu)
+[Saliency] 模型載入完成，耗時 0.7s
+[Progress] model_warmup     asset=-                        stage=SaliencyModelManager     dur=-
+══════════════════════════════════════════════════════════════════════
+Pipeline 啟動佈局 (Startup Layout)
+══════════════════════════════════════════════════════════════════════
+[GPU VRAM]
+  device        total(GB)    free@plan   budget(GB)
+  cuda:0             23.6          2.0          2.0
+  cuda:1             23.6         13.1          7.6
+  cuda:2             23.6         13.9          7.4
+  cuda:3             23.6          1.5          1.5
+
+[模型載入 / 放置]
+  model                   resident(GB)  status  placement
+  QwenModelManager        6.5           eager   cuda:2
+  WhisperModelManager     3.0           eager   cuda:1
+  LaionModelManager       1.7           eager   cuda:1
+  MusiqModelManager       0.5           eager   cuda:1
+  AudioEnvModelManager    0.3           eager   cuda:1
+  ──────────────────────────────────────────────────────────
+  VadModelManager         1             eager   cpu
+  MediaPipeModelManager   16            eager   cpu×16
+  SaliencyModelManager    4             eager   cpu×4
+
+[Worker Pool 並行度（同時可跑的 thread 數）]
+  pool              threads
+  io                     80
+  cpu                    64
+  gpu                    16
+  api                    16
+  asset-driver           16   (MAX_ASSETS_PARALLEL)
+══════════════════════════════════════════════════════════════════════
+🚀 [系統啟動] FastAPI 伺服器運行於 http://0.0.0.0:5176
+🔒 [CORS 設定] 允許的前端連線來源: http://localhost:5175
+INFO:     Started server process [650350]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:5176 (Press CTRL+C to quit)
+[LogtoJWT] 🔑 JWKS 公鑰快取已更新
+🧹 [Standardizer] 開始掃描並標準化素材: /data1/cache/mjlee/assets/2jhpn2col50g/dataset1
+✅ [Standardizer] 標準化完成，處理了 0 個檔案。
+[Service] 正在處理 7 個素材...
+[Progress] pipeline_start   asset=IMG_7763_std.jpg         stage=-                        dur=-
+[Progress] stage_start      asset=IMG_7763_std.jpg         stage=decode_image             dur=-
+[Progress] pipeline_start   asset=IMG_7738_std.mp4         stage=-                        dur=-
+[Progress] stage_start      asset=IMG_7738_std.mp4         stage=decode_video             dur=-
+[Progress] pipeline_start   asset=IMG_8105_std.jpg         stage=-                        dur=-
+[Progress] stage_start      asset=IMG_8105_std.jpg         stage=decode_image             dur=-
+[Progress] pipeline_start   asset=IMG_7739_std.mp4         stage=-                        dur=-
+[Progress] stage_start      asset=IMG_7739_std.mp4         stage=decode_video             dur=-
+[Progress] pipeline_start   asset=IMG_1964_std.mp4         stage=-                        dur=-
+[Progress] stage_start      asset=IMG_1964_std.mp4         stage=decode_video             dur=-
+[Progress] pipeline_start   asset=IMG_1959_std.jpg         stage=-                        dur=-
+[Progress] stage_start      asset=IMG_1959_std.jpg         stage=decode_image             dur=-
+[Progress] pipeline_start   asset=IMG_7743_std.mp4         stage=-                        dur=-
+[Progress] stage_start      asset=IMG_7743_std.mp4         stage=decode_video             dur=-
+[Progress] stage_finish     asset=IMG_7739_std.mp4         stage=decode_video             dur=531.5ms
+[Progress] stage_start      asset=IMG_7739_std.mp4         stage=tech_score               dur=-
+[Progress] stage_start      asset=IMG_7739_std.mp4         stage=audio_extraction         dur=-
+[Progress] stage_finish     asset=IMG_8105_std.jpg         stage=decode_image             dur=551.0ms
+[Progress] stage_start      asset=IMG_8105_std.jpg         stage=tech_score               dur=-
+[FFmpeg] 正在提取 AI 專用音軌: tmp0yyjxk89.wav
+[Progress] stage_finish     asset=IMG_7738_std.mp4         stage=decode_video             dur=633.5ms
+[Progress] stage_start      asset=IMG_7738_std.mp4         stage=tech_score               dur=-
+[Progress] stage_start      asset=IMG_7738_std.mp4         stage=audio_extraction         dur=-
+[FFmpeg] 正在提取 AI 專用音軌: tmpcr2b8bjl.wav
+[Progress] stage_finish     asset=IMG_1959_std.jpg         stage=decode_image             dur=752.3ms
+[Progress] stage_start      asset=IMG_1959_std.jpg         stage=tech_score               dur=-
+[Progress] stage_finish     asset=IMG_7739_std.mp4         stage=audio_extraction         dur=208.4ms
+[Progress] stage_finish     asset=IMG_7743_std.mp4         stage=decode_video             dur=798.1ms
+[Progress] stage_start      asset=IMG_7743_std.mp4         stage=tech_score               dur=-
+[Progress] stage_start      asset=IMG_7743_std.mp4         stage=audio_extraction         dur=-
+[FFmpeg] 正在提取 AI 專用音軌: tmpy3zq4q_8.wav
+[Progress] stage_finish     asset=IMG_7763_std.jpg         stage=decode_image             dur=821.1ms
+[Progress] stage_start      asset=IMG_7763_std.jpg         stage=tech_score               dur=-
+[Progress] stage_finish     asset=IMG_1964_std.mp4         stage=decode_video             dur=824.4ms
+[Progress] stage_start      asset=IMG_1964_std.mp4         stage=tech_score               dur=-
+[Progress] stage_start      asset=IMG_1964_std.mp4         stage=audio_extraction         dur=-
+[FFmpeg] 正在提取 AI 專用音軌: tmprhy43068.wav
+[Progress] stage_finish     asset=IMG_7738_std.mp4         stage=audio_extraction         dur=210.5ms
+[Progress] stage_finish     asset=IMG_1964_std.mp4         stage=audio_extraction         dur=164.7ms
+[Progress] stage_finish     asset=IMG_7743_std.mp4         stage=audio_extraction         dur=190.8ms
+[Progress] stage_finish     asset=IMG_7739_std.mp4         stage=tech_score               dur=1588.2ms
+[Progress] stage_finish     asset=IMG_8105_std.jpg         stage=tech_score               dur=1575.0ms
+[Progress] stage_start      asset=IMG_7739_std.mp4         stage=reject_filter            dur=-
+[Progress] stage_start      asset=IMG_8105_std.jpg         stage=reject_filter            dur=-
+[Progress] stage_finish     asset=IMG_7739_std.mp4         stage=reject_filter            dur=0.0ms
+[Progress] stage_finish     asset=IMG_8105_std.jpg         stage=reject_filter            dur=0.0ms
+[Progress] stage_start      asset=IMG_7739_std.mp4         stage=vad                      dur=-
+[Progress] stage_start      asset=IMG_8105_std.jpg         stage=semantic_image           dur=-
+[Progress] stage_start      asset=IMG_8105_std.jpg         stage=saliency                 dur=-
+[Progress] stage_start      asset=IMG_7739_std.mp4         stage=audio_env                dur=-
+[Progress] stage_start      asset=IMG_8105_std.jpg         stage=aes_score                dur=-
+[Progress] stage_start      asset=IMG_8105_std.jpg         stage=cv_features              dur=-
+[Progress] stage_start      asset=IMG_7739_std.mp4         stage=semantic_video           dur=-
+[Progress] stage_start      asset=IMG_8105_std.jpg         stage=face_detect              dur=-
+[Progress] stage_start      asset=IMG_7739_std.mp4         stage=scene_cut                dur=-
+[Analyzer] 正在計算物理分鏡切點 (Visual Cuts)...
+[Progress] stage_start      asset=IMG_8105_std.jpg         stage=exif                     dur=-
+[Progress] stage_finish     asset=IMG_8105_std.jpg         stage=exif                     dur=0.0ms
+[Progress] stage_start      asset=IMG_7739_std.mp4         stage=motion_intensity         dur=-
+[Progress] stage_start      asset=IMG_7739_std.mp4         stage=aes_score                dur=-
+[Progress] stage_start      asset=IMG_7739_std.mp4         stage=saliency_union           dur=-
+[Progress] stage_start      asset=IMG_7739_std.mp4         stage=cv_features              dur=-
+[Progress] stage_start      asset=IMG_7739_std.mp4         stage=face_detect              dur=-
+[Progress] stage_finish     asset=IMG_8105_std.jpg         stage=face_detect              dur=22.4ms
+[Progress] stage_finish     asset=IMG_7739_std.mp4         stage=face_detect              dur=21.1ms
+[Progress] stage_finish     asset=IMG_8105_std.jpg         stage=saliency                 dur=381.4ms
+Timeout (0:01:30)!
+Thread 0x00007cbf05fff6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 355 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/queue.py", line 140 in put
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/scenedetect/scene_manager.py", line 1434 in _decode_thread
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc3d97fa6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 90 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc3d9ffb6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/threadpoolctl.py", line 1017 in _find_libraries_with_dl_iterate_phdr
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/threadpoolctl.py", line 976 in _load_libraries
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/threadpoolctl.py", line 818 in __init__
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/sklearn/utils/parallel.py", line 192 in _get_threadpool_controller
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/sklearn/utils/parallel.py", line 208 in wrapper
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/sklearn/cluster/_kmeans.py", line 1516 in fit
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/sklearn/base.py", line 1336 in wrapper
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/media_strategy.py", line 117 in _compute_dominant_colors
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/cv_features_stage.py", line 33 in run
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/pipeline.py", line 202 in _run_stage
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 59 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 93 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc3da7fc6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 355 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/_base.py", line 451 in result
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/aes_score_stage.py", line 61 in run
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/pipeline.py", line 202 in _run_stage
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 59 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 93 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc3daffd6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/rembg/sessions/base.py", line 55 in normalize
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/rembg/sessions/u2net.py", line 31 in predict
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/rembg/bg.py", line 286 in remove
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/model/saliency_model_manager.py", line 77 in get_saliency_mask
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/model/base_model_manager.py", line 72 in wrapper
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/video_frame_utils.py", line 115 in compute_saliency_bbox_at_time
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/saliency_union_stage.py", line 38 in <lambda>
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/executor/model_pool_registry.py", line 430 in run_saliency
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/saliency_union_stage.py", line 36 in run
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/pipeline.py", line 202 in _run_stage
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 59 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 93 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc3db7fe6c0 (most recent call first):
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/media_strategy.py", line 140 in _compute_motion_intensity
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/motion_intensity_stage.py", line 27 in run
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/pipeline.py", line 202 in _run_stage
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 59 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 93 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc3dbfff6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/scenedetect/detectors/content_detector.py", line 35 in _mean_pixel_distance
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/scenedetect/detectors/content_detector.py", line 169 in _calculate_frame_score
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/scenedetect/detectors/content_detector.py", line 202 in process_frame
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/scenedetect/scene_manager.py", line 1189 in _process_frame
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/scenedetect/scene_manager.py", line 1342 in detect_scenes
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/scenedetect/__init__.py", line 165 in detect
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/template_engine/scene_cut_extractor.py", line 11 in get_cuts
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/scene_cut_stage.py", line 28 in run
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/pipeline.py", line 202 in _run_stage
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 59 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 93 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc3e4ff96c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 90 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc3e57fa6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 355 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/queue.py", line 171 in get
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/model/model_pool.py", line 295 in _acquire_preferring
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/model/model_pool.py", line 263 in run_with_failover
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/semantic_video_stage.py", line 85 in _analyze_with_qwen
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/semantic_video_stage.py", line 66 in run
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/pipeline.py", line 202 in _run_stage
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 59 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 93 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc3e5ffb6c0 (most recent call first):
+  File "<frozen posixpath>", line 468 in _joinrealpath
+  File "<frozen posixpath>", line 424 in realpath
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/threadpoolctl.py", line 548 in _realpath
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/threadpoolctl.py", line 1146 in _make_controller_from_path
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/threadpoolctl.py", line 1005 in match_library_callback
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/threadpoolctl.py", line 1017 in _find_libraries_with_dl_iterate_phdr
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/threadpoolctl.py", line 976 in _load_libraries
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/threadpoolctl.py", line 818 in __init__
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/sklearn/utils/parallel.py", line 192 in _get_threadpool_controller
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/sklearn/utils/parallel.py", line 208 in wrapper
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/sklearn/cluster/_kmeans.py", line 1516 in fit
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/sklearn/base.py", line 1336 in wrapper
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/media_strategy.py", line 117 in _compute_dominant_colors
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/cv_features_stage.py", line 33 in run
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/pipeline.py", line 202 in _run_stage
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 59 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 93 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc3e67fc6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/transformers/models/clip/modeling_clip.py", line 350 in forward
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1787 in _call_impl
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1776 in _wrapped_call_impl
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/transformers/models/clip/modeling_clip.py", line 382 in forward
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1787 in _call_impl
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1776 in _wrapped_call_impl
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/transformers/modeling_layers.py", line 93 in __call__
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/transformers/models/clip/modeling_clip.py", line 500 in forward
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1787 in _call_impl
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1776 in _wrapped_call_impl
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/transformers/models/clip/modeling_clip.py", line 680 in forward
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/transformers/utils/output_capturing.py", line 248 in wrapper
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/transformers/utils/generic.py", line 952 in wrapper
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1787 in _call_impl
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1776 in _wrapped_call_impl
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/transformers/models/clip/modeling_clip.py", line 855 in get_image_features
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/transformers/utils/generic.py", line 876 in wrapper
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/model/laion_model_manager.py", line 165 in _extract_features
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/model/laion_model_manager.py", line 141 in score_batch
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/model/base_model_manager.py", line 72 in wrapper
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/model/base_model_manager.py", line 110 in wrapper
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/aes_score_stage.py", line 31 in <lambda>
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/model/model_pool.py", line 268 in run_with_failover
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/executor/model_pool_registry.py", line 359 in borrow_for_batch
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/aes_score_stage.py", line 31 in _laion_batch
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/batch_collector.py", line 159 in _dispatch
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/batch_collector.py", line 151 in _worker_loop
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc3e6ffd6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 355 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/_base.py", line 451 in result
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/aes_score_stage.py", line 61 in run
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/pipeline.py", line 202 in _run_stage
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 59 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 93 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc3e77fe6c0 (most recent call first):
+  File "<frozen posixpath>", line 468 in _joinrealpath
+  File "<frozen posixpath>", line 424 in realpath
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/inspect.py", line 1016 in getmodule
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/inspect.py", line 1090 in findsource
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/inspect.py", line 1718 in getframeinfo
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/inspect.py", line 1756 in getouterframes
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/inspect.py", line 1781 in stack
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/lazy_loader/__init__.py", line 227 in load
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/librosa/core/audio.py", line 32 in <module>
+  File "<frozen importlib._bootstrap>", line 488 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 999 in exec_module
+  File "<frozen importlib._bootstrap>", line 935 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1331 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1360 in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1387 in _gcd_import
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/importlib/__init__.py", line 90 in import_module
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/lazy_loader/__init__.py", line 78 in __getattr__
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/lazy_loader/__init__.py", line 79 in __getattr__
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/model/audio_env_model_manager.py", line 99 in classify_environment_batch
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/model/base_model_manager.py", line 72 in wrapper
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/model/base_model_manager.py", line 110 in wrapper
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/audio_env_stage.py", line 31 in <lambda>
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/model/model_pool.py", line 268 in run_with_failover
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/executor/model_pool_registry.py", line 359 in borrow_for_batch
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/audio_env_stage.py", line 31 in _audio_env_batch
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/batch_collector.py", line 159 in _dispatch
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/batch_collector.py", line 151 in _worker_loop
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc3e7fff6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 355 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/_base.py", line 451 in result
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/audio_env_stage.py", line 62 in run
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/pipeline.py", line 202 in _run_stage
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 59 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 93 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc3eefff6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 90 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc3987f86c0 (most recent call first):
+  File "<frozen posixpath>", line 468 in _joinrealpath
+  File "<frozen posixpath>", line 424 in realpath
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/inspect.py", line 1016 in getmodule
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/inspect.py", line 1090 in findsource
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/inspect.py", line 1718 in getframeinfo
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torch/_library/utils.py", line 45 in get_source
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torch/library.py", line 182 in _register_fake
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torch/library.py", line 1073 in register
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torchcodec/_core/ops.py", line 302 in <module>
+  File "<frozen importlib._bootstrap>", line 488 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 999 in exec_module
+  File "<frozen importlib._bootstrap>", line 935 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1331 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1360 in _find_and_load
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torchcodec/_core/_metadata.py", line 16 in <module>
+  File "<frozen importlib._bootstrap>", line 488 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 999 in exec_module
+  File "<frozen importlib._bootstrap>", line 935 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1331 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1360 in _find_and_load
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torchcodec/_core/__init__.py", line 8 in <module>
+  File "<frozen importlib._bootstrap>", line 488 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 999 in exec_module
+  File "<frozen importlib._bootstrap>", line 935 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1331 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1360 in _find_and_load
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torchcodec/decoders/__init__.py", line 7 in <module>
+  File "<frozen importlib._bootstrap>", line 488 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 999 in exec_module
+  File "<frozen importlib._bootstrap>", line 935 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1331 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1360 in _find_and_load
+  File "<frozen importlib._bootstrap>", line 488 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap>", line 1415 in _handle_fromlist
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torchcodec/__init__.py", line 12 in <module>
+  File "<frozen importlib._bootstrap>", line 488 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap_external>", line 999 in exec_module
+  File "<frozen importlib._bootstrap>", line 935 in _load_unlocked
+  File "<frozen importlib._bootstrap>", line 1331 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1360 in _find_and_load
+  File "<frozen importlib._bootstrap>", line 488 in _call_with_frames_removed
+  File "<frozen importlib._bootstrap>", line 1310 in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 1360 in _find_and_load
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torchaudio/_torchcodec.py", line 82 in load_with_torchcodec
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torchaudio/__init__.py", line 86 in load
+  File "/home/nas/mjlee/.cache/torch/hub/snakers4_silero-vad_master/src/silero_vad/utils_vad.py", line 148 in read_audio
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/model/vad_model_manager.py", line 50 in has_speech
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/model/base_model_manager.py", line 72 in wrapper
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/vad_stage.py", line 43 in run
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/pipeline.py", line 202 in _run_stage
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 59 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 93 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc397ff76c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 90 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc3977f66c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 355 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/_base.py", line 451 in result
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/tech_score_stage.py", line 63 in run
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/pipeline.py", line 202 in _run_stage
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 59 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 93 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc396ff56c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 355 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/_base.py", line 451 in result
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/tech_score_stage.py", line 63 in run
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/pipeline.py", line 202 in _run_stage
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 59 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 93 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc162f8d6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 90 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc165f936c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 355 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/_base.py", line 451 in result
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/tech_score_stage.py", line 63 in run
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/pipeline.py", line 202 in _run_stage
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 59 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 93 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc1a37fe6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/pyiqa/archs/musiq_arch.py", line 197 in forward
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1787 in _call_impl
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1776 in _wrapped_call_impl
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/pyiqa/archs/musiq_arch.py", line 275 in forward
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1787 in _call_impl
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1776 in _wrapped_call_impl
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/pyiqa/archs/musiq_arch.py", line 437 in forward
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1787 in _call_impl
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1776 in _wrapped_call_impl
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/pyiqa/models/inference_model.py", line 117 in forward
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1787 in _call_impl
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1776 in _wrapped_call_impl
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/model/musiq_model_manager.py", line 112 in score_batch
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/model/base_model_manager.py", line 72 in wrapper
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/model/base_model_manager.py", line 110 in wrapper
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/tech_score_stage.py", line 32 in <lambda>
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/model/model_pool.py", line 268 in run_with_failover
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/executor/model_pool_registry.py", line 359 in borrow_for_batch
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/tech_score_stage.py", line 32 in _musiq_batch
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/batch_collector.py", line 159 in _dispatch
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/batch_collector.py", line 151 in _worker_loop
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc3ee7ec6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 90 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc3effef6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/transformers/models/qwen3_vl/modeling_qwen3_vl.py", line 747 in fast_pos_embed_interpolate
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/transformers/models/qwen3_vl/modeling_qwen3_vl.py", line 782 in forward
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/transformers/utils/output_capturing.py", line 248 in wrapper
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/transformers/utils/generic.py", line 952 in wrapper
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1787 in _call_impl
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1776 in _wrapped_call_impl
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/transformers/models/qwen3_vl/modeling_qwen3_vl.py", line 1156 in get_image_features
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/transformers/utils/generic.py", line 876 in wrapper
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/transformers/models/qwen3_vl/modeling_qwen3_vl.py", line 1288 in forward
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/transformers/utils/generic.py", line 876 in wrapper
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1787 in _call_impl
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1776 in _wrapped_call_impl
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/transformers/models/qwen3_vl/modeling_qwen3_vl.py", line 1507 in forward
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/transformers/utils/generic.py", line 876 in wrapper
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1787 in _call_impl
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1776 in _wrapped_call_impl
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/transformers/generation/utils.py", line 3768 in _prefill
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/transformers/generation/utils.py", line 2736 in _sample
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/transformers/generation/utils.py", line 2543 in generate
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/torch/utils/_contextlib.py", line 124 in decorate_context
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/model/qwen_model_manager.py", line 183 in analyze_media
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/model/base_model_manager.py", line 72 in wrapper
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/model/base_model_manager.py", line 110 in wrapper
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/semantic_image_stage.py", line 86 in <lambda>
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/model/model_pool.py", line 268 in run_with_failover
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/semantic_image_stage.py", line 85 in _analyze_with_qwen
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/semantic_image_stage.py", line 66 in run
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/pipeline.py", line 202 in _run_stage
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 59 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 93 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc43cff96c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 355 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 655 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/_base.py", line 305 in wait
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/pipeline.py", line 158 in execute
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/scheduler/hybrid_scheduler.py", line 89 in _drive_one
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 59 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 93 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc43d7fa6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 355 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/_base.py", line 451 in result
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/tech_score_stage.py", line 63 in run
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/pipeline.py", line 202 in _run_stage
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/pipeline.py", line 141 in execute
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/scheduler/hybrid_scheduler.py", line 89 in _drive_one
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 59 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 93 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc43dffb6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 355 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 655 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/_base.py", line 305 in wait
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/pipeline.py", line 158 in execute
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/scheduler/hybrid_scheduler.py", line 89 in _drive_one
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 59 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 93 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc43e7fc6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 355 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 655 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/_base.py", line 305 in wait
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/pipeline.py", line 158 in execute
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/scheduler/hybrid_scheduler.py", line 89 in _drive_one
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 59 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 93 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc43effd6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 355 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 655 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/_base.py", line 305 in wait
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/pipeline.py", line 158 in execute
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/scheduler/hybrid_scheduler.py", line 89 in _drive_one
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 59 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 93 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc43f7fe6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 355 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 655 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/_base.py", line 305 in wait
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/pipeline.py", line 158 in execute
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/scheduler/hybrid_scheduler.py", line 89 in _drive_one
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 59 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 93 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc43ffff6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 355 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/_base.py", line 451 in result
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/stages/tech_score_stage.py", line 63 in run
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/pipeline.py", line 202 in _run_stage
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/pipeline.py", line 141 in execute
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/scheduler/hybrid_scheduler.py", line 89 in _drive_one
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 59 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 93 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc480dfa6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 359 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 655 in wait
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/progress/watchdog.py", line 134 in _loop
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc481dfc6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 355 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/_base.py", line 451 in result
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/scheduler/hybrid_scheduler.py", line 69 in run
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/media_processor/pipeline/runner.py", line 131 in run
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/backend/services/director_service.py", line 137 in run_workflow
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 59 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 93 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc4825fd6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 355 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/queue.py", line 171 in get
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/anyio/_backends/_asyncio.py", line 991 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc755ffb6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 90 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc7967fc6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 90 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc7d6ffd6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 90 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc8177fe6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 90 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc857fff6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 90 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc8ccff96c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 90 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc8f57fa6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 90 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc9367fc6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 90 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc9767fc6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 90 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc9b6ffd6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 90 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cc9f77fe6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 90 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cca37fff6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 90 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007ccc157fe6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 90 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007ccc36ffd6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 90 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007ccd257fe6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 90 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007ccd89ee46c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/concurrent/futures/thread.py", line 90 in _worker
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1012 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007ccf4a7fc6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 359 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 655 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/tqdm/_monitor.py", line 60 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007ccf4bfff6c0 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 359 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 655 in wait
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/tqdm/_monitor.py", line 60 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1075 in _bootstrap_inner
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/threading.py", line 1032 in _bootstrap
+
+Thread 0x00007cd4ea5b4740 (most recent call first):
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/selectors.py", line 468 in select
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/asyncio/base_events.py", line 1961 in _run_once
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/asyncio/base_events.py", line 645 in run_forever
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/asyncio/base_events.py", line 678 in run_until_complete
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/asyncio/runners.py", line 118 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/asyncio/runners.py", line 195 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/uvicorn/server.py", line 75 in run
+  File "/data1/cache/mjlee/conda_envs/agent/lib/python3.12/site-packages/uvicorn/main.py", line 617 in run
+  File "/nfs/nas/home/mjlee/ShortReelsAgent/backend/main.py", line 57 in <module>

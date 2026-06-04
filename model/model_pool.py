@@ -315,6 +315,17 @@ class ModelPool(Generic[T]):
             return chosen
         return first  # 沒有「不在 avoid」的可借，只能用 first（保持借出）
 
+    def warmup_all(self) -> None:
+        """
+        對池內每個 instance 依序呼叫 ``warmup()``，在啟動單執行緒階段觸發其首呼叫 lazy import / 原生 dlopen。
+
+        刻意**不經借出佇列、不參與併發**：在「併發開始前」序列跑完，確保所有原生擴充都已 import，
+        執行期 worker thread 首呼叫便不再 dlopen，避免與其他執行緒撞動態連結器鎖造成死結
+        （見 :meth:`BaseModelManager.warmup`）。未 override ``warmup`` 的子類為 no-op，呼叫無副作用。
+        """
+        for instance in self._instances:
+            instance.warmup()
+
     @staticmethod
     def _default_free_scan(device_id: int) -> float:
         """真實掃描指定卡的 free VRAM（GB）。"""

@@ -230,7 +230,10 @@ class ModelPoolRegistry:
                 name = model_class.__name__
                 self._startup_tracker.emit_model_warmup(name, device, payload={"status": "loading"})
                 # 建立 pool 即觸發各槽位 Manager singleton 的 _initialize(載入權重)
-                self.get_pool(model_class)
+                pool = self.get_pool(model_class)
+                # 啟動單執行緒預熱各 instance 的首呼叫 lazy import / 原生 dlopen（多數模型 no-op；
+                # AudioEnv 等延遲載原生解碼後端者藉此避免執行期撞動態連結器鎖死結）
+                pool.warmup_all()
                 self._startup_tracker.emit_model_warmup(name, device, payload={"status": "ready"})
         else:
             print("[ModelPoolRegistry] 無 eager pool 模型(無 CUDA 或 VRAM 不足),pool 模型維持 lazy")
@@ -272,7 +275,8 @@ class ModelPoolRegistry:
         for name, loader in self._auxiliary_loaders():
             self._startup_tracker.emit_model_warmup(name, "cpu", payload={"status": "loading"})
             try:
-                loader()
+                # 建立 singleton（載入權重）後，單執行緒預熱首呼叫 lazy import（如 VAD→torchcodec）
+                loader().warmup()
                 self._startup_tracker.emit_model_warmup(name, "cpu", payload={"status": "ready"})
             except Exception as exc:
                 print(f"[ModelPoolRegistry] aux warmup {name} 失敗({exc});改為 lazy 載入")
@@ -297,7 +301,7 @@ class ModelPoolRegistry:
             self._startup_tracker.emit_model_warmup("SaliencyModelManager", saliency_label, payload={"status": "lazy_fallback"})
 
     @staticmethod
-    def _auxiliary_loaders() -> list[tuple[str, Callable[[], object]]]:
+    def _auxiliary_loaders() -> list[tuple[str, Callable[[], BaseModelManager]]]:
         """回傳 aux(CPU)模型的 (名稱, 載入函式);MediaPipe 已改走 pool，不在此列。"""
         from model.vad_model_manager import VadModelManager
         return [
