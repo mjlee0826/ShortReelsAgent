@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from backend.api.director import director_service
 from backend.auth.logto_jwt_verifier import verify_token
 from backend.services.async_job_runner import async_job_runner
-from backend.services.asset_repository import AssetRepository, AssetView
+from backend.services.asset_repository import AssetDetailView, AssetRepository, AssetView
 from backend.services.thumbnail_service import ThumbnailService
 
 router = APIRouter()
@@ -51,6 +51,26 @@ async def list_assets(project_name: str, user_id: str = Depends(verify_token)):
     try:
         # 縮圖產生可能稍重(cv2 / PIL),丟 thread 不卡 event loop
         return await asyncio.to_thread(asset_repository.list_assets, user_id, project_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.get("/projects/{project_name}/assets/{filename}", response_model=AssetDetailView)
+async def get_asset_detail(
+    project_name: str,
+    filename: str,
+    user_id: str = Depends(verify_token),
+):
+    """
+    取得單一素材的完整詳情(AssetView + 原始媒體 URL + Phase 1 完整感知 metadata)。
+
+    供前端詳情彈窗呈現未裁切全圖 / 完整影片與分區資訊;路徑穿越由 list_assets 的素材白名單
+    天然擋掉(查無此 filename → 404)。讀檔不卡 event loop,丟 thread 執行。
+    """
+    try:
+        return await asyncio.to_thread(
+            asset_repository.get_asset_detail, user_id, project_name, filename
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 

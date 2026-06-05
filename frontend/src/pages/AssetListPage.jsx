@@ -6,6 +6,7 @@ import useProjectStore from '../store/useProjectStore';
 import useProgressSocket from '../hooks/useProgressSocket';
 import AppHeader from '../components/AppHeader/AppHeader';
 import AssetGrid from '../components/AssetGrid/AssetGrid';
+import AssetDetailModal from '../components/AssetGrid/AssetDetailModal';
 import BulkActionBar from '../components/AssetGrid/BulkActionBar';
 import SelectionToolbar from '../components/AssetGrid/SelectionToolbar';
 import ProgressOverlay from '../components/AssetGrid/ProgressOverlay';
@@ -38,6 +39,8 @@ export default function AssetListPage() {
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   // 已完成（pipeline_finish）的素材集合,用來累計進度,避免重複事件灌爆計數
   const finishedRef = useRef(new Set());
+  // 詳情彈窗：null = 關閉；非 null = 開啟該檔詳情（非選取模式點卡片開啟）
+  const [detailFilename, setDetailFilename] = useState(null);
 
   const displayName =
     currentProject?.name === projectId ? currentProject.display_name : projectId;
@@ -147,11 +150,18 @@ export default function AssetListPage() {
   const clearSelection = useCallback(() => setSelected(new Set()), []);
 
   // 進入 / 離開選取模式；離開時一併清空選取
-  const enterSelection = useCallback(() => setSelectionMode(true), []);
+  const enterSelection = useCallback(() => {
+    setSelectionMode(true);
+    setDetailFilename(null); // 進選取模式即關閉詳情，避免兩模式狀態交疊
+  }, []);
   const exitSelection = useCallback(() => {
     setSelectionMode(false);
     clearSelection();
   }, [clearSelection]);
+
+  // ── 詳情彈窗 ─────────────────────────────────────────────────────────────────
+  const openDetail = useCallback((filename) => setDetailFilename(filename), []);
+  const closeDetail = useCallback(() => setDetailFilename(null), []);
 
   // ── 策略切換 ───────────────────────────────────────────────────────────────
   const handleToggleStrategy = useCallback(async (filename, strategy) => {
@@ -286,6 +296,17 @@ export default function AssetListPage() {
             selectionMode={selectionMode}
             onToggleSelect={toggleSelect}
             onToggleStrategy={handleToggleStrategy}
+            onOpenDetail={openDetail}
+          />
+        )}
+
+        {/* 素材詳情彈窗（非選取模式點卡片開啟）：呈現完整媒體 + Phase 1 資訊 */}
+        {detailFilename && (
+          <AssetDetailModal
+            projectName={projectId}
+            filename={detailFilename}
+            thumbnailUrl={assets.find((a) => a.filename === detailFilename)?.thumbnail_url}
+            onClose={closeDetail}
           />
         )}
       </main>

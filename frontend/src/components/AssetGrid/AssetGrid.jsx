@@ -15,6 +15,7 @@ export default function AssetGrid({
   selectionMode,
   onToggleSelect,
   onToggleStrategy,
+  onOpenDetail,
 }) {
   return (
     <div className="grid auto-rows-fr grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
@@ -31,6 +32,7 @@ export default function AssetGrid({
             selectionMode={selectionMode}
             onToggleSelect={onToggleSelect}
             onToggleStrategy={onToggleStrategy}
+            onOpenDetail={onOpenDetail}
           />
         );
       })}

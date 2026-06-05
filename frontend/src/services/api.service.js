@@ -166,6 +166,14 @@ class DirectorApiService {
     return response.data;
   }
 
+  // 取得單一素材的完整詳情（AssetView + 原始媒體 URL + Phase 1 完整感知 metadata），供詳情彈窗使用
+  async fetchAssetDetail(projectName, filename) {
+    const response = await apiClient.get(
+      `/api/projects/${projectName}/assets/${encodeURIComponent(filename)}`
+    );
+    return response.data;
+  }
+
   // 更新單一素材的 Simple/Complex 策略並標記 dirty，回傳更新後的素材檢視
   async setAssetStrategy(projectName, filename, strategy) {
     const response = await apiClient.patch(

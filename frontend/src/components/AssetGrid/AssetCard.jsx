@@ -16,7 +16,7 @@ const PLACEHOLDER_ICON_SIZE = 'text-3xl';
  * 不佔流排版；資訊區檔名與詳情各鎖單行（詳情恆渲染固定行高、空時保留空行）；策略列 mt-auto 釘底。
  * 任何狀態都渲染相同 DOM 槽位、只改「固定槽位的內容/顏色/脈動」，故各卡高度一致。
  *
- * 選取模式（selectionMode）才顯示左上勾選框並使整卡可點選；非選取模式整卡不掛 onClick。
+ * 選取模式（selectionMode）顯示左上勾選框、整卡點擊切換選取；非選取模式整卡點擊開啟詳情彈窗。
  * effectiveStatus 已由父層把 WebSocket 即時狀態覆蓋在持久化狀態之上；切換 / 選取於處理中禁用。
  *
  * @param {object} asset 素材資料
@@ -27,6 +27,7 @@ const PLACEHOLDER_ICON_SIZE = 'text-3xl';
  * @param {boolean} selectionMode 是否處於選取模式
  * @param {(filename:string)=>void} onToggleSelect 切換選取
  * @param {(filename:string, strategy:string)=>void} onToggleStrategy 切換策略
+ * @param {(filename:string)=>void} onOpenDetail 開啟詳情（非選取模式整卡點擊）
  */
 export default function AssetCard({
   asset,
@@ -37,6 +38,7 @@ export default function AssetCard({
   selectionMode,
   onToggleSelect,
   onToggleStrategy,
+  onOpenDetail,
 }) {
   const meta = resolveStatusMeta(effectiveStatus);
   const isVideo = asset.media_kind === 'video';
@@ -48,14 +50,20 @@ export default function AssetCard({
   });
   // 選取模式且未禁用時，整卡可點選（IG / Google 相簿式）
   const cardSelectable = selectionMode && !disabled;
+  // 非選取模式：整卡點擊開啟詳情（即使分析進行中亦可，詳情為唯讀）；選取模式維持切換選取
+  const handleCardClick = selectionMode
+    ? (cardSelectable ? () => onToggleSelect(asset.filename) : undefined)
+    : () => onOpenDetail?.(asset.filename);
+  // 游標手型：選取模式需可選才顯示；非選取模式恆可點開詳情
+  const showPointer = selectionMode ? cardSelectable : true;
 
   return (
     <div
-      onClick={cardSelectable ? () => onToggleSelect(asset.filename) : undefined}
+      onClick={handleCardClick}
       className={[
         'relative h-full flex flex-col bg-surface border rounded-2xl overflow-hidden transition-colors',
         selected ? 'border-accent' : 'border-border hover:border-border-strong',
-        cardSelectable ? 'cursor-pointer' : '',
+        showPointer ? 'cursor-pointer' : '',
       ].join(' ')}
     >
       {/* 縮圖區（固定 3:2，object-cover 正規化任意尺寸使各卡等高）；覆蓋元素皆 absolute 不佔高 */}
@@ -118,13 +126,14 @@ export default function AssetCard({
         {/* 詳情鎖單行固定行高並恆渲染（空時保留空行）；依狀態著色提升可讀 */}
         <p className={`text-[12px] font-medium truncate h-4 leading-4 ${detailTone(effectiveStatus)}`} title={detail || undefined}>{detail}</p>
 
-        {/* Simple / Complex segmented 切換器（mt-auto 釘底）*/}
-        <StrategyToggle
-          className="mt-auto"
-          value={asset.strategy}
-          disabled={disabled}
-          onChange={(value) => onToggleStrategy(asset.filename, value)}
-        />
+        {/* Simple / Complex segmented 切換器（mt-auto 釘底）；外層 stopPropagation 避免點切換器誤開詳情 */}
+        <div className="mt-auto" onClick={(e) => e.stopPropagation()}>
+          <StrategyToggle
+            value={asset.strategy}
+            disabled={disabled}
+            onChange={(value) => onToggleStrategy(asset.filename, value)}
+          />
+        </div>
       </div>
     </div>
   );

@@ -11,10 +11,15 @@ import json
 import os
 from enum import Enum
 from typing import Optional
+from urllib.parse import quote
 
 from pydantic import BaseModel
 
-from backend.services.asset_discovery import PHASE1_STATUS_FILENAME, collect_asset_files
+from backend.services.asset_discovery import (
+    PHASE1_METADATA_FILENAME,
+    PHASE1_STATUS_FILENAME,
+    collect_asset_files,
+)
 from backend.services.project_meta_store import project_meta_store
 from backend.services.thumbnail_service import ThumbnailService
 from config.app_config import ASSETS_DIR
@@ -28,6 +33,20 @@ META_KEY_ANALYZED_STRATEGIES = "analyzed_strategies"
 
 # 素材尚未被 Phase 1 分析過(全狀態檔內查無此檔)時的 UI 狀態
 ASSET_STATUS_UNPROCESSED = "unprocessed"
+
+# 後端對外位址預設值(與 thumbnail_service 同一套讀法):用來組 /static 原始媒體的完整 URL
+_DEFAULT_BACKEND_URL = "http://localhost:5174"
+
+# 副檔名 → MIME(供詳情前端決定 <img>/<video> 呈現與 HEIC 後備;集中於此避免 magic string)
+_EXT_TO_MIME = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".heic": "image/heic",
+    ".heif": "image/heif",
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+}
 
 
 class AssetStrategy(str, Enum):
@@ -53,13 +72,35 @@ class AssetView(BaseModel):
     modified_at: str = ""
 
 
+class AssetDetailView(BaseModel):
+    """單一素材的完整詳情檢視 (Value Object)。
+
+    在列表用的 ``AssetView`` 之上,補上「未裁切原始媒體 URL」與 Phase 1 完整感知 metadata,
+    供前端詳情彈窗呈現全圖 / 完整影片與分區資訊。``metadata`` 對 rejected / error /
+    unprocessed 素材為 None(這些素材本就沒有 success metadata,前端走狀態說明分支)。
+    """
+
+    asset: AssetView                          # 重用列表檢視(狀態 / 策略 / dirty / 縮圖 / 技術分)
+    media_url: Optional[str] = None           # /static 原始媒體完整 URL(未裁切全圖 / 完整影片)
+    media_mime: Optional[str] = None          # 例 image/jpeg、video/mp4、image/heic(前端據此決定呈現)
+    metadata: Optional[dict] = None           # phase1_assets_metadata.json 該檔的 metadata 區塊(原樣)
+    metadata_kind: Optional[str] = None       # "image" | "video"(metadata 結構辨識用)
+
+
 class AssetRepository:
     """讀寫素材檢視 / 策略 / dirty 的儲存庫;縮圖產生委派給注入的 ThumbnailService。"""
 
-    def __init__(self, assets_dir: str = ASSETS_DIR, thumbnail_service: Optional[ThumbnailService] = None):
-        """設定素材根目錄並注入縮圖服務(預設自建一個)。"""
+    def __init__(
+        self,
+        assets_dir: str = ASSETS_DIR,
+        thumbnail_service: Optional[ThumbnailService] = None,
+        backend_url: Optional[str] = None,
+    ):
+        """設定素材根目錄、注入縮圖服務(預設自建),並記錄後端對外位址供組原始媒體 URL。"""
         self._assets_dir = assets_dir
         self._thumbnails = thumbnail_service or ThumbnailService()
+        # 與 ThumbnailService 同一套讀法:優先參數 → 環境變數 BACKEND_URL → 預設 localhost
+        self._backend_url = backend_url or os.getenv("BACKEND_URL", _DEFAULT_BACKEND_URL)
 
     # ── 路徑與 JSON 讀寫 ─────────────────────────────────────────────────────
 
@@ -83,6 +124,21 @@ class AssetRepository:
             return {}
         with open(status_path, "r", encoding="utf-8") as f:
             return json.load(f)
+
+    @staticmethod
+    def _read_metadata_map(project_dir: str) -> dict:
+        """
+        讀取 Phase 1 success-only 完整 metadata 檔,轉成「檔名 → 該筆紀錄」對照。
+
+        檔內為 list(每筆含絕對路徑 ``file`` 與 ``metadata``);以 basename 當鍵與 ``AssetView.filename``
+        對齊(兩者同為 collect_asset_files 產出的標準化檔名)。不存在回空 dict(全部視為無 metadata)。
+        """
+        metadata_path = os.path.join(project_dir, PHASE1_METADATA_FILENAME)
+        if not os.path.exists(metadata_path):
+            return {}
+        with open(metadata_path, "r", encoding="utf-8") as f:
+            records = json.load(f)
+        return {os.path.basename(rec["file"]): rec for rec in records if rec.get("file")}
 
     # ── 對外操作 ─────────────────────────────────────────────────────────────
 
@@ -123,6 +179,40 @@ class AssetRepository:
                 modified_at=_iso_from_mtime(stat.st_mtime),
             ))
         return views
+
+    def get_asset_detail(self, user_id: str, project: str, filename: str) -> AssetDetailView:
+        """
+        取得單一素材的完整詳情:重用 ``list_assets`` 的 join 取得 ``AssetView``,再補上 /static
+        原始媒體 URL(未裁切全圖 / 完整影片)與 Phase 1 完整感知 metadata。
+
+        重用 list_assets 而非另寫一份讀取,使狀態 / 策略 / dirty / 縮圖的 join 規則維持單一來源
+        (DRY);素材量級小,多掃一次目錄成本可忽略。查無該素材拋 FileNotFoundError(端點轉 404)。
+        """
+        project_dir = self._project_dir(user_id, project)
+        # 沿用既有 join 取單檔檢視(與 set_strategy 結尾同手法);查無視為素材不存在
+        view = next(
+            (v for v in self.list_assets(user_id, project) if v.filename == filename),
+            None,
+        )
+        if view is None:
+            raise FileNotFoundError(f"找不到素材: {filename}")
+
+        # 只有 success 素材有完整 metadata;rejected / error / unprocessed 回 None,前端走狀態說明分支
+        record = self._read_metadata_map(project_dir).get(filename)
+        metadata = record.get("metadata") if record else None
+        metadata_kind = record.get("type") if record else None
+
+        return AssetDetailView(
+            asset=view,
+            media_url=self._build_media_url(user_id, project, filename),
+            media_mime=_EXT_TO_MIME.get(os.path.splitext(filename)[1].lower()),
+            metadata=metadata,
+            metadata_kind=metadata_kind,
+        )
+
+    def _build_media_url(self, user_id: str, project: str, filename: str) -> str:
+        """組單一素材的 /static 原始媒體完整 URL;檔名經 quote 處理中文 / 空白等特殊字元。"""
+        return f"{self._backend_url}/static/{user_id}/{project}/{quote(filename)}"
 
     def set_strategy(self, user_id: str, project: str, filename: str, strategy: str) -> AssetView:
         """
