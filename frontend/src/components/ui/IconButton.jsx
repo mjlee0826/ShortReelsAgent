@@ -9,6 +9,8 @@ const TONE_CLASS = {
   neutral: 'text-ink-muted hover:text-ink hover:bg-surface-2',
   danger: 'text-ink-faint hover:text-danger hover:bg-danger/10',
   accent: 'text-ink-muted hover:text-accent hover:bg-accent-soft',
+  // 疊在封面縮圖上的危險操作（如刪除）：半透明深底確保可讀，hover 轉實心危險色
+  'overlay-danger': 'text-white bg-black/45 hover:bg-danger backdrop-blur-sm',
 };
 
 export default function IconButton({ tone = 'neutral', className = '', children, ...rest }) {

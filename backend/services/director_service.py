@@ -7,15 +7,16 @@ from media_processor.pipeline import PipelineRunner, ProgressTracker
 from media_tools.media_standardizer import MediaStandardizer
 from template_engine.template_analyzer_facade import TemplateAnalyzerFacade
 from director_agent.director_facade import DirectorFacade
-from backend.services.asset_discovery import PHASE1_STATUS_FILENAME, collect_asset_files
+from backend.services.asset_discovery import (
+    PHASE1_METADATA_FILENAME,
+    PHASE1_STATUS_FILENAME,
+    collect_asset_files,
+)
 from backend.services.asset_repository import AssetRepository
 from backend.services.project_meta_store import project_meta_store
 
 # 計算素材數量時認定的媒體副檔名
 _MEDIA_EXTENSIONS = {'.mp4', '.mov', '.jpg', '.jpeg', '.png', '.heic', '.heif', '.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg'}
-
-# success-only 感知結果落地檔（供 Phase 4 使用，與全狀態的 PHASE1_STATUS_FILENAME 區分）
-_PHASE1_METADATA_FILENAME = "phase1_assets_metadata.json"
 
 
 class DirectorService:
@@ -118,7 +119,7 @@ class DirectorService:
         全量重跑直接覆寫；子集重分析則保留未重跑的舊條目、移除本次重跑者的舊條目、append 新成功者
         （以 file 的 basename 為鍵；重跑後變 rejected/error 者自然從 success 清單消失）。
         """
-        dump_path = os.path.join(target_dir, _PHASE1_METADATA_FILENAME)
+        dump_path = os.path.join(target_dir, PHASE1_METADATA_FILENAME)
         if merge and os.path.exists(dump_path):
             with open(dump_path, 'r', encoding='utf-8') as f:
                 existing = json.load(f)
@@ -190,7 +191,7 @@ class DirectorService:
             raise ValueError(f"找不到素材資料夾: {target_dir}")
         
         # --- 定義各階段的 JSON 儲存路徑 ---
-        phase1_dump_path = os.path.join(target_dir, "phase1_assets_metadata.json")
+        phase1_dump_path = os.path.join(target_dir, PHASE1_METADATA_FILENAME)
         phase2_dump_path = os.path.join(target_dir, "phase2_template_dna.json")
         phase3_dump_path = os.path.join(target_dir, "phase3_audio_dna.json") # 【新增】Phase 3 存檔路徑
         blueprint_dump_path = os.path.join(target_dir, "phase4_blueprint.json")

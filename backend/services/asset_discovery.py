@@ -19,6 +19,10 @@ SUPPORTED_MEDIA_EXTENSIONS: frozenset[str] = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
 # 與 success-only 的 phase1_assets_metadata.json(Phase 4 用)區分。
 PHASE1_STATUS_FILENAME = "phase1_asset_status.json"
 
+# Phase 1 success-only 完整感知結果落地檔(list,每筆含 file + metadata,metadata 內有 aesthetic_score)。
+# 供 Phase 4 取用,亦供專案總覽挑「美學最高素材」當封面;為避免 magic string 散落而集中於此。
+PHASE1_METADATA_FILENAME = "phase1_assets_metadata.json"
+
 # 標準化輸出檔名的標記片段(原始檔若已有此版本則被略過)
 _STANDARDIZED_MARKER = "_std"
 

@@ -81,51 +81,10 @@ export function deriveProjectStatus(project) {
   return STATUS_META[PROJECT_STATUS.DRAFT];
 }
 
-// --- 確定性漸層封面（純前端，無後端縮圖）---
+// --- 封面 ---
 
 /** 封面長寬比（具名常數，便於統一調整）。 */
 export const COVER_ASPECT = 'aspect-[16/10]';
-
-/** 漸層起訖角度。 */
-const GRADIENT_ANGLE_DEG = 135;
-
-/**
- * 年輕活潑的雙色漸層色盤（含品牌靛紫家族）。
- * 以 inline style 套用，避免 Tailwind 動態 class 在建置時被 purge。
- */
-const GRADIENT_PALETTE = [
-  ['#6d5efc', '#8b5cf6'], // 品牌靛紫 → 紫
-  ['#f472b6', '#fb7185'], // 粉 → 玫瑰
-  ['#22d3ee', '#3b82f6'], // 青 → 藍
-  ['#34d399', '#10b981'], // 翠綠
-  ['#fbbf24', '#f97316'], // 琥珀 → 橙
-  ['#a78bfa', '#6366f1'], // 薰衣草 → 靛
-  ['#f43f5e', '#ec4899'], // 紅 → 粉
-  ['#14b8a6', '#06b6d4'], // 藍綠 → 青
-];
-
-/**
- * 對字串做簡單字元碼累加雜湊（確定性；同字串永遠同結果）。
- * @param {string} text
- * @returns {number} 非負整數
- */
-function hashString(text) {
-  let hash = 0;
-  for (let i = 0; i < text.length; i += 1) {
-    hash = (hash + text.charCodeAt(i) * (i + 1)) % Number.MAX_SAFE_INTEGER;
-  }
-  return hash;
-}
-
-/**
- * 依專案 seed（建議用 project.name）產生固定的漸層 inline style。
- * @param {string} seed
- * @returns {{backgroundImage:string}}
- */
-export function coverGradientStyle(seed) {
-  const [from, to] = GRADIENT_PALETTE[hashString(seed || '') % GRADIENT_PALETTE.length];
-  return { backgroundImage: `linear-gradient(${GRADIENT_ANGLE_DEG}deg, ${from} 0%, ${to} 100%)` };
-}
 
 // --- 排序 ---
 

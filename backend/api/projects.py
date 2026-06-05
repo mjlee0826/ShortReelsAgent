@@ -15,7 +15,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from backend.auth.logto_jwt_verifier import verify_token
 from backend.services.ingestion_provider import cloud_ingestion_service
+from backend.services.project_cover_service import ProjectCoverService
 from backend.services.project_meta_store import project_meta_store
+from backend.services.thumbnail_service import ThumbnailService
 from config.app_config import ASSETS_DIR
 from ingestion_engine.models import (
     META_KEY_DRIVE_FOLDER_ID,
@@ -39,6 +41,10 @@ router = APIRouter()
 _background_tasks: set[asyncio.Task] = set()
 
 _ASSETS_BASE_PATH = ASSETS_DIR
+
+# 模組層級單例：縮圖服務與封面挑選服務（跨請求共享；縮圖 lazy 產生後快取）
+_thumbnail_service = ThumbnailService()
+_cover_service = ProjectCoverService(thumbnail_service=_thumbnail_service)
 
 # --- 允許的媒體副檔名（用於計算素材數量）---
 _MEDIA_EXTENSIONS = {'.mp4', '.mov', '.jpg', '.jpeg', '.png', '.heic', '.heif', '.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg'}
@@ -74,6 +80,8 @@ class ProjectMeta(BaseModel):
     sync_status: Optional[str] = None
     last_synced_at: Optional[str] = None
     last_sync_error: Optional[str] = None
+    # 專案總覽封面：美學最高素材的縮圖 URL（無已分析素材時為 None，前端改顯中性佔位）
+    cover_thumbnail_url: Optional[str] = None
 
 
 # --- 工具函式 ---
@@ -124,7 +132,13 @@ def _allocate_unique_name(user_root: str, base_name: str) -> str:
 
 @router.get("/projects", response_model=list[ProjectMeta])
 async def list_projects(user_id: str = Depends(verify_token)):
-    """列出目前登入使用者的所有專案；單一專案 meta 損毀不影響其餘專案的列出。"""
+    """列出目前登入使用者的所有專案；磁碟掃描與封面縮圖補產較重，丟 thread 不卡 event loop。"""
+    # 縮圖首產用到 cv2 / PIL 偏重（比照 assets.list_assets），整段同步磁碟工作 offload 到執行緒
+    return await asyncio.to_thread(_list_projects_sync, user_id)
+
+
+def _list_projects_sync(user_id: str) -> list[dict]:
+    """掃使用者根目錄組各專案 meta 並補上封面縮圖；單一專案 meta 損毀不影響其餘專案的列出。"""
     user_root = _user_dir(user_id)
     projects = []
     for name in sorted(os.listdir(user_root)):
@@ -145,6 +159,8 @@ async def list_projects(user_id: str = Depends(verify_token)):
                     "has_blueprint": os.path.exists(os.path.join(project_dir, "phase4_blueprint.json")),
                 }
                 project_meta_store.write(project_dir, meta)
+            # 補上封面：美學最高素材的縮圖 URL（無已分析素材 / 失敗則為 None，由前端顯中性佔位）
+            meta["cover_thumbnail_url"] = _cover_service.resolve_cover_url(user_id, name, project_dir)
             projects.append(meta)
         except Exception as exc:  # noqa: BLE001 - 單一專案的任何意外都不該讓整份列表 500
             print(f"[Projects Error] 略過無法讀取的專案 '{name}': {exc}")

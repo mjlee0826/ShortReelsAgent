@@ -2,24 +2,25 @@
 
 /*
  * 設計系統 Design Token（Tailwind v4 @theme）
- * 以語意化色票取代散落各檔的 gray-900 / blue-600 硬編碼，建立一致的深色「剪輯工作室」視覺。
+ * 以語意化色票取代散落各檔的 gray-900 / blue-600 硬編碼，建立一致的 IG 風中性炭灰深色介面。
  * 命名規則：canvas/surface/elevated 為由深到淺的表面層；ink 為文字層級；accent 為品牌強調色。
+ * 色系刻意中性（移除藍紫雜訊）並自純黑微微提亮，讓卡片與背景分層清楚、不顯沉重。
  */
 @theme {
-  /* 表面層（由最底頁面背景到浮起元素） */
-  --color-canvas: #0a0a0f;
-  --color-surface: #14141b;
-  --color-surface-2: #1c1c26;
-  --color-elevated: #23232f;
+  /* 表面層（由最底頁面背景到浮起元素）— 中性炭灰、微微提亮 */
+  --color-canvas: #121212;
+  --color-surface: #1c1c1f;
+  --color-surface-2: #26262a;
+  --color-elevated: #313137;
 
   /* 邊框 */
-  --color-border: #2a2a38;
-  --color-border-strong: #3a3a4d;
+  --color-border: #383840;
+  --color-border-strong: #4a4a52;
 
   /* 文字層級 */
-  --color-ink: #f4f4f7;
-  --color-ink-muted: #a2a2b8;
-  --color-ink-faint: #6c6c82;
+  --color-ink: #f5f5f7;
+  --color-ink-muted: #b3b3c0;
+  --color-ink-faint: #7a7a85;
 
   /* 品牌強調色（靛紫系） */
   --color-accent: #6d5efc;

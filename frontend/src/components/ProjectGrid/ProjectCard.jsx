@@ -1,16 +1,20 @@
 import React, { useState } from 'react';
-import { FaPlay, FaFilm, FaTrash, FaThLarge, FaPen, FaGoogleDrive, FaHdd } from 'react-icons/fa';
+import { FaPlay, FaFilm, FaTrash, FaThLarge, FaGoogleDrive, FaHdd } from 'react-icons/fa';
 import { Card, Badge, Button, IconButton } from '../ui';
-import { SOURCE_GDRIVE, COVER_ASPECT, deriveProjectStatus, coverGradientStyle } from './projectStatus';
+import { SOURCE_GDRIVE, COVER_ASPECT, deriveProjectStatus } from './projectStatus';
+
+// 刪除鈕圖示尺寸（具名常數，避免 magic number；較舊版放大以利點擊）
+const DELETE_ICON_SIZE = 16;
 
 /**
  * ProjectCard：媒體優先的專案卡片（IG 動態風）。
  *
- * 一致性設計（沿用 AssetCard 的嚴格等高技法）：所有狀態共用同一版型——固定比例漸層封面、
- * 右上唯一主狀態膠囊、左下素材數、標題 / meta / 標籤列皆單行恆渲染、操作列 mt-auto 釘底。
- * 狀態差異「只改固定槽位的內容/顏色」，絕不新增或移除整個區塊，故不論專案狀態為何，每張卡片高度一致。
+ * 一致性設計（沿用 AssetCard 的嚴格等高技法）：所有狀態共用同一版型——固定比例封面
+ * （美學最高素材縮圖，缺則中性佔位）、右上唯一主狀態膠囊（實心高對比）、左下素材數、
+ * 標題 / meta / 標籤列皆單行恆渲染、操作列 mt-auto 釘底。狀態差異「只改固定槽位的內容/顏色」，
+ * 絕不新增或移除整個區塊，故不論專案狀態為何，每張卡片高度一致。
  *
- * 互動：點卡片進編輯器、「管理」進素材頁、hover 顯示刪除（二次確認）。
+ * 互動：點卡片 / 播放鈕進編輯器、「管理素材」進素材頁、hover 顯示刪除（二次確認）。
  */
 export default function ProjectCard({ project, onOpen, onManage, onDelete }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -28,21 +32,37 @@ export default function ProjectCard({ project, onOpen, onManage, onDelete }) {
       onClick={() => onOpen(project)}
       className="group relative h-full flex flex-col overflow-hidden"
     >
-      {/* 封面：確定性漸層 + 置中播放鈕（影片感）+ 主狀態膠囊 + 素材數 */}
-      <div className={`relative w-full shrink-0 ${COVER_ASPECT}`} style={coverGradientStyle(project.name)}>
-        {/* 置中播放鈕，hover 放大 */}
-        <div className="absolute inset-0 flex items-center justify-center">
-          <span className="w-12 h-12 rounded-full bg-white/15 backdrop-blur-sm ring-1 ring-white/25 flex items-center justify-center text-white text-lg transition-transform group-hover:scale-110">
-            <FaPlay className="ml-0.5" />
-          </span>
-        </div>
+      {/* 封面：美學最高素材縮圖（缺則中性佔位）+ 置中播放鈕 + 主狀態膠囊 + 素材數 */}
+      <div className={`relative w-full shrink-0 overflow-hidden bg-surface-2 ${COVER_ASPECT}`}>
+        {project.cover_thumbnail_url ? (
+          <>
+            {/* 底層：美學最高素材縮圖（object-cover 正規化任意尺寸）*/}
+            <img
+              src={project.cover_thumbnail_url}
+              alt={project.display_name}
+              loading="lazy"
+              className="absolute inset-0 w-full h-full object-cover"
+            />
+            {/* 置中播放鈕，hover 放大（疊在縮圖上，傳達「播放 / 進編輯器」）*/}
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="w-12 h-12 rounded-full bg-white/15 backdrop-blur-sm ring-1 ring-white/25 flex items-center justify-center text-white text-lg transition-transform group-hover:scale-110">
+                <FaPlay className="ml-0.5" />
+              </span>
+            </div>
+          </>
+        ) : (
+          // 無已分析素材：乾淨中性佔位（置中影片圖示，比照 AssetCard）
+          <div className="absolute inset-0 flex items-center justify-center text-ink-faint/40 text-4xl">
+            <FaFilm />
+          </div>
+        )}
 
         {/* 底部暗化，讓左下素材數可讀 */}
         <div className="absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-black/40 to-transparent" />
 
-        {/* 右上：唯一主狀態膠囊（永遠存在，只變色/變字）*/}
+        {/* 右上：唯一主狀態膠囊（永遠存在，只變色/變字；實心高對比以疊在縮圖上仍清楚）*/}
         <div className="absolute top-2.5 right-2.5">
-          <Badge tone={status.tone}>
+          <Badge tone={status.tone} solid>
             {status.pulse && <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />}
             {status.label}
           </Badge>
@@ -74,8 +94,8 @@ export default function ProjectCard({ project, onOpen, onManage, onDelete }) {
               </button>
             </div>
           ) : (
-            <IconButton tone="danger" className="w-7 h-7" onClick={() => setConfirmDelete(true)} title="刪除專案">
-              <FaTrash size={11} />
+            <IconButton tone="overlay-danger" className="w-9 h-9" onClick={() => setConfirmDelete(true)} title="刪除專案">
+              <FaTrash size={DELETE_ICON_SIZE} />
             </IconButton>
           )}
         </div>
@@ -103,24 +123,16 @@ export default function ProjectCard({ project, onOpen, onManage, onDelete }) {
           {project.has_blueprint && <Badge tone="success">已有藍圖</Badge>}
         </div>
 
-        {/* 操作列（mt-auto 釘底；按鈕 stopPropagation 避免與卡片點擊衝突）*/}
-        <div className="mt-auto flex items-center gap-2 pt-1">
-          <Button
-            variant="primary"
-            size="sm"
-            fullWidth
-            leftIcon={<FaPen size={11} />}
-            onClick={(e) => { e.stopPropagation(); onOpen(project); }}
-          >
-            進入編輯器
-          </Button>
+        {/* 操作列（mt-auto 釘底；唯一操作為「管理素材」，進編輯器改由點卡片 / 播放鈕觸發）*/}
+        <div className="mt-auto pt-1">
           <Button
             variant="secondary"
             size="sm"
+            fullWidth
             leftIcon={<FaThLarge size={11} />}
             onClick={(e) => { e.stopPropagation(); onManage(project); }}
           >
-            管理
+            管理素材
           </Button>
         </div>
       </div>
