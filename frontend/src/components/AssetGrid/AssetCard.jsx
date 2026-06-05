@@ -21,9 +21,9 @@ const STRATEGY_OPTIONS = [STRATEGY_SIMPLE, STRATEGY_COMPLEX];
 /**
  * AssetCard：單張素材卡片（縮圖 + 狀態徽章 + Simple/Complex 切換 + 選取）。
  *
- * 卡片採固定結構並撐滿格高（h-full）；縮圖固定 4:3 並 object-cover 正規化任意尺寸素材，
- * 詳情區保留固定高度，切換器以 mt-auto 釘在底部。配合 AssetGrid 的 auto-rows-fr，
- * 確保所有卡片的 Simple/Complex 切換器在各種縮圖尺寸 / 文字長度下位置與外觀皆一致（修正需求 2）。
+ * 嚴格等高且精簡的設計：縮圖固定 3:2 並 object-cover 正規化任意尺寸素材；檔名與狀態詳情
+ * 各鎖單行（truncate + 固定行高、詳情恆渲染），使資訊區高度恆定 → 所有卡片高度一致且較矮。
+ * 切換器以 mt-auto 釘底，配合 AssetGrid 的 auto-rows-fr 兜底任何殘差。
  *
  * effectiveStatus 已由父層把 WebSocket 即時狀態覆蓋在持久化狀態之上；切換 / 選取於處理中禁用。
  */
@@ -66,8 +66,8 @@ export default function AssetCard({
         <div className="absolute top-2 right-2 z-10"><Badge tone="accent">待重跑</Badge></div>
       )}
 
-      {/* 縮圖區（固定 4:3）*/}
-      <div className="relative aspect-[4/3] bg-canvas flex items-center justify-center shrink-0">
+      {/* 縮圖區（固定 3:2：較 4:3 矮，object-cover 正規化任意尺寸素材使各卡等高）*/}
+      <div className="relative aspect-[3/2] bg-canvas flex items-center justify-center shrink-0">
         {asset.thumbnail_url ? (
           <img src={asset.thumbnail_url} alt={asset.filename} loading="lazy" className="w-full h-full object-cover" />
         ) : (
@@ -81,11 +81,11 @@ export default function AssetCard({
         <div className="absolute bottom-2 right-2"><Badge tone={status.tone}>{status.label}</Badge></div>
       </div>
 
-      {/* 資訊 + 策略切換：flex-1 撐高、切換器 mt-auto 釘底 */}
-      <div className="flex flex-col gap-2 p-3 flex-1">
+      {/* 資訊 + 策略切換：flex-1 撐高、切換器 mt-auto 釘底；內距精簡以降低卡片高度 */}
+      <div className="flex flex-col gap-1.5 p-2 flex-1">
         <p className="text-xs text-ink-muted truncate" title={asset.filename}>{asset.filename}</p>
-        {/* 詳情區保留固定高度，避免有無詳情造成版面位移 */}
-        <p className="text-[11px] text-ink-faint line-clamp-2 min-h-[2rem]" title={detail || undefined}>{detail}</p>
+        {/* 詳情鎖單行固定行高並恆渲染（空時保留空行），確保各卡資訊區等高；完整內容看 hover */}
+        <p className="text-[11px] text-ink-faint truncate h-4 leading-4" title={detail || undefined}>{detail}</p>
 
         {/* Simple / Complex 切換器（whitespace-nowrap 確保窄卡不換行）*/}
         <div className="mt-auto flex rounded-lg overflow-hidden border border-border text-[11px]">

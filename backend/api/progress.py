@@ -194,7 +194,10 @@ async def _stream_events(websocket: WebSocket, queue: asyncio.Queue) -> None:
             await websocket.send_text(msg)
     finally:
         receiver.cancel()
-        with contextlib.suppress(Exception):
+        # CancelledError 於 Python 3.8+ 繼承 BaseException,不被 suppress(Exception) 攔下;
+        # 須顯式納入,否則 job 正常結束(收到哨兵 return)後 cancel(receiver) 的 await 會把
+        # CancelledError 拋進 ASGI,uvicorn 記為 "Exception in ASGI application"。
+        with contextlib.suppress(asyncio.CancelledError, Exception):
             await receiver
 
 

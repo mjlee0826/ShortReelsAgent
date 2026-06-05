@@ -10,9 +10,11 @@ backend，避免 ingestion_engine 與 backend 互相 import 形成循環依賴�
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
+import tempfile
 import threading
 from typing import Callable, Optional
 
@@ -204,19 +206,22 @@ class CloudIngestionService:
             return None
 
     def _patch_meta(self, project_dir: str, fields: dict) -> None:
-        """讀取既有 project_meta.json，更新指定欄位後以 temp+rename 原子寫回；meta 不存在則略過。"""
+        """讀取既有 project_meta.json，更新指定欄位後以唯一 temp+rename 原子寫回；meta 不存在則略過。"""
         meta = self._read_meta(project_dir)
         if meta is None:
             return
         meta.update(fields)
         meta_path = os.path.join(project_dir, _META_FILENAME)
-        tmp_path = f"{meta_path}.tmp"
+        # 唯一 temp 檔:poller 與後端同進程寫同一檔,固定共用 .tmp 會被另一寫者截斷而換入損毀內容
+        fd, tmp_path = tempfile.mkstemp(dir=project_dir, prefix=f"{_META_FILENAME}.", suffix=".tmp")
         try:
-            with open(tmp_path, "w", encoding="utf-8") as f:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(meta, f, ensure_ascii=False, indent=2)
             os.replace(tmp_path, meta_path)
         except OSError:
-            # metadata 更新失敗不應中斷同步主流程
+            # metadata 更新失敗不應中斷同步主流程;清掉殘留 temp 再返回
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_path)
             return
 
     # ── 純函式工具 ────────────────────────────────────────────────────────────

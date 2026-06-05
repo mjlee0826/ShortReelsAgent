@@ -76,11 +76,6 @@ class AssetRepository:
         return project_meta_store.read(project_dir) or {}
 
     @staticmethod
-    def _write_meta(project_dir: str, meta: dict) -> None:
-        """原子寫回 project_meta.json(整份覆寫,保留呼叫端讀-改-寫的其餘欄位)。委派原子寫入。"""
-        project_meta_store.write(project_dir, meta)
-
-    @staticmethod
     def _read_status_map(project_dir: str) -> dict:
         """讀取 Phase 1 全狀態檔(鍵為檔名);不存在回空 dict(全部視為未處理)。"""
         status_path = os.path.join(project_dir, PHASE1_STATUS_FILENAME)
@@ -134,7 +129,8 @@ class AssetRepository:
         設定單一素材的策略並依「是否偏離上次分析所用策略」更新 dirty,回傳更新後的檢視。
 
         以 analyzed_strategies 為基準:策略改回上次分析值→清除 dirty;偏離→標記待重跑。
-        修正「Simple→Complex 後改回 Simple 仍殘留待重跑」的問題(讀-改-寫整份 meta,保留其餘欄位)。
+        經 ``project_meta_store.update`` 在 per-path 鎖內讀-改-寫,確保批量併發改策略不互相覆蓋
+        (杜絕 lost update),亦保留 meta 其餘欄位。
         """
         if strategy not in (AssetStrategy.SIMPLE.value, AssetStrategy.COMPLEX.value):
             raise ValueError(f"不支援的策略: {strategy}")
@@ -142,21 +138,23 @@ class AssetRepository:
         if not self._asset_exists(project_dir, filename):
             raise FileNotFoundError(f"找不到素材: {filename}")
 
-        meta = self._read_meta(project_dir)
-        meta.setdefault(META_KEY_ASSET_STRATEGIES, {})[filename] = strategy
-        # 基準為上次分析所用策略(未分析過視為 SIMPLE):回到基準即毋須重跑,偏離才標記待重跑
-        baseline = meta.get(META_KEY_ANALYZED_STRATEGIES, {}).get(
-            filename, AssetStrategy.SIMPLE.value
-        )
-        dirty = set(meta.get(META_KEY_DIRTY_ASSETS, []))
-        if strategy == baseline:
-            dirty.discard(filename)
-        else:
-            dirty.add(filename)
-        meta[META_KEY_DIRTY_ASSETS] = sorted(dirty)
-        self._write_meta(project_dir, meta)
+        def _mutate(meta: dict) -> None:
+            """就地更新該檔策略,並依「是否偏離上次分析基準」加 / 清 dirty。"""
+            meta.setdefault(META_KEY_ASSET_STRATEGIES, {})[filename] = strategy
+            # 基準為上次分析所用策略(未分析過視為 SIMPLE):回到基準即毋須重跑,偏離才標記待重跑
+            baseline = meta.get(META_KEY_ANALYZED_STRATEGIES, {}).get(
+                filename, AssetStrategy.SIMPLE.value
+            )
+            dirty = set(meta.get(META_KEY_DIRTY_ASSETS, []))
+            if strategy == baseline:
+                dirty.discard(filename)
+            else:
+                dirty.add(filename)
+            meta[META_KEY_DIRTY_ASSETS] = sorted(dirty)
 
-        # 回傳該檔最新檢視(策略已更新、dirty=True)
+        project_meta_store.update(project_dir, _mutate)
+
+        # 回傳該檔最新檢視(策略已更新、dirty 已依基準調整)
         return next(v for v in self.list_assets(user_id, project) if v.filename == filename)
 
     def select_pending(self, user_id: str, project: str) -> list[str]:
@@ -183,28 +181,28 @@ class AssetRepository:
 
         基準(analyzed_strategies)供 set_strategy 判斷回退:把策略改回上次分析所用值即不再 dirty。
         ``filenames`` 為 None 代表整個專案全部重分析(清空 dirty 並更新所有素材基準);否則只處理指定檔名。
+        經 ``project_meta_store.update`` 在鎖內讀-改-寫,避免與併發的改策略互相覆蓋。
         """
         project_dir = self._project_dir(user_id, project)
-        meta = self._read_meta(project_dir)
-        strategies = meta.get(META_KEY_ASSET_STRATEGIES, {})
-        analyzed = dict(meta.get(META_KEY_ANALYZED_STRATEGIES, {}))
-        dirty = set(meta.get(META_KEY_DIRTY_ASSETS, []))
-
-        # 本次完成分析的檔名:None 代表全部素材(連同清空整份 dirty)
+        # None 代表全部素材:磁碟掃描放在交易外(不需持鎖,亦避免拉長臨界區)
         if filenames is None:
             analyzed_targets = [os.path.basename(p) for p in collect_asset_files(project_dir)]
-            remaining: set[str] = set()
         else:
             analyzed_targets = filenames
-            remaining = dirty - set(filenames)
 
-        # 推進基準至當前策略(未設定者視為 SIMPLE),供下次 set_strategy 的回退判斷
-        for fname in analyzed_targets:
-            analyzed[fname] = strategies.get(fname, AssetStrategy.SIMPLE.value)
+        def _mutate(meta: dict) -> None:
+            """就地推進已分析基準,並清掉本次完成者的 dirty(None 代表清空整份 dirty)。"""
+            strategies = meta.get(META_KEY_ASSET_STRATEGIES, {})
+            analyzed = dict(meta.get(META_KEY_ANALYZED_STRATEGIES, {}))
+            dirty = set(meta.get(META_KEY_DIRTY_ASSETS, []))
+            remaining = set() if filenames is None else dirty - set(filenames)
+            # 推進基準至當前策略(未設定者視為 SIMPLE),供下次 set_strategy 的回退判斷
+            for fname in analyzed_targets:
+                analyzed[fname] = strategies.get(fname, AssetStrategy.SIMPLE.value)
+            meta[META_KEY_ANALYZED_STRATEGIES] = analyzed
+            meta[META_KEY_DIRTY_ASSETS] = sorted(remaining)
 
-        meta[META_KEY_ANALYZED_STRATEGIES] = analyzed
-        meta[META_KEY_DIRTY_ASSETS] = sorted(remaining)
-        self._write_meta(project_dir, meta)
+        project_meta_store.update(project_dir, _mutate)
 
     @staticmethod
     def _asset_exists(project_dir: str, filename: str) -> bool:
