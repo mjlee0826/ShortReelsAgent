@@ -1,53 +1,43 @@
 import React from 'react';
-import { FaCheckDouble, FaRegSquare, FaSync, FaPlay, FaEdit } from 'react-icons/fa';
+import { FaCheckSquare, FaSync, FaPlay, FaEdit } from 'react-icons/fa';
 import { Button } from '../ui';
 
 /**
- * BulkActionBar：頂部批量操作列。
+ * BulkActionBar：預設（非選取模式）工具列。
  *
- * 提供全選 / 清除、批量設策略、重新分析（選中 / 全部）、開始生成、前往編輯器。
- * 工作進行中（jobRunning）時禁用會觸發新工作的按鈕，避免重複送出。
+ * 左側「選取」進入選取模式；右側為主要動作：重新分析全部、前往編輯器、開始生成。
+ * 需先選取的批量操作改由選取模式的 SelectionToolbar 提供。工作進行中時禁用會觸發新工作的按鈕。
+ *
+ * @param {number} total 素材總數
+ * @param {boolean} jobRunning 是否工作進行中
+ * @param {()=>void} onEnterSelection 進入選取模式
+ * @param {()=>void} onReanalyzeAll 重新分析全部
+ * @param {()=>void} onGoEditor 前往編輯器
+ * @param {()=>void} onGenerate 開始生成
  */
 export default function BulkActionBar({
   total,
-  selectedCount,
   jobRunning,
-  onSelectAll,
-  onClearSelection,
-  onBulkStrategy,
-  onReanalyzeSelected,
+  onEnterSelection,
   onReanalyzeAll,
-  onGenerate,
   onGoEditor,
+  onGenerate,
 }) {
-  const hasSelection = selectedCount > 0;
+  const isEmpty = total === 0;
 
   return (
     <div className="flex flex-wrap items-center gap-2 mb-5">
-      <span className="text-xs text-ink-faint mr-1">已選 {selectedCount} / {total}</span>
-
-      <Button variant="secondary" size="sm" onClick={onSelectAll} disabled={jobRunning} leftIcon={<FaCheckDouble size={11} />}>全選</Button>
-      <Button variant="secondary" size="sm" onClick={onClearSelection} disabled={jobRunning || !hasSelection} leftIcon={<FaRegSquare size={11} />}>清除選取</Button>
-
-      {/* 批量設策略（套用到選中素材）*/}
-      <div className="flex items-center gap-1 pl-2 border-l border-border">
-        <Button variant="secondary" size="sm" onClick={() => onBulkStrategy('simple')} disabled={jobRunning || !hasSelection}>選中設 Simple</Button>
-        <Button variant="secondary" size="sm" onClick={() => onBulkStrategy('complex')} disabled={jobRunning || !hasSelection}>選中設 Complex</Button>
-      </div>
-
-      {/* 重新分析 */}
-      <div className="flex items-center gap-1 pl-2 border-l border-border">
-        <Button variant="secondary" size="sm" onClick={onReanalyzeSelected} disabled={jobRunning || !hasSelection} leftIcon={<FaSync size={11} />}>重新分析選中</Button>
-        <Button variant="secondary" size="sm" onClick={onReanalyzeAll} disabled={jobRunning || total === 0} leftIcon={<FaSync size={11} />}>重新分析全部</Button>
-      </div>
+      {/* 進入選取模式（空專案無可選 → 禁用）*/}
+      <Button variant="secondary" size="sm" onClick={onEnterSelection} disabled={jobRunning || isEmpty} leftIcon={<FaCheckSquare size={11} />}>選取</Button>
 
       {/* 右側主要動作 */}
       <div className="flex items-center gap-2 ml-auto">
+        <Button variant="secondary" size="sm" onClick={onReanalyzeAll} disabled={jobRunning || isEmpty} leftIcon={<FaSync size={11} />}>重新分析全部</Button>
         <Button variant="secondary" size="sm" onClick={onGoEditor} leftIcon={<FaEdit size={11} />}>前往編輯器</Button>
         <Button
           size="sm"
           onClick={onGenerate}
-          disabled={jobRunning || total === 0}
+          disabled={jobRunning || isEmpty}
           loading={jobRunning}
           leftIcon={!jobRunning ? <FaPlay size={11} /> : null}
         >

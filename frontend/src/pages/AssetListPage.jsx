@@ -7,6 +7,7 @@ import useProgressSocket from '../hooks/useProgressSocket';
 import AppHeader from '../components/AppHeader/AppHeader';
 import AssetGrid from '../components/AssetGrid/AssetGrid';
 import BulkActionBar from '../components/AssetGrid/BulkActionBar';
+import SelectionToolbar from '../components/AssetGrid/SelectionToolbar';
 import ProgressOverlay from '../components/AssetGrid/ProgressOverlay';
 import { IconButton, Spinner, EmptyState } from '../components/ui';
 
@@ -29,6 +30,8 @@ export default function AssetListPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
   const [selected, setSelected] = useState(new Set());
+  // 選取模式：開啟後卡片才顯示勾選框、整卡可點選（與 selected 為獨立關注點）
+  const [selectionMode, setSelectionMode] = useState(false);
   // WebSocket 即時狀態覆蓋層：filename → { status, stage }
   const [liveStatusMap, setLiveStatusMap] = useState({});
   const [jobRunning, setJobRunning] = useState(false);
@@ -107,6 +110,9 @@ export default function AssetListPage() {
   const startJob = useCallback(async (jobPromise, involvedFilenames) => {
     setErrorMsg('');
     setJobRunning(true);
+    // 開工即清空選取並退出選取模式（處理中不應再停留在選取狀態）
+    setSelected(new Set());
+    setSelectionMode(false);
     finishedRef.current = new Set();
     setProgress({ done: 0, total: involvedFilenames.length });
     const initialLive = {};
@@ -139,6 +145,13 @@ export default function AssetListPage() {
   }, [assets]);
 
   const clearSelection = useCallback(() => setSelected(new Set()), []);
+
+  // 進入 / 離開選取模式；離開時一併清空選取
+  const enterSelection = useCallback(() => setSelectionMode(true), []);
+  const exitSelection = useCallback(() => {
+    setSelectionMode(false);
+    clearSelection();
+  }, [clearSelection]);
 
   // ── 策略切換 ───────────────────────────────────────────────────────────────
   const handleToggleStrategy = useCallback(async (filename, strategy) => {
@@ -226,19 +239,28 @@ export default function AssetListPage() {
         {/* 進度條（工作進行中才顯示）*/}
         <ProgressOverlay visible={jobRunning} done={progress.done} total={progress.total} />
 
-        {/* 批量操作列 */}
-        <BulkActionBar
-          total={assets.length}
-          selectedCount={selected.size}
-          jobRunning={jobRunning}
-          onSelectAll={selectAll}
-          onClearSelection={clearSelection}
-          onBulkStrategy={handleBulkStrategy}
-          onReanalyzeSelected={handleReanalyzeSelected}
-          onReanalyzeAll={handleReanalyzeAll}
-          onGenerate={handleGenerate}
-          onGoEditor={goEditor}
-        />
+        {/* 工具列：選取模式顯示情境列，否則顯示預設列（同位置、等高，切換不跳動）*/}
+        {selectionMode ? (
+          <SelectionToolbar
+            total={assets.length}
+            selectedCount={selected.size}
+            jobRunning={jobRunning}
+            onExitSelection={exitSelection}
+            onSelectAll={selectAll}
+            onClearSelection={clearSelection}
+            onBulkStrategy={handleBulkStrategy}
+            onReanalyzeSelected={handleReanalyzeSelected}
+          />
+        ) : (
+          <BulkActionBar
+            total={assets.length}
+            jobRunning={jobRunning}
+            onEnterSelection={enterSelection}
+            onReanalyzeAll={handleReanalyzeAll}
+            onGoEditor={goEditor}
+            onGenerate={handleGenerate}
+          />
+        )}
 
         {/* 載入中 */}
         {isLoading && assets.length === 0 && (
@@ -261,6 +283,7 @@ export default function AssetListPage() {
             selected={selected}
             liveStatusMap={liveStatusMap}
             jobRunning={jobRunning}
+            selectionMode={selectionMode}
             onToggleSelect={toggleSelect}
             onToggleStrategy={handleToggleStrategy}
           />

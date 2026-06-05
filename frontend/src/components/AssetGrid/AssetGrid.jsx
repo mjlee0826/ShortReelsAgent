@@ -12,6 +12,7 @@ export default function AssetGrid({
   selected,
   liveStatusMap,
   jobRunning,
+  selectionMode,
   onToggleSelect,
   onToggleStrategy,
 }) {
@@ -27,6 +28,7 @@ export default function AssetGrid({
             effectiveStatus={live?.status || asset.status}
             liveStage={live?.stage || null}
             disabled={jobRunning}
+            selectionMode={selectionMode}
             onToggleSelect={onToggleSelect}
             onToggleStrategy={onToggleStrategy}
           />
