@@ -4,8 +4,8 @@ AssetContext:單一 asset 流經 Pipeline 時的可變狀態容器 (Value Object
 設計重點
 --------
 - **dataclass**:符合 CLAUDE.md「資料結構用 dataclass」要求,欄位皆有型別。
-- **欄位全帶預設值**:Week 2a 只需 ``result`` 一個產出欄位;Week 2b/2c 拆 Stage 後,
-  各 Stage 會把中間結果寫進 ``scratch``,新增欄位不需大改既有程式(plan 風險表「欄位設計遺漏」緩解)。
+- **欄位全帶預設值**:細粒度 Stage 把中間結果寫進 ``scratch``,
+  新增欄位不需大改既有程式。
 - **index 保序**:HybridScheduler 平行完成順序不定,``index`` 記錄輸入順序,
   讓最終 ``phase1_assets_metadata.json`` 與舊版序列輸出逐欄一致。
 """
@@ -66,8 +66,8 @@ class AssetContext:
     """
     單一 asset 的處理上下文,在各 Stage 間傳遞並就地累積結果。
 
-    Week 2a 的 LegacyStage 直接把整份 ``process()`` 輸出寫入 ``result``;
-    Week 2b/2c 拆 Stage 後,細粒度 Stage 改寫 ``scratch`` 的中間欄位,最後由 AssemblyStage 組裝成 ``result``。
+    LegacyStage 直接把整份 ``process()`` 輸出寫入 ``result``;
+    細粒度 Stage 則改寫 ``scratch`` 的中間欄位,最後由 AssemblyStage 組裝成 ``result``。
     """
 
     # ── 輸入(建構時給定)──────────────────────────────────────────────────
@@ -77,9 +77,9 @@ class AssetContext:
     index: int                  # 輸入順序索引,保證輸出排序穩定
     video_strategy: VideoStrategy = VideoStrategy.SIMPLE
     image_strategy: ImageStrategy = ImageStrategy.SIMPLE
-    # Week 2a 恆為 0(LegacyStage 用 device-0 singleton);Week 3b 才依 Pool 借出實際裝置
+    # GPU stage 使用的裝置 id;預設 device-0,啟用多卡 Pool 時依借出的實際裝置覆寫
     device_id: int = 0
-    # Week 3b:driver 注入本次 run 的 ProgressTracker,讓 GPU stage 的 borrow 即時 VRAM 等待
+    # driver 注入本次 run 的 ProgressTracker,讓 GPU stage 的 borrow 即時 VRAM 等待
     # 能發出帶 asset_id 的 RESOURCE_WAIT / RESOURCE_ACQUIRED 事件(無 tracker 時為 None,事件略過)
     tracker: Optional["ProgressTracker"] = None
 
@@ -87,9 +87,9 @@ class AssetContext:
     status: str = STATUS_PENDING
     result: Optional[dict] = None   # 與 ProcessorResult.to_dict() 相容的最終 metadata
     error: Optional[str] = None     # status==error 時的錯誤訊息
-    # 拆 Stage 後各 Stage 的中間產物暫存區(Week 2a 暫不使用,預留擴充)
+    # 各 Stage 的中間產物暫存區(細粒度 Stage 間傳遞用)
     scratch: dict[str, Any] = field(default_factory=dict)
-    # 本 asset 處理期間產生、結束時需刪除的暫存檔絕對路徑(Week 2c:影片 audio wav / timecode mp4)。
+    # 本 asset 處理期間產生、結束時需刪除的暫存檔絕對路徑(例:影片 audio wav / timecode mp4)。
     # 建檔 Stage 以 append 登記(GIL 下 list.append 為原子操作,平行 Stage 併發登記安全);
     # Pipeline.execute 在 finally 統一清除,success / rejected / error 三條路徑都會清(取代原 process() 的 finally)。
     temp_paths: list[str] = field(default_factory=list)

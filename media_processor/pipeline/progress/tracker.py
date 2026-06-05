@@ -19,7 +19,7 @@ class ProgressTracker:
     執行緒安全：訂閱 / 取消訂閱與廣播全程持有 ``_lock``；
     廣播時對每個 Observer ``try/except``，任一失敗都不影響其他 Observer 與主流水線。
 
-    用法（Week 2a 之後 Pipeline 內部）::
+    用法（Pipeline 內部）::
 
         tracker = ProgressTracker(job_id="abc-123")
         tracker.subscribe(PrintProgressObserver())
@@ -150,7 +150,7 @@ class ProgressTracker:
             payload=payload or {},
         ))
 
-    # ── Week 3b：啟動期 warm up 與借出 VRAM 等待事件 ──────────────────────────
+    # ── 啟動期 warm up 與借出 VRAM 等待事件 ───────────────────────────────────
     def emit_model_warmup(
         self,
         model_name: str,

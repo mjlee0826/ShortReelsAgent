@@ -1,8 +1,8 @@
 """
-GpuCapacityManager：啟動時掃描各 GPU free VRAM，規劃模型放置 + 每卡 BudgetGate 預算 (Week 3b)。
+GpuCapacityManager：啟動時掃描各 GPU free VRAM，規劃模型放置 + 每卡 BudgetGate 預算。
 
-職責 (plan §5.3)
-----------------
+職責
+----
 - **掃描** —— 用 ``torch.cuda.mem_get_info`` 取每張卡的 free / total VRAM（掃描函式可注入假值供測試）。
 - **規劃放置** —— 依「eager 優先序 + check-before-load」決定每個模型放哪些 ``(device, slot)``：
   Qwen（主瓶頸）優先且盡量鋪滿可放下的每張卡（多卡）；其餘小模型用剩餘 VRAM 挑最寬鬆的卡放單份；
@@ -164,7 +164,7 @@ class GpuCapacityManager:
         return [self._fallback_slot(current)]
 
     def get_pool_size(self, model_class: type) -> int:
-        """回傳指定模型規劃的槽位數（roadmap §8 對 ModelPoolRegistry 的介面）。"""
+        """回傳指定模型規劃的槽位數（供 ModelPoolRegistry 使用）。"""
         return len(self.plan_slots(model_class))
 
     def transient_gb(self, model_class: type) -> float:
@@ -203,7 +203,7 @@ class GpuCapacityManager:
         print(f"[GpuCapacityManager] 已套用 per-device BudgetGate；{self.describe()}")
 
     def describe(self) -> str:
-        """回傳規劃摘要字串（供啟動日誌；對應驗收條件「Qwen 只放某些卡」可肉眼確認）。"""
+        """回傳規劃摘要字串（供啟動日誌，可肉眼確認 Qwen 放在哪些卡）。"""
         current = self.plan()
         if not current.gpu_ids:
             return "GpuCapacityManager(no CUDA)"
@@ -425,7 +425,7 @@ class GpuCapacityManager:
 
         - Qwen：``multi_card=True``、``max_slots=0``（= 用全域 QWEN_MAX_SLOTS_PER_GPU，同卡可塞多份）。
         - 其餘小模型：``multi_card=False``（單卡 best-fit，集中到 small_host）。
-        - **Saliency 不在此列**（Option 3）：U²-Net 已改為純 CPU（見 model.saliency_model_manager），
+        - **Saliency 不在此列**：U²-Net 為純 CPU（見 model.saliency_model_manager），
           由 model_pool_registry 的獨立 CPU pool 管理、在 _warm_up_auxiliary 預熱，不佔任何 GPU 預算。
         lazy import 各 Manager，避免「import 本模組」就把 transformers/pyiqa/panns 一併拉進來。
         """

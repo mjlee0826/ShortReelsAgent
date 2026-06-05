@@ -1,12 +1,12 @@
 """
 MusiqModelManager：MUSIQ 技術畫質評分器（手震 / 噪點 / 失焦偵測）。
 
-Week 1 / Week 3a 變動
----------------------
-Week 1 新增 :meth:`score_batch`(多張一次 forward),單張 :meth:`get_technical_score` 維持不變。
-Week 3a 由 ``BatchCollector`` 接入,並把批次前處理從「center-crop 成正方形」改為
-「每張走與單張完全相同的 :meth:`_preprocess_single` 保比例縮放 + 對批內最大 H/W zero-padding」再 stack
-—— 內容區與單張逐像素一致,差異僅來自 padding 區,最大化與單張分數的一致性。
+批次處理
+--------
+:meth:`score_batch` 多張一次 forward，:meth:`get_technical_score` 處理單張。
+批次由 ``BatchCollector`` 接入，前處理讓每張走與單張完全相同的 :meth:`_preprocess_single`
+保比例縮放 + 對批內最大 H/W zero-padding 再 stack
+—— 內容區與單張逐像素一致，差異僅來自 padding 區，最大化與單張分數的一致性。
 
 設計模式
 --------
@@ -39,7 +39,7 @@ from config.model_config import (
 class MusiqModelManager(BaseModelManager):
     """技術畫質評估大腦 (MUSIQ)，精準辨別手震廢片與唯美景深。"""
 
-    # Week 3b：單次 forward 暫態峰值 → BudgetGate 記帳（INFERENCE_PRIORITY 維持預設 0）
+    # 單次 forward 暫態峰值 → BudgetGate 記帳（INFERENCE_PRIORITY 維持預設 0）
     INFERENCE_VRAM_COST_GB = MUSIQ_TRANSIENT_VRAM_GB
 
     def _initialize(self, device_id: int = 0):

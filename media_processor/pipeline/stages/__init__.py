@@ -1,9 +1,9 @@
 """
 media_processor.pipeline.stages 套件:具體 Stage 實作。
 
-Week 2a:Legacy 包裝 Stage(整段 process() 包成單一 Stage)。
-Week 2b:圖片細粒度 Stage(Decode / TechScore / Reject / 平行群 / Semantic / Assembly)
-        + ``ImageWork`` 中間狀態容器。Week 2c 將比照新增影片細粒度 Stage。
+- Legacy 包裝 Stage(整段 process() 包成單一 Stage)。
+- 圖片細粒度 Stage(Decode / TechScore / Reject / 平行群 / Semantic / Assembly)
+  + ``ImageWork`` 中間狀態容器。
 """
 from media_processor.pipeline.stages.aes_score_stage import AesScoreStage
 from media_processor.pipeline.stages.assembly_image_stage import AssemblyImageStage
@@ -21,14 +21,14 @@ from media_processor.pipeline.stages.semantic_image_stage import SemanticImageSt
 from media_processor.pipeline.stages.tech_score_stage import TechScoreStage
 
 __all__ = [
-    # Week 2a Legacy 包裝
+    # Legacy 包裝
     "LegacyProcessStage",
     "LegacyImagePipelineStage",
     "LegacyVideoPipelineStage",
-    # Week 2b 中間狀態容器
+    # 中間狀態容器
     "ImageWork",
     "IMAGE_WORK_KEY",
-    # Week 2b 圖片細粒度 Stage
+    # 圖片細粒度 Stage
     "DecodeImageStage",
     "TechScoreStage",
     "RejectFilterStage",

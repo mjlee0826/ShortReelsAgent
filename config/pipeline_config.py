@@ -2,10 +2,8 @@
 Pipeline 排程層常數集中管理 (Configuration Object Pattern)。
 
 media_processor/pipeline/ 底下所有模組從此處 import 併發度與 timeout 設定,
-避免 magic number 散落各檔。數值先給 plan §10 的預設值,壓測後可依
+避免 magic number 散落各檔。數值為預設值,壓測後可依
 nvidia-smi 與 CPU 利用率調整;併發度可由環境變數覆寫,方便實機調校與 rollback。
-
-設計來源:integrated_acceleration_plan.md §10「Worker Pool 大小建議」。
 """
 import os
 
@@ -61,43 +59,43 @@ API_POOL_MAX_WORKERS = 16
 
 # ── Stage 提交逾時 ────────────────────────────────────────────────────────────
 # 將 Stage 提交到 ResourceExecutor 後等待結果的最長秒數;None 表示無限等待。
-# Week 2a 單 Stage 群組走 inline 不受此值影響,保留給 Week 2b/2c 多 Stage 群組。
+# 單 Stage 群組走 inline 不受此值影響,保留給多 Stage 群組。
 STAGE_SUBMIT_TIMEOUT_SEC: float | None = None
 
 # ── 模型載入策略 ──────────────────────────────────────────────────────────────
-# Eager Warm Up 開關。Week 3b 起預設 True:啟動時依 GpuCapacityManager 的優先序 + check-before-load
+# Eager Warm Up 開關。預設 True:啟動時依 GpuCapacityManager 的優先序 + check-before-load
 # 預載熱門模型(Qwen 一定常駐、VRAM 不足的自動降級 lazy),讓第一個 asset 不再卡 20–60s 等載入
-# (plan §5.2 對齊 vLLM/Triton 慣例)。開發 / 單卡迭代想啟動快可設 EAGER_MODELS=false 關閉。
+# (對齊 vLLM/Triton 慣例)。開發 / 單卡迭代想啟動快可設 EAGER_MODELS=false 關閉。
 EAGER_MODELS_DEFAULT = True
 EAGER_MODELS = _read_bool_env("EAGER_MODELS", EAGER_MODELS_DEFAULT)
 
-# ── 多 GPU ModelPool 借出開關 (Week 3b) ────────────────────────────────────────
+# ── 多 GPU ModelPool 借出開關 ────────────────────────────────────────
 # True(預設):semantic stage 與 GPU batch_fn 走 ModelPoolRegistry.instance().get_pool().borrow(),
 #   把推論分散到 capacity 規劃的多張卡(Qwen 多卡、其餘最寬鬆卡),並享 borrow 即時 VRAM 重檢。
-# False:緊急 rollback 回 Week 3a 行為 —— 直接用 device-0 singleton(不經 pool / 不重檢),
+# False:緊急 rollback —— 直接用 device-0 singleton(不經 pool / 不重檢),
 #   仍受 BudgetGate(L2)保護。供逐欄一致 A/B 與多 GPU 出問題時快速退回。
 GPU_POOL_ENABLED = _read_bool_env("GPU_POOL_ENABLED", True)
 
-# ── 圖片 Pipeline 拆 Stage 切換 (Week 2b) ──────────────────────────────────────
-# False(預設):走 Week 2b 新拆的細粒度 Stage 編排(Decode → Tech → Reject → 平行群 → Assembly)。
-# True：回退 Week 2a 的單一 LegacyImagePipelineStage,供 A/B 逐欄一致回歸與緊急 rollback。
-# 人類同組素材各跑一次 true / false,diff phase1_assets_metadata.json 即完成驗收(roadmap §13)。
+# ── 圖片 Pipeline 拆 Stage 切換 ──────────────────────────────────────
+# False(預設):走細粒度 Stage 編排(Decode → Tech → Reject → 平行群 → Assembly)。
+# True：回退單一 LegacyImagePipelineStage,供 A/B 逐欄一致回歸與緊急 rollback。
+# 同組素材各跑一次 true / false,diff phase1_assets_metadata.json 即完成驗收。
 USE_LEGACY_IMAGE_PIPELINE_DEFAULT = False
 USE_LEGACY_IMAGE_PIPELINE = _read_bool_env(
     "USE_LEGACY_IMAGE_PIPELINE", USE_LEGACY_IMAGE_PIPELINE_DEFAULT
 )
 
-# ── 影片 Pipeline 拆 Stage 切換 (Week 2c) ──────────────────────────────────────
-# False(預設):走 Week 2c 新拆的細粒度 Stage 依賴圖(DAG):Decode → Tech → Reject → 大平行群 → Assembly
+# ── 影片 Pipeline 拆 Stage 切換 ──────────────────────────────────────
+# False(預設):走細粒度 Stage 依賴圖(DAG):Decode → Tech → Reject → 大平行群 → Assembly
 #   (Simple);Decode → (Timecode‖音訊‖場景‖視覺特徵) → Gemini → EventBbox → Assembly(Complex)。
-# True：回退 Week 2a 的單一 LegacyVideoPipelineStage,供 A/B 逐欄一致回歸與緊急 rollback。
-# 人類同組影片各跑一次 true / false,diff phase1_assets_metadata.json 即完成驗收(roadmap §13)。
+# True：回退單一 LegacyVideoPipelineStage,供 A/B 逐欄一致回歸與緊急 rollback。
+# 同組影片各跑一次 true / false,diff phase1_assets_metadata.json 即完成驗收。
 USE_LEGACY_VIDEO_PIPELINE_DEFAULT = False
 USE_LEGACY_VIDEO_PIPELINE = _read_bool_env(
     "USE_LEGACY_VIDEO_PIPELINE", USE_LEGACY_VIDEO_PIPELINE_DEFAULT
 )
 
-# ── Dynamic Batching 逐模型開關 (Week 3a) ──────────────────────────────────────
+# ── Dynamic Batching 逐模型開關 ──────────────────────────────────────
 # 控制各 Stage 是否走 BatchCollector 合批;False 時該 Stage 回退原單張呼叫(對 driver 透明)。
 # 與 USE_LEGACY_* 同屬操作開關,供逐欄一致 A/B 與緊急 rollback:
 #   - LAION 因 CLIP 固定 resize 224²,單張/批次完全一致,預設安全可開。
@@ -114,7 +112,7 @@ AUDIO_ENV_BATCH_ENABLED = _read_bool_env("AUDIO_ENV_BATCH_ENABLED", True)
 # 超過 MAX_ASSETS_PARALLEL 個 instance 不會帶來額外並行收益，故以此為上限避免浪費記憶體。
 MEDIAPIPE_POOL_SIZE: int = MAX_ASSETS_PARALLEL
 
-# ── Saliency Pool (Option 3：U²-Net 移出 GPU、改純 CPU) ─────────────────────────
+# ── Saliency Pool (U²-Net 移出 GPU、改純 CPU) ─────────────────────────
 # saliency 已從 GpuCapacityManager 移除、改由 model_pool_registry 的獨立 CPU pool 管理併發。
 # 與 MediaPipe pool 不同：這裡每個 instance 是一份**獨立**的 u2net onnxruntime CPU session
 # （各 ~170MB RAM + 自己的 thread pool），故**不**直接取 MAX_ASSETS_PARALLEL，預設給較保守的 4：
@@ -129,7 +127,7 @@ SALIENCY_POOL_SIZE: int = _read_int_env("SALIENCY_POOL_SIZE", 4)
 # 故預設保守給 4（覆蓋常見並行影片數）；批量更大時用 env VAD_POOL_SIZE 調高。
 VAD_POOL_SIZE: int = _read_int_env("VAD_POOL_SIZE", 4)
 
-# ── 卡住偵測 Watchdog (Week 3b 觀測性) ─────────────────────────────────────────
+# ── 卡住偵測 Watchdog (觀測性) ─────────────────────────────────────────
 # 背景 daemon 每隔 heartbeat 秒印出「目前進行中的 stage + 已執行秒數」，超過 stall_warn 秒標 ⚠。
 # 只在「有進行中 stage」時才印（idle 不洗版）；processor 疑似卡住時用來看卡在哪個 stage、
 # 是否在等 VRAM（borrow 的 RESOURCE_WAIT）。純觀測、不改流水線；要關閉設 WATCHDOG_ENABLED=false。

@@ -1,13 +1,14 @@
 """
 media_processor.pipeline 套件公開 API。
 
-Week 1:Observer Pattern 進度介面(``progress`` 模組)。
-Week 2a:Pipeline 框架核心 ── Context / Stage / Group / Pipeline / Builder / Scheduler /
-         Executor & ModelPool Registry / Runner(Facade)。
+匯出兩組元件:
+- Observer Pattern 進度介面(``progress`` 模組)。
+- Pipeline 框架核心 ── Context / Stage / Pipeline / Builder / Scheduler /
+  Executor & ModelPool Registry / Runner(Facade)。
 
-對外建議只用 ``PipelineRunner`` 一個入口;其餘類別供 Week 2b/2c 拆 Stage 時組裝使用。
+對外建議只用 ``PipelineRunner`` 一個入口;其餘類別供組裝細粒度 Stage 時使用。
 """
-# ── Week 1:進度觀測 ─────────────────────────────────────────────────────────
+# ── 進度觀測 ───────────────────────────────────────────────────────────────
 from media_processor.pipeline.progress import (
     PrintProgressObserver,
     ProgressEvent,
@@ -16,7 +17,7 @@ from media_processor.pipeline.progress import (
     ProgressTracker,
 )
 
-# ── Week 2a:框架核心 ───────────────────────────────────────────────────────
+# ── 框架核心 ───────────────────────────────────────────────────────────────
 from media_processor.pipeline.builder import PipelineBuilder
 from media_processor.pipeline.context import (
     AssetContext,
@@ -40,13 +41,13 @@ from media_processor.pipeline.stage import (
 )
 
 __all__ = [
-    # Week 1 progress
+    # progress
     "PrintProgressObserver",
     "ProgressEvent",
     "ProgressEventType",
     "ProgressObserver",
     "ProgressTracker",
-    # Week 2a framework
+    # framework
     "PipelineRunner",
     "PipelineBuilder",
     "Pipeline",

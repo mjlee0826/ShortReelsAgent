@@ -1,10 +1,10 @@
 """
 LaionModelManager：LAION Aesthetic Predictor + CLIP 美學評分器。
 
-Week 1 變動
------------
-新增 :meth:`score_batch` 一次處理多張，由 ``CLIPProcessor`` 直接吃 ``list[PIL.Image]``。
-單張介面 :meth:`get_aesthetic_score` 維持不變。
+批次處理
+--------
+:meth:`score_batch` 一次處理多張，由 ``CLIPProcessor`` 直接吃 ``list[PIL.Image]``；
+單張介面為 :meth:`get_aesthetic_score`。
 
 設計模式
 --------
@@ -68,7 +68,7 @@ class LAIONAestheticMLP(nn.Module):
 class LaionModelManager(BaseModelManager):
     """美學打分大腦 (LAION Aesthetic Predictor + CLIP)，評估畫面美感與構圖。"""
 
-    # Week 3b：CLIP + MLP 單次 forward 暫態峰值 → BudgetGate 記帳（INFERENCE_PRIORITY 維持預設 0）
+    # CLIP + MLP 單次 forward 暫態峰值 → BudgetGate 記帳（INFERENCE_PRIORITY 維持預設 0）
     INFERENCE_VRAM_COST_GB = LAION_TRANSIENT_VRAM_GB
 
     def _initialize(self, device_id: int = 0):

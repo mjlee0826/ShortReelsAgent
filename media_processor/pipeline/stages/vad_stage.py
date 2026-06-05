@@ -13,7 +13,7 @@ class VadStage(Stage):
     """
     以 Silero VAD 偵測 wav 是否含人聲,寫入 ``VideoWork.has_speech``,作為 WhisperStage 的閘門。
 
-    Week 3a 由 ``AudioInferenceStage`` 全拆而來:VAD 底層不支援 batch(plan §4.2),維持單張呼叫。
+    VAD 底層不支援 batch,維持單張呼叫。
     音訊檔不存在 / 過小(靜音)時跳過、保留預設(無語音),對齊原 ``_analyze_audio`` 短路。
     Silero VAD 在 **CPU** 推論(模型極輕、ms 級;搬上 GPU 的 H2D/D2H 開銷反而更慢、又佔 VRAM 跟
     Qwen 搶),故標記為 **CPU 資源**。改走 ``run_vad`` 從 CPU pool 借出(``VAD_POOL_SIZE`` 個獨立

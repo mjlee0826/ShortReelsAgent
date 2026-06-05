@@ -94,12 +94,17 @@ thread Z: acquire(cost=18,prio=0)  ✓ used=21
 ```
 **VRAM 夠時同卡併發,夠不夠由 cost 決定**;`cost > 整卡預算` 時於 `in_flight==0` 仍單獨放行(避免永久阻塞)。
 
-### priority 反餓死（Week 3b 新增）
+### priority 反餓死（Week 3b 新增；✅ 2026-06-05 軟化為「保留車道」）
 
-`acquire(cost_gb, priority)` 多了 `priority`:**只要有高優先(Qwen,`INFERENCE_PRIORITY>0`)在等,
-低優先(其餘模型恆 0)一律不放行** —— 讓在飛的小 forward 排空、預算騰給 Qwen,避免 MUSIQ/LAION
-串流把主瓶頸 Qwen 的大塊請求無限延後。子類用 class 屬性 `INFERENCE_PRIORITY` 宣告,`inference_guard`
-經 `gate.acquire(self.INFERENCE_VRAM_COST_GB, self.INFERENCE_PRIORITY)` 帶入。
+`acquire(cost_gb, priority)` 多了 `priority`,讓主瓶頸 Qwen(`INFERENCE_PRIORITY=10`)在等大塊 VRAM 時,
+不被 MUSIQ/LAION/AudioEnv/Whisper 等小模型(恆 0)的串流無限延後。子類用 class 屬性 `INFERENCE_PRIORITY`
+宣告,`inference_guard` 經 `gate.acquire(self.INFERENCE_VRAM_COST_GB, self.INFERENCE_PRIORITY)` 帶入。
+
+> **⚠️ 2026-06-05 修正(原硬規則反把小模型餓死,已軟化)**:最初版是「**只要有高優先在等,低優先一律不放行**」,
+> 但 Qwen 單次 forward 長達數十秒~數分鐘時,同卡小模型被整場餓死(log 裡 aes 實算 ~50ms 卻被卡到 91s)。
+> 改為**保留一條低優先車道**:即使有 Qwen 在等,只要低優先「在飛成本總和 ≤ budget ×
+> `BUDGET_GATE_LOW_PRIORITY_RESERVE_RATIO`(預設 0.5)」仍放行(且整體不超預算防 OOM),
+> 讓小模型細水長流、Qwen 仍對大半預算保有優先權。`0.0`=回到舊硬餓死規則、`1.0`=等同取消優先序。
 
 ### 一行升級（實際簽名帶 device_id）
 
@@ -151,7 +156,8 @@ qwen_pool = ModelPool(QwenManager, slots=[
 - **Qwen**:依該卡 free VRAM 自動算同卡份數(`QWEN_MAX_SLOTS_PER_GPU`:`0`=auto 取「能真正並行的份數」
   = `floor((free−小模型常駐−buffer)/(resident+transient))`、`>0`=上限)。BudgetGate(非 BinaryGate)下
   同卡多 instance 才真的能並行 forward —— 紅利現了。
-- **Saliency**:以 per-model 上限 `1` 做「每卡一份」的多卡分散(小模型不需同卡多份)。
+- **~~Saliency:以 per-model 上限 `1` 做每卡一份的多卡分散~~** → **⚠️ 2026-06-05 起已移出 GPU、改純 CPU pool**
+  (見 §7 更正);GpuCapacityManager 不再規劃 Saliency 的 GPU slot,`max_slots_by_model={Saliency:1}` 已失效。
 - 規劃會避免把瀕死卡塞爆(放不下「常駐+暫態+buffer」就不放),並把單卡小模型集中到「最不排擠 Qwen lane」的卡。
 
 ---
@@ -208,15 +214,20 @@ BatchCollector worker thread(達 batch_size 或 timeout_ms):
 | 模型 | self.device | L2 | L3 |
 |---|---|---|---|
 | Qwen / Whisper / MUSIQ / LAION / AudioEnv | `cuda:N` | ✓ | ✓ |
-| **Saliency**(rembg/onnxruntime) | `cuda:N`(Week 3b 起綁卡 + 納入 capacity) | ✓ | ✓ |
-| MediaPipe | `cpu` | skip | ✓ |
-| **VAD**(silero) | `cpu`(Week 3b 起顯式標記;模型極輕本就跑 CPU) | skip | ✓ |
+| **Saliency**(rembg/onnxruntime/U²-Net) | `cpu`(**2026-06-05 起改純 CPU pool**,見下方更正) | skip | ✓ |
+| **MediaPipe** | `cpu`(CPU pool,每 asset 一份) | skip | ✓ |
+| **VAD**(silero) | `cpu`(**2026-06-05 起改 CPU pool**,多 instance 真平行) | skip | ✓ |
 | Gemini API | 無 device attribute | skip | ✓ |
 
-> **⚠️ 更正(Week 3b)**:Saliency 原本「內部管理、不設 device → 跳過 L2」,在共用機上 onnxruntime 會自選
-> cuda:0、不受 BudgetGate 控管而 hang(實機事故根因)。改為由呼叫端綁「最空卡」+ 設 `self.device=cuda:N`
-> + `INFERENCE_VRAM_COST_GB`,forward 經 L2 BudgetGate;VAD 則顯式標 `cpu`(它本就該在 CPU、搬 GPU 反而更慢)。
-> 子類其餘零改動。
+> **⚠️ 更正一(Week 3b,已被更正二推翻)**:Saliency 原本「內部管理、不設 device → 跳過 L2」,在共用機上
+> onnxruntime 會自選 cuda:0、不受 BudgetGate 控管而 hang。Week 3b 曾改為綁「最空卡」cuda:N + 納入 capacity/BudgetGate。
+>
+> **⚠️ 更正二(2026-06-05,最終定案,推翻更正一)**:綁 GPU 後**實機在共用工作站仍出事**——onnxruntime
+> `CUDAExecutionProvider` 與 PyTorch 各自的 CUDA allocator / context 互不知情,共卡時偶發 hang / OOM。
+> 最終**直接移出 GPU、固定 `CPUExecutionProvider`**(`self.device='cpu'` → 跳過 L2、borrow 即時放行),
+> 改由 `model_pool_registry` 的獨立 **CPU pool**(`SALIENCY_POOL_SIZE` 份獨立 onnxruntime CPU session)管併發;
+> CPU EP 推論釋放 GIL,根除上述故障。**VAD 同期也從 CPU 單例改 CPU pool**(`VAD_POOL_SIZE` 份獨立 Silero,
+> 修正單例 `@synchronized_inference` 把多影片 VAD 序列化到 250s+);MediaPipe 亦為 CPU pool。三池同構、皆啟動期預熱。
 
 ---
 
@@ -238,6 +249,7 @@ BatchCollector worker thread(達 batch_size 或 timeout_ms):
 
 ---
 
-*文件最後更新:2026-06-04(Week 3b 後續:Saliency 納入 capacity/BudgetGate、VAD 顯式 CPU、
-同卡多 instance 由 capacity 自動規劃、OOM 同卡重試 + 跨卡 failover)*
+*文件最後更新:2026-06-05(模型換代後續修正:Saliency **移出 GPU 改純 CPU pool**(推翻 6-04 的綁卡)、
+VAD 改 CPU pool、MediaPipe CPU pool、BudgetGate priority **軟化為保留車道**(反餓死))*
+*前版:2026-06-04(Week 3b 後續:Saliency 納入 capacity/BudgetGate、VAD 顯式 CPU、同卡多 instance 由 capacity 自動規劃、OOM 同卡重試 + 跨卡 failover)*
 *前版:2026-06-03(Week 3b:BudgetGate + priority 反餓死 + gate factory 簽名帶 device_id)*

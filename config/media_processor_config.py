@@ -2,6 +2,7 @@
 媒體處理器常數集中管理 (Configuration Object Pattern)。
 media_processor/ 與 media_tools/ 所有模組從此處 import，避免 magic number 散落各檔。
 """
+import os
 
 # ── 畫質過濾 (ImageProcessor / ContextCompressor) ─────────────────────────────
 # MUSIQ 技術畫質分數低於此值的圖片直接 reject，避免模糊/噪點素材進入導演決策
@@ -61,7 +62,7 @@ MIDDLE_FRAME_POSITION     = 0.5              # 代表幀位置（對應 SALIENCY
 # ComplexVideo 無 technical_score 欄位，ContextCompressor 以此值強制通過畫質篩選
 TECHNICAL_SCORE_FORCE_PASS = 100.0
 
-# ── Dynamic Batching 參數 (Week 3a BatchCollector 已接入) ──────────────────────
+# ── Dynamic Batching 參數 (BatchCollector) ──────────────────────
 # 各支援 batch 推論的模型一次合批的最大樣本數（上限；實際批量受上游併發與 timeout 決定）。
 # 開關（*_BATCH_ENABLED）與 asset 並行度（影響 inline stage 有效批量）放在 pipeline_config.py。
 MUSIQ_BATCH_SIZE     = 16
@@ -71,21 +72,39 @@ AUDIO_ENV_BATCH_SIZE = 4
 # 末尾未達 batch_size 時，等待多少毫秒就強制觸發 forward，避免最後幾張卡死
 BATCH_COLLECT_TIMEOUT_MS = 50
 
-# ── GPU 資源管理 (Week 3b BudgetGate 啟用) ─────────────────────────────────────
+# ── GPU 資源管理 (BudgetGate) ─────────────────────────────────────
 # 預留給系統 / 共用 GPU 的其他使用者的 VRAM，不納入 BudgetGate 預算
 GPU_SAFETY_BUFFER_GB = 1.5
 
-# ── 各模型 VRAM 估值 (Week 3b Capacity Manager / BudgetGate) ────────────────────
+# ── 各模型 VRAM 估值 (Capacity Manager / BudgetGate) ────────────────────
 # ⚠️ 以下皆為「估值」，實機請以 torch.cuda.reset_peak_memory_stats() +
 #    max_memory_allocated() 包一次 forward 校準。GpuCapacityManager 會組成
 #    {ModelClass: ModelVramProfile} 對照表（對照表本身在 capacity manager，因需 import 模型類別）。
 # - resident：模型常駐權重（載入後一直佔著，決定一張卡放得下幾份模型）。
 # - transient：單次 forward 暫態峰值（activation/KV cache/workspace），即 INFERENCE_VRAM_COST_GB，
 #   給 BudgetGate 記帳「在飛行中 forward 成本總和 ≤ 預算」。
-# Qwen3-VL-4B 4-bit NF4 常駐估值 ~3.5GB（8B 時實測 ~6.4GB，4B 約其半；待實機 reset_peak_memory 校準）；
-# transient 為含影像 token 的 generate 暫態估值（4B 層數/隱藏維較小，較 8B 低）。
-QWEN_RESIDENT_VRAM_GB       = 3.5
-QWEN_TRANSIENT_VRAM_GB      = 2.5
+# Qwen 量化策略 (Strategy 選擇器)：三種載入策略，預設 bf16（不量化）。
+# 理由：bnb 4-bit/8-bit 在 transformers 推理時每個 matmul 都即時反量化、沒有真正的低位元 kernel
+#   （真 4-bit kernel 僅 vLLM 有），單次 forward 慢 2~4 倍；本專案 Qwen 為端到端主瓶頸且 VRAM 充裕
+#   （單卡 ~23GB、4B bf16 僅 ~8.5GB），故預設走最快的 bf16。nf4 / int8 保留供「VRAM 吃緊」或品質
+#   回歸 A/B，以 env QWEN_QUANT_MODE 覆寫。
+QWEN_QUANT_MODE_NF4  = "nf4"    # bitsandbytes 4-bit NF4：最省 VRAM、最慢
+QWEN_QUANT_MODE_INT8 = "int8"   # bitsandbytes 8-bit：VRAM / 速度介於中間
+QWEN_QUANT_MODE_BF16 = "bf16"   # 不量化、bf16 權重：最快、VRAM 最大（預設）
+QWEN_QUANT_MODE_DEFAULT = QWEN_QUANT_MODE_BF16
+QWEN_QUANT_MODE = os.environ.get("QWEN_QUANT_MODE", QWEN_QUANT_MODE_DEFAULT).strip().lower()
+
+# 各量化模式的 VRAM profile：(resident 常駐權重, transient 單次 forward 暫態峰值)，單位 GB。
+# bf16：Qwen3-VL-4B 權重 4B×2byte ≈ 8GB + 視覺編碼器 ≈ 8.5GB；nf4 ~3.5GB、int8 ~5.5GB。
+# 未知 mode 退回 bf16 profile（過估 resident 只會少放幾份、安全；低估才會 OOM）。
+_QWEN_VRAM_PROFILE_BY_MODE = {
+    QWEN_QUANT_MODE_NF4:  (3.5, 2.5),
+    QWEN_QUANT_MODE_INT8: (5.5, 2.5),
+    QWEN_QUANT_MODE_BF16: (8.5, 3.0),
+}
+QWEN_RESIDENT_VRAM_GB, QWEN_TRANSIENT_VRAM_GB = _QWEN_VRAM_PROFILE_BY_MODE.get(
+    QWEN_QUANT_MODE, _QWEN_VRAM_PROFILE_BY_MODE[QWEN_QUANT_MODE_BF16]
+)
 # Whisper 改 faster-whisper(CTranslate2) large-v3-turbo：CT2 float16 常駐遠小於 HF large-v3（~3GB → ~1.6GB）
 WHISPER_RESIDENT_VRAM_GB    = 1.6
 WHISPER_TRANSIENT_VRAM_GB   = 1.0
@@ -96,7 +115,7 @@ LAION_TRANSIENT_VRAM_GB     = 1.0
 AUDIO_ENV_RESIDENT_VRAM_GB  = 0.3
 AUDIO_ENV_TRANSIENT_VRAM_GB = 0.5
 # Saliency（U²-Net via rembg/onnxruntime）：常駐 + 單次推論暫態。
-# Week 3b 起 saliency 納入 GpuCapacityManager（每卡一份的多卡）並走 pool，故需 resident（規劃放置）
+# saliency 納入 GpuCapacityManager（每卡一份的多卡）並走 pool，故需 resident（規劃放置）
 # 與 transient（INFERENCE_VRAM_COST_GB，forward 經 L2 BudgetGate 記帳）。resident 為 onnxruntime
 # CUDA session 常駐估值（含 context 開銷）。
 SALIENCY_RESIDENT_VRAM_GB   = 0.5
@@ -115,29 +134,24 @@ QWEN_INFERENCE_PRIORITY = 10
 BUDGET_GATE_LOW_PRIORITY_RESERVE_RATIO = 0.5
 
 # 同卡 Qwen instance 份數上限（同卡多 slot ⇒ 同卡可並行多條 Qwen forward；需 VRAM 充裕）。
-#   0（預設，= QWEN_SLOTS_AUTO）：自動 —— GpuCapacityManager 依該卡 free VRAM 算「能真正並行的份數」：
-#     floor((free − 單卡模型常駐總和 − GPU_SAFETY_BUFFER_GB) / (QWEN_RESIDENT + QWEN_TRANSIENT))，
-#     常駐放得下至少 1 份。會預留其餘單卡模型常駐，故雙卡環境通常仍每卡 1 份（安全），單張大卡才放到多份。
-#   >0：手動上限 —— 取 min(本值, 自動值)；例如 1 = 強制每卡單份（Week 3b 原行為）、2 = 上限每卡 2 份。
-# 代價：每多 1 份多吃 ~QWEN_RESIDENT_VRAM_GB 常駐權重；同卡多條 forward 共用 SM，報酬遞減（約 1.2–1.5x）。
+#   0（= QWEN_SLOTS_AUTO）：自動 —— GpuCapacityManager 依該卡 free VRAM 算「能真正並行的份數」：
+#     floor((free − 單卡模型常駐總和 − GPU_SAFETY_BUFFER_GB) / (QWEN_RESIDENT + QWEN_TRANSIENT))。
+#   >0：手動上限 —— 取 min(本值, 自動值)；例如 1 = 強制每卡單份、2 = 上限每卡 2 份。
+# 設為 1 的理由：實測 Qwen 為 compute-bound（單卡 SM/頻寬已飽和），同卡疊多份 forward 只是互相
+#   時間分片、總吞吐不變（報酬遞減 ~1.2–1.5x），徒增 VRAM；且 bf16 權重 ~8.5GB，單張 23GB 卡本就
+#   只放得下 1 份。要回到「依 VRAM 自動鋪滿」改回 QWEN_SLOTS_AUTO。
 QWEN_SLOTS_AUTO = 0
-QWEN_MAX_SLOTS_PER_GPU = QWEN_SLOTS_AUTO
+QWEN_MAX_SLOTS_PER_GPU = 1
 
-# ── OOM 容錯重試 (Week 3b oom_resilient) ───────────────────────────────────────
+# ── OOM 容錯重試 (oom_resilient) ───────────────────────────────────────
 # 推論遇 CUDA OOM 時釋放 VRAM + backoff 後重試的最大次數；耗盡仍 OOM 則 re-raise 標 asset error。
 OOM_RETRY_MAX_ATTEMPTS = 3
 # 線性 backoff 基數（秒）：第 k 次重試前睡 OOM_RETRY_BACKOFF_SEC * k，給鄰居 / 同卡 forward 排空時間。
 OOM_RETRY_BACKOFF_SEC = 1.0
 
-# ── borrow 即時 VRAM 重檢 (Week 3b ModelPool.borrow) ───────────────────────────
+# ── borrow 即時 VRAM 重檢 (ModelPool.borrow) ───────────────────────────
 # 借出 GPU 模型前以 mem_get_info 重檢真實 free VRAM（含鄰居 process）；不足時每隔本秒數輪詢一次。
 BORROW_VRAM_POLL_INTERVAL_SEC = 0.5
 # 等待 VRAM 的上限秒數；逾時仍不足則「盡力放行」（讓 forward 去試，OOM 由 oom_resilient 兜底），
-# 避免鄰居長期佔用造成 driver thread 永久卡死（plan §5.3 note 1：優先等待，但不可無限等）。
+# 避免鄰居長期佔用造成 driver thread 永久卡死（優先等待，但不可無限等）。
 BORROW_VRAM_MAX_WAIT_SEC = 30.0
-
-# ── Qwen VLM 量化切換 ─────────────────────────────────────────────────────────
-# 啟動時 env var QWEN_USE_4BIT 未設定時的預設值
-# True： bitsandbytes 4-bit(NF4) 量化（主路徑，runtime ~6.4GB）
-# False：bitsandbytes 8-bit 量化（品質回歸 A/B，runtime ~10GB）
-QWEN_USE_4BIT_DEFAULT = True

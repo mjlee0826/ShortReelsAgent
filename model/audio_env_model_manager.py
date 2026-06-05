@@ -1,10 +1,10 @@
 """
 環境音分類引擎，使用 PANNs CNN14 對 AudioSet 527 類進行推論。
 
-Week 3a 變動
------------
-新增 :meth:`classify_environment_batch`（多檔一次 forward，變長音訊尾端 zero-pad 對齊），
-由 ``BatchCollector`` 接入；單張 :meth:`classify_environment` 維持不變。
+批次與單張介面
+--------------
+:meth:`classify_environment_batch` 對多檔一次 forward（變長音訊尾端 zero-pad 對齊），
+由 ``BatchCollector`` 接入；:meth:`classify_environment` 處理單一音檔。
 top-k 解析抽成共用 :meth:`_topk_labels`（Template Method），單張 / 批次共用；
 失敗回空列表（Null Object）。
 """
@@ -35,7 +35,7 @@ class AudioEnvModelManager(BaseModelManager):
     輸出 top-k 分類標籤與信心分數，結構化且易於下游 LLM 理解。
     """
 
-    # Week 3b：PANNs CNN14 單次 forward 暫態峰值 → BudgetGate 記帳（INFERENCE_PRIORITY 維持預設 0）
+    # PANNs CNN14 單次 forward 暫態峰值 → BudgetGate 記帳（INFERENCE_PRIORITY 維持預設 0）
     INFERENCE_VRAM_COST_GB = AUDIO_ENV_TRANSIENT_VRAM_GB
 
     def _initialize(self, device_id: int = 0):

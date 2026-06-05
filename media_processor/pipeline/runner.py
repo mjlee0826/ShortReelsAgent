@@ -4,8 +4,6 @@ PipelineRunner:Phase 1 素材感知的對外單一入口 (Facade Pattern)。
 把 Builder / Scheduler / ExecutorRegistry / ModelPoolRegistry / ProgressTracker 全部藏在後面,
 呼叫端(``DirectorService``)只需呼叫 :meth:`run`,傳入檔案清單與影片策略,拿回與舊版序列迴圈
 **逐欄一致**的 metadata dict 列表,完全無感於底層的並行框架。
-
-設計來源:integrated_acceleration_plan.md Layer 2/3;roadmap §4 Week 2a。
 """
 from __future__ import annotations
 
@@ -55,14 +53,14 @@ class PipelineRunner:
         Args:
             max_assets_parallel: asset 並行度(env ``MAX_ASSETS_PARALLEL`` 可覆寫)。
             observers: 進度觀察者;``None`` 時預設掛 ``PrintProgressObserver``,
-                       讓開發期可肉眼看到多 asset 事件交錯(驗收條件#2)。
-            eager_models: 是否啟動期預載模型;Week 2a 僅保留旗標,實際 warm up 留 Week 3b。
+                       讓開發期可肉眼看到多 asset 事件交錯。
+            eager_models: 是否在啟動期預載(warm up)模型,讓第一個 asset 不必等待載入。
         """
-        # observers 需先就緒,供 ModelPoolRegistry 的 warm up / borrow 等待事件廣播(Week 3b)
+        # observers 需先就緒,供 ModelPoolRegistry 的 warm up / borrow 等待事件廣播
         self._observers = observers if observers is not None else [PrintProgressObserver()]
         # Layer 2 資源管理:跨請求長存的資源池與模型池
         self._registry = ExecutorRegistry()
-        # Week 3b:ModelPoolRegistry 接 GpuCapacityManager,規劃多卡放置 + 每卡 BudgetGate 預算,
+        # ModelPoolRegistry 接 GpuCapacityManager,規劃多卡放置 + 每卡 BudgetGate 預算,
         # 並把自己註冊為 process 級共享實例(stage / batch_fn 經 instance() 借出模型)
         self._model_pool_registry = ModelPoolRegistry(observers=self._observers)
         # 套用 per-device BudgetGate(依各卡 free VRAM 預算;無 CUDA 時 no-op,維持 BinaryGate)
@@ -75,12 +73,12 @@ class PipelineRunner:
 
         print(f"[PipelineRunner] {self._registry.describe()}")
         if eager_models:
-            # Week 3b:依 capacity 規劃的優先序預載熱門模型(Qwen 多卡常駐、VRAM 不足自動降 lazy),
+            # 依 capacity 規劃的優先序預載熱門模型(Qwen 多卡常駐、VRAM 不足自動降 lazy),
             # 讓第一個 asset 不再卡載入;無 CUDA 時 warm_up 自動 no-op
             print("[PipelineRunner] EAGER_MODELS=true,啟動期依 capacity 規劃預載熱門模型...")
             self._model_pool_registry.warm_up()
 
-        # Week 3b:warm up 後印啟動佈局表(GPU VRAM 放置 + 各 pool 並行度),讓使用者一眼確認資源分佈
+        # warm up 後印啟動佈局表(GPU VRAM 放置 + 各 pool 並行度),讓使用者一眼確認資源分佈
         print(StartupReporter(
             capacity_manager=self._model_pool_registry.capacity,
             executor_registry=self._registry,
@@ -99,7 +97,7 @@ class PipelineRunner:
 
         Args:
             asset_files: 已過濾、依輸入順序排列的媒體檔案絕對路徑清單。
-            base_dir:    素材資料夾(目前僅供日誌 / 未來擴充,實際路徑已在 asset_files)。
+            base_dir:    素材資料夾(目前僅供日誌,實際路徑已在 asset_files)。
             video_strategy: 影片策略(SIMPLE / COMPLEX);圖片不受影響(工廠依副檔名路由)。
 
         Returns:
@@ -115,7 +113,7 @@ class PipelineRunner:
         for observer in self._observers:
             tracker.subscribe(observer)
 
-        # Week 3b:卡住偵測 watchdog(背景 daemon,定期印進行中 stage;本次 run 結束即收工)
+        # 卡住偵測 watchdog(背景 daemon,定期印進行中 stage;本次 run 結束即收工)
         watchdog = (
             StallWatchdog(
                 WATCHDOG_HEARTBEAT_SEC, WATCHDOG_STALL_WARN_SEC, WATCHDOG_FREEZE_DUMP_SEC

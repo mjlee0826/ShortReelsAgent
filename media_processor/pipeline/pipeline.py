@@ -3,7 +3,7 @@ Pipeline:一條 asset 處理流水線,以依賴圖 (DAG) 排程 (Template Method
 
 由多個 :class:`StageNode` 組成,執行語意:
 - **每個 Stage 只等自己宣告的上游依賴**(``StageNode.deps``)全部完成,即可執行;
-  彼此無依賴的 Stage 真正並行,不被「整個前群組」barrier 卡住(取代 Week 2a/2b 的 StageGroup)。
+  彼此無依賴的 Stage 真正並行,不被「整個前群組」barrier 卡住。
 - **依資源型別分派**:多個同時可執行的 Stage 各自送到 ExecutorRegistry 對應的 Worker Pool(IO/CPU/GPU/API);
   **單一可執行且無併發時直接在 driver thread inline 跑**(省一次 thread 跳轉,也讓單節點 / Legacy
   Pipeline 不被較小的 GPU pool 限流 —— N 個 asset driver 仍能滿並行)。
@@ -12,8 +12,6 @@ Pipeline:一條 asset 處理流水線,以依賴圖 (DAG) 排程 (Template Method
 
 橫切關注點(進度事件、錯誤隔離)集中在本類別的 ``_run_stage`` 處理,Stage 子類別保持單純。
 排程順序只影響「時機」、不影響「輸出值」(輸出與執行順序無關,只要依賴正確)→ 與 Legacy 逐欄一致。
-
-設計來源:integrated_acceleration_plan.md §11(Dataflow / DAG);roadmap §6 Week 2c。
 """
 from __future__ import annotations
 

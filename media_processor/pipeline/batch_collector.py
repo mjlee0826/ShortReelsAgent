@@ -3,7 +3,7 @@ BatchCollector:Stage 內的動態合批器 (Producer–Consumer + Future/Promise
 
 設計動機
 --------
-plan §4.3:多個 asset 的同一個 Stage 在執行期自動合批,攤平 GPU kernel 啟動成本
+多個 asset 的同一個 Stage 在執行期自動合批,攤平 GPU kernel 啟動成本
 (MUSIQ/LAION 單張 200ms、batch 16 約 30ms/張),等同 Triton / vLLM 的 dynamic batching
 縮小到 Stage 內部。對 driver thread 完全透明 —— Stage 只是把「單張呼叫」換成
 ``collector.submit(item).result()``,Stage 介面與依賴圖都不動。
@@ -15,7 +15,7 @@ plan §4.3:多個 asset 的同一個 Stage 在執行期自動合批,攤平 GPU k
 (還沒呼叫模型);worker 呼叫 ``batch_fn``(內部走 ``@synchronized_inference`` → L2 GpuGate)時,
 沒有任何阻塞中的送件方握著 gate,故必能取得 → 跑完分發 Future → 解除所有阻塞。
 即使 GPU pool 的 slot 全部阻塞在 future 上,獨立的 worker 仍能推進;timeout 保證即使只有 1 件
-也會在 ``timeout_ms`` 後觸發。詳見 ``docs/lock_design.md`` 與整合計畫 §4.3。
+也會在 ``timeout_ms`` 後觸發。詳見 ``docs/lock_design.md``。
 
 跨 asset 共享
 -------------

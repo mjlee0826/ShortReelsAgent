@@ -11,10 +11,10 @@ slot 概念
 ----------
 - 預設 ``gpu_ids=[0, 1]`` 等價於 ``slots=[GpuSlot(0), GpuSlot(1)]``，每張 GPU 一份 instance。
 - 顯式指定 ``slots=[GpuSlot(0, 0), GpuSlot(0, 1)]`` 可在**同卡載入兩份 weight**，
-  搭配 Week 3b ``BudgetGate`` 達成同卡併發紅利（需 VRAM 充裕）。
-- Week 3b 起 ``GpuCapacityManager`` 會依該卡 free VRAM **自動決定 Qwen 同卡份數**
+  搭配 ``BudgetGate`` 達成同卡併發紅利（需 VRAM 充裕）。
+- ``GpuCapacityManager`` 會依該卡 free VRAM **自動決定 Qwen 同卡份數**
   （config ``QWEN_MAX_SLOTS_PER_GPU``：``0`` 自動 / ``>0`` 上限），呼叫端通常不必手填 slots。
-- 注意：``BinaryGate`` 下同卡多 instance 仍被 L2 序列化，需 ``BudgetGate``（Week 3b 預設）才有同卡併發效果。
+- 注意：``BinaryGate`` 下同卡多 instance 仍被 L2 序列化，需 ``BudgetGate``（預設）才有同卡併發效果。
 
 典型用法
 --------
@@ -55,7 +55,7 @@ class PoolBorrowObserver(Protocol):
     """
     borrow() 即時 VRAM 重檢的觀察者 (Protocol；定義在 model 層，不依賴 pipeline)。
 
-    pipeline 側提供 adapter 實作，把 wait / ready 轉成 ProgressEvent 推給前端（Week 3b Q2）。
+    pipeline 側提供 adapter 實作，把 wait / ready 轉成 ProgressEvent 推給前端。
     以原生型別傳參（非 pipeline 物件），維持 model → pipeline 的零依賴。
     """
 
@@ -127,7 +127,7 @@ class ModelPool(Generic[T]):
         for idx in range(len(self._instances)):
             self._available.put(idx)
 
-        # 即時 VRAM 重檢參數（Week 3b）：need ≤ 0 等於停用
+        # 即時 VRAM 重檢參數：need ≤ 0 等於停用
         self._vram_need_gb = vram_need_gb
         self._safety_buffer_gb = safety_buffer_gb
         self._poll_interval_sec = poll_interval_sec
@@ -164,7 +164,7 @@ class ModelPool(Generic[T]):
 
         兩道關卡：
         1. **L1 借出佇列**：所有槽位皆借出中則阻塞，直到有實例歸還或超過 ``timeout``。
-        2. **即時 VRAM 重檢**（Week 3b，``vram_need_gb > 0`` 時）：取得槽位後再以 mem_get_info 確認
+        2. **即時 VRAM 重檢**（``vram_need_gb > 0`` 時）：取得槽位後再以 mem_get_info 確認
            該卡真實 free VRAM（含鄰居 process）足夠本次 forward，不足則阻塞輪詢；逾 ``max_wait_sec``
            仍不足則「盡力放行」（交給 forward 嘗試，OOM 由 ``oom_resilient`` 兜底），避免永久卡死。
 

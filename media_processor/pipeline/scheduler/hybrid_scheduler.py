@@ -1,5 +1,5 @@
 """
-HybridScheduler:asset 間粗粒度並行的主力排程器 (plan §6.2)。
+HybridScheduler:asset 間粗粒度並行的主力排程器。
 
 核心機制
 --------
@@ -7,8 +7,8 @@ N 個 asset driver thread 同時推進(預設 ``MAX_ASSETS_PARALLEL``),每個 dr
 跑一條 Pipeline。所有 driver 共享同一組 ``ExecutorRegistry``,於是:
 ``asset A 在跑 GPU forward、asset B 在抽音訊(IO)、asset C 在跑場景偵測(CPU)`` ── 不同資源永遠有事做。
 
-Week 2a 的 Pipeline 是單一 LegacyStage(inline 執行),故並行紅利來自「driver 並行 + L2 GpuGate
-只序列化 GPU forward,IO/CPU 自然重疊」。Week 2b/2c 拆 Stage 後再疊加「群組內並行」。
+並行紅利有兩個來源:「driver 並行 + L2 GpuGate 只序列化 GPU forward,IO/CPU 自然重疊」;
+Pipeline 拆成細粒度 Stage 後,再疊加 Pipeline 內無依賴 Stage 的並行。
 """
 from __future__ import annotations
 
@@ -78,7 +78,7 @@ class HybridScheduler:
         tracker: ProgressTracker | None,
     ) -> AssetContext:
         """單一 asset 的 driver:建 Pipeline → 執行 → 發 pipeline 起訖事件。"""
-        # Week 3b:把本次 run 的 tracker 掛到 context,讓 GPU stage 的 borrow VRAM 等待能發帶 asset_id 的事件
+        # 把本次 run 的 tracker 掛到 context,讓 GPU stage 的 borrow VRAM 等待能發帶 asset_id 的事件
         context.tracker = tracker
         if tracker is not None:
             tracker.emit_pipeline_start(asset_id=context.asset_id)

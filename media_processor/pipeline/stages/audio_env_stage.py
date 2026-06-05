@@ -35,7 +35,7 @@ class AudioEnvStage(Stage):
     """
     對 wav 做 PANNs CNN14 環境音分類,寫入 ``VideoWork.environmental_sounds``。
 
-    Week 3a 全拆後**只依賴 audio_extract**(與 VAD/Whisper 無依賴),DAG 中可與語音鏈並行,
+    本 Stage **只依賴 audio_extract**(與 VAD/Whisper 無依賴),DAG 中可與語音鏈並行,
     修正原 ``AudioInferenceStage`` 把環境音排在 Whisper 之後的過度序列化。音訊無效時跳過、保留空環境音。
     啟用合批時走 ``BatchCollector``,否則單張。GPU 資源;singleton 延遲載入。
     """

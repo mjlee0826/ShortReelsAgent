@@ -5,7 +5,11 @@ model/ 底下所有 manager 的常數統一在此定義，對外是唯一的 imp
 import os
 from config.media_processor_config import (
     MUSIQ_MAX_INPUT_SIZE as MUSIQ_MAX_SHORT_SIDE,
-    QWEN_USE_4BIT_DEFAULT,
+    # Qwen 量化策略：mode 與三個合法值常數已在 media_processor_config 解析（含 env 覆寫），此處 re-export
+    QWEN_QUANT_MODE,
+    QWEN_QUANT_MODE_NF4,
+    QWEN_QUANT_MODE_INT8,
+    QWEN_QUANT_MODE_BF16,
 )
 
 # ── Gemini 影片上傳輪詢 ───────────────────────────────────────────────────────
@@ -31,7 +35,10 @@ __all__ = [
     "QWEN_MODEL_ID",
     "QWEN_PROCESSOR_ID",
     "QWEN_BASE_MODEL_ID",
-    "QWEN_USE_4BIT",
+    "QWEN_QUANT_MODE",
+    "QWEN_QUANT_MODE_NF4",
+    "QWEN_QUANT_MODE_INT8",
+    "QWEN_QUANT_MODE_BF16",
     "QWEN_USE_FLASH_ATTN",
     "QWEN_MAX_NEW_TOKENS",
     "QWEN_MAX_PIXELS",
@@ -121,13 +128,12 @@ def _read_float_env(env_name: str, default: float) -> float:
         return default
 
 
-# 啟動時決定走哪條 Qwen 路徑（Feature Toggle）；rollback 時設 false
-QWEN_USE_4BIT        = _read_bool_env("QWEN_USE_4BIT", QWEN_USE_4BIT_DEFAULT)
+# Qwen 量化策略（QWEN_QUANT_MODE）已於 config.media_processor_config 解析（含 env 覆寫），上方 import
+# re-export 進來；QwenModelManager 依此 Strategy 分派 bf16（預設）/ nf4 / int8 載入路徑。
 # Flash Attention 2 開關，安裝失敗時 QwenModelManager 內部會 fallback 到 sdpa
 QWEN_USE_FLASH_ATTN = _read_bool_env("QWEN_USE_FLASH_ATTN", True)
-# 量化改用 bitsandbytes（4-bit/8-bit 皆即時量化官方 base model），不再用 cyankiwi
-# compressed-tensors AWQ —— 後者在 transformers 推理時會整包解壓成 bf16、runtime 不省 VRAM
-# （真正的 4-bit kernel 僅 vLLM 有）。故 model id 一律指向官方 base，由 BitsAndBytesConfig 即時量化。
+# 預設 bf16 不量化（最快）；nf4 / int8 走 bitsandbytes 即時量化官方 base model（VRAM 吃緊或品質回歸時用）。
+# model id 一律指向官方 base，量化與否由 QwenModelManager._build_base_load_kwargs 依 mode 決定。
 QWEN_MODEL_ID       = QWEN_BASE_MODEL_ID
 
 # ── Qwen 單次 forward 成本旋鈕（皆可由 env 覆寫，便於不改碼 A/B 品質 vs 速度）─────────

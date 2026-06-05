@@ -7,8 +7,8 @@ GpuGate：GPU 容量門抽象與預設實作 (Strategy Pattern)。
 跨 instance 的多模型同卡時會撞 VRAM OOM（例如同卡 Qwen + Whisper 兩條 thread）。
 GpuGate 補上「同卡所有 forward 互斥」這層 (L2)，並設計成可替換策略：
 
-- Week 1: ``BinaryGate`` ── Semaphore(1)，粗粒度互斥，序列化同卡所有 forward。
-- Week 3b: ``BudgetGate`` ── 依 per-model VRAM cost 預算控制，VRAM 夠可同卡併發；
+- ``BinaryGate`` ── Semaphore(1)，粗粒度互斥，序列化同卡所有 forward。
+- ``BudgetGate`` ── 依 per-model VRAM cost 預算控制，VRAM 夠可同卡併發；
   並以 ``priority`` 讓主瓶頸（Qwen）優先取得 VRAM，不被小模型串流餓死。
 
 整體鎖層級與升級路徑詳見 ``docs/lock_design.md``。
@@ -46,8 +46,8 @@ class BinaryGate(GpuGate):
     """
     粗粒度 Gate：同卡同時最多一條 forward。
 
-    用法等同 ``threading.Semaphore(1)``，是 Week 1 修補同卡多模型 OOM bug 的最小成本實作。
-    後續 Week 3b 由 GPU Capacity Manager 透過
+    用法等同 ``threading.Semaphore(1)``，是修補同卡多模型 OOM bug 的最小成本實作。
+    由 GPU Capacity Manager 透過
     ``BaseModelManager.register_gate_factory`` 替換為 ``BudgetGate`` 即可拿到同卡併發紅利。
     """
 
@@ -66,7 +66,7 @@ class BinaryGate(GpuGate):
 
 class BudgetGate(GpuGate):
     """
-    細粒度 Gate：以 per-model VRAM cost 做預算記帳，VRAM 夠就同卡併發 (Week 3b)。
+    細粒度 Gate：以 per-model VRAM cost 做預算記帳，VRAM 夠就同卡併發。
 
     預算語意
     --------

@@ -68,7 +68,7 @@ class SemanticVideoStage(Stage):
     def _analyze_with_qwen(self, media_input, context: AssetContext) -> dict:
         """
         SIMPLE 本地 Qwen 全局分析:``GPU_POOL_ENABLED`` 時從 capacity 規劃的多卡 pool 借出
-        (享多卡分散 + borrow 即時 VRAM 重檢事件),否則回退 device-0 singleton(Week 3a 行為)。
+        (享多卡分散 + borrow 即時 VRAM 重檢事件),否則回退 device-0 singleton。
         """
         if not GPU_POOL_ENABLED:
             return self._qwen_engine().analyze_media(

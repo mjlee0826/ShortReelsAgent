@@ -3,11 +3,11 @@ StageNode:依賴圖節點 —— 一個 Stage 加上它依賴的上游 Stage 名
 
 設計語意
 --------
-Week 2a/2b 以 ``StageGroup``(群組間 barrier)表達編排,但「等整個前群組」是過度約束:
-某些 Stage 其實只依賴前面的**其中一個** Stage(例:Complex 影片的 ``SemanticVideo`` 只需要
-``Timecode`` 的產物,卻被迫等同群的 ``AudioInference`` / ``FaceDetect``)。
+以「群組間 barrier」表達編排會過度約束:某些 Stage 其實只依賴前面的**其中一個** Stage
+(例:Complex 影片的 ``SemanticVideo`` 只需要 ``Timecode`` 的產物,卻被迫等同群的
+``AudioInference`` / ``FaceDetect``)。
 
-Week 2c 改用真正的依賴圖:每個 ``StageNode`` 宣告自己依賴哪些上游 Stage,
+改用真正的依賴圖:每個 ``StageNode`` 宣告自己依賴哪些上游 Stage,
 由 :class:`~media_processor.pipeline.pipeline.Pipeline` 依「依賴全部完成才可執行」的拓樸順序排程,
 讓彼此無依賴的 Stage 真正並行、不互相 block。
 

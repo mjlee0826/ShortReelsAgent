@@ -3,7 +3,7 @@ ExecutorRegistry:依 ResourceType 路由到對應 Worker Pool (Registry + Facade
 
 把四個 ResourceExecutor 集中管理,Stage 只要宣告自己的 ``resource_type``,
 Pipeline 就能把它丟到正確的 Pool,呼叫端無需知道 Pool 實體。
-GPU Pool 大小依實際 GPU 數動態決定(plan §10),不寫死。
+GPU Pool 大小依實際 GPU 數動態決定,不寫死。
 """
 from __future__ import annotations
 

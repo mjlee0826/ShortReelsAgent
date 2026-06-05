@@ -1,10 +1,10 @@
 """
 LegacyProcessStage:把整個既有 ``processor.process()`` 包成單一 Stage (Adapter Pattern)。
 
-Week 2a 的核心妥協 ── **框架就緒但先不拆 Stage**。本 Stage 直接委派給既有的
-``MediaProcessorFactory`` + ``MediaStrategy.process()``,完全不改動 model 路徑,
-因此輸出與 Week 1 序列版逐欄一致、風險最低。Week 2b/2c 才會把 process() 內部展開成
-DecodeStage / TechScoreStage / SemanticStage 等細粒度 Stage,屆時本 Stage 退居 fallback 與 regression 比對。
+**框架包裝但不拆 Stage**:本 Stage 直接委派給既有的 ``MediaProcessorFactory`` +
+``MediaStrategy.process()``,完全不改動 model 路徑,因此輸出與序列版逐欄一致。
+相對於把 process() 展開成 DecodeStage / TechScoreStage / SemanticStage 等細粒度 Stage 的版本,
+本 Stage 退居 fallback 與 regression 比對。
 """
 from __future__ import annotations
 

@@ -5,8 +5,8 @@ ResourceExecutor:四種資源 Worker Pool 的薄封裝 (Adapter Pattern)。
 彼此不爭用,確保「做 IO 時 GPU 不會被閒置卡住」。本類別只是把 ThreadPoolExecutor
 包成帶名稱與資源型別的物件,讓 ExecutorRegistry 能依 ResourceType 路由。
 
-四個子類別(IO/CPU/GPU/APIExecutor)對應 roadmap §4「四個 Executor」,
-彼此只差 ``RESOURCE_TYPE``,行為一致 ── 差異化的併發度由 ExecutorRegistry 從 config 注入。
+四個子類別(IO/CPU/GPU/APIExecutor)彼此只差 ``RESOURCE_TYPE``,行為一致 ──
+差異化的併發度由 ExecutorRegistry 從 config 注入。
 """
 from __future__ import annotations
 

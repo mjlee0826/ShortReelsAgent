@@ -62,7 +62,7 @@ _DEFAULT_LANGUAGE = ""
 class WhisperModelManager(BaseModelManager):
     """Whisper 語音辨識大腦（faster-whisper / CTranslate2，含幻覺防跳針過濾器）。"""
 
-    # Week 3b：單次轉錄暫態峰值 → BudgetGate 記帳（INFERENCE_PRIORITY 維持預設 0）
+    # 單次轉錄暫態峰值 → BudgetGate 記帳（INFERENCE_PRIORITY 維持預設 0）
     INFERENCE_VRAM_COST_GB = WHISPER_TRANSIENT_VRAM_GB
 
     def _initialize(self, device_id: int = 0):

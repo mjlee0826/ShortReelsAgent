@@ -2,10 +2,10 @@
 PipelineBuilder:依 asset 類型與策略組裝 Pipeline 依賴圖 (Builder Pattern)。
 
 把「Pipeline 由哪些 Stage、彼此依賴關係如何」這個編排知識集中在這裡,呼叫端(Runner / Scheduler)
-只拿成品 Pipeline,不需知道 Stage 細節。Week 2c 起改用 :class:`StageNode` 宣告**每個 Stage 的真依賴**
-(取代 StageGroup barrier),由 Pipeline 以拓樸順序排程 —— 無依賴的 Stage 真正並行、不互相 block。
+只拿成品 Pipeline,不需知道 Stage 細節。以 :class:`StageNode` 宣告**每個 Stage 的真依賴**,
+由 Pipeline 以拓樸順序排程 —— 無依賴的 Stage 真正並行、不互相 block。
 
-各依賴圖見 plan Week 2c D3;``USE_LEGACY_*_PIPELINE`` 旗標可回退單節點 Legacy 供 A/B 逐欄一致回歸。
+各 Pipeline 的依賴圖見對應的 build 方法;``USE_LEGACY_*_PIPELINE`` 旗標可回退單節點 Legacy 供 A/B 逐欄一致回歸。
 """
 from __future__ import annotations
 
@@ -66,11 +66,11 @@ class PipelineBuilder:
 
     def _build_image_pipeline(self, context: AssetContext) -> Pipeline:
         """
-        圖片 Pipeline(Week 2c DAG 表達,可旗標回退 Legacy)。
+        圖片 Pipeline(DAG 表達,可旗標回退 Legacy)。
 
         依賴圖:``decode → tech → reject → {semantic, saliency, aes, cv, face, exif} → assembly``。
         reject 之後的六個 Stage 並行(各只依賴 reject);reject 觸發時它們與 assembly 全被短路跳過。
-        輸出與 Week 2b 逐欄一致(只改排程,不改值)。
+        輸出與 Legacy 逐欄一致(只改排程,不改值)。
         """
         if USE_LEGACY_IMAGE_PIPELINE:
             return Pipeline([StageNode(LegacyImagePipelineStage())], name=_IMAGE_PIPELINE_NAME)

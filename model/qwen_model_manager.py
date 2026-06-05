@@ -1,17 +1,18 @@
 """
 QwenModelManager：本地視覺大腦 (Qwen3-VL)，提供圖片與影片的 caption / mood / scene_tags 等推論。
 
-量化策略
---------
-- 4-bit 主路徑：**bitsandbytes NF4**（``QWEN_USE_4BIT=true``，預設）。原規劃的
-  compressed-tensors AWQ（cyankiwi）在 transformers 推理時會整包解壓成 bf16、
-  runtime 不省 VRAM（真正的 4-bit kernel 僅 vLLM 有），故改用 bnb 才能真正砍半。
-- 8-bit 後備路徑：``QWEN_USE_4BIT=false``，供品質回歸 A/B。
+量化策略（``QWEN_QUANT_MODE``，三選一）
+--------------------------------------
+- **bf16 主路徑（預設）**：不量化，bf16 權重。單次 forward 最快——bnb 量化在 transformers 推理時
+  每個 matmul 都即時反量化、沒有真正的低位元 kernel（真 4-bit kernel 僅 vLLM 有），慢 2~4 倍；
+  本專案 Qwen 為主瓶頸且 VRAM 充裕（4B bf16 僅 ~8.5GB），故預設 bf16 換取速度。
+- **nf4 後備路徑**：bitsandbytes 4-bit NF4，最省 VRAM（VRAM 吃緊時用）。
+- **int8 後備路徑**：bitsandbytes 8-bit，供品質回歸 A/B。
 - **Flash Attention 2** 啟用 + sdpa fallback（Strategy + try/except 隔離）。
 
 設計模式
 --------
-- **Strategy**：依 ``QWEN_USE_4BIT`` 在 ``_build_base_load_kwargs`` 切 4-bit / 8-bit 兩條載入路徑。
+- **Strategy**：依 ``QWEN_QUANT_MODE`` 在 ``_build_base_load_kwargs`` 以分派表切 bf16 / nf4 / int8 載入路徑。
 - **Chain of Responsibility (簡化版)**：Attention 實作優先序 FA2 → sdpa，遇錯自動 fallback。
 """
 import torch
@@ -31,7 +32,10 @@ from config.media_processor_config import QWEN_TRANSIENT_VRAM_GB, QWEN_INFERENCE
 from config.model_config import (
     QWEN_MODEL_ID,
     QWEN_PROCESSOR_ID,
-    QWEN_USE_4BIT,
+    QWEN_QUANT_MODE,
+    QWEN_QUANT_MODE_NF4,
+    QWEN_QUANT_MODE_INT8,
+    QWEN_QUANT_MODE_BF16,
     QWEN_USE_FLASH_ATTN,
     QWEN_MAX_NEW_TOKENS,
     QWEN_MAX_PIXELS,
@@ -48,13 +52,13 @@ _ATTN_FALLBACK = "sdpa"
 class QwenModelManager(BaseModelManager):
     """統一的本地視覺大腦 (Qwen3-VL)，bitsandbytes 4-bit 為主路徑、8-bit 為品質回歸路徑。"""
 
-    # Week 3b：單次 generate 暫態峰值 → BudgetGate 記帳;高優先 → 反餓死(Qwen 是主瓶頸)
+    # 單次 generate 暫態峰值 → BudgetGate 記帳;高優先 → 反餓死(Qwen 是主瓶頸)
     INFERENCE_VRAM_COST_GB = QWEN_TRANSIENT_VRAM_GB
     INFERENCE_PRIORITY = QWEN_INFERENCE_PRIORITY
 
     def _initialize(self, device_id: int = 0):
         """
-        依 ``QWEN_USE_4BIT`` 旗標選擇模型載入路徑，並嘗試啟用 Flash Attention 2。
+        依 ``QWEN_QUANT_MODE`` 選擇模型載入路徑（bf16 / nf4 / int8），並嘗試啟用 Flash Attention 2。
 
         Flash Attn 安裝失敗或硬體不支援時，自動 fallback 到 sdpa 而不中斷流程。
         """
@@ -69,10 +73,9 @@ class QwenModelManager(BaseModelManager):
             self.processor = AutoProcessor.from_pretrained(QWEN_PROCESSOR_ID)
 
         # 印出實際生效的 attention 實作與量化模式：方便確認 FA2 是否真的啟用、
-        # 以及落在 4-bit 主路徑或 8-bit 回歸路徑（對應驗收條件「FA2 實機生效」）
+        # 以及落在 bf16（預設）/ nf4 / int8 哪條載入路徑
         attn_impl = getattr(self.model.config, "_attn_implementation", "unknown")
-        quant_mode = "4bit-nf4" if QWEN_USE_4BIT else "8bit"
-        print(f"[Qwen] attn_implementation={attn_impl}, 量化={quant_mode}")
+        print(f"[Qwen] attn_implementation={attn_impl}, 量化={QWEN_QUANT_MODE}")
 
     def _load_model_with_attention_fallback(self) -> Qwen3VLForConditionalGeneration:
         """
@@ -111,33 +114,54 @@ class QwenModelManager(BaseModelManager):
 
     def _build_base_load_kwargs(self) -> dict:
         """
-        建構 ``from_pretrained`` 的共用參數。
+        建構 ``from_pretrained`` 的共用參數，並依 ``QWEN_QUANT_MODE`` 分派量化策略 (Strategy Pattern)。
 
         - **device_map 鎖定 self.device**：每個 Manager 實例對應一張指定 GPU
           （由 ``device_id`` 決定），避免 ``device_map="auto"`` 在共用 GPU 環境
-          抓到別人佔用的卡，也讓 Week 3b 多 GPU Pool 的「一卡一實例」成立。
-        - 量化一律由 **bitsandbytes** 即時量化官方 base model：4-bit(NF4) 為主路徑、
-          8-bit 為品質回歸後備。改採 bnb 是因 compressed-tensors AWQ 在 transformers
-          推理時會整包解壓成 bf16、runtime 不省 VRAM（真正的 4-bit kernel 僅 vLLM 有）。
+          抓到別人佔用的卡，也讓多 GPU Pool 的「一卡一實例」成立。
+        - **量化策略**：預設 bf16（不量化、最快）；nf4 / int8 走 bitsandbytes 即時量化官方 base model
+          （VRAM 吃緊或品質回歸時用）。未知 mode 退回 bf16（最快、最穩，與 capacity profile 退回方向一致）。
         """
         # device_map={"": self.device} 將整個模型固定在指定 GPU，
         # 不做跨卡切分，符合 BaseModelManager 以 device_id 區分實例的設計
         load_kwargs: dict = {"device_map": {"": self.device}}
-        if QWEN_USE_4BIT:
-            # 4-bit 主路徑：bitsandbytes NF4。權重在 runtime 保持 4-bit（不解壓），
-            # 4B 模型約 2.5-3GB；compute dtype 用 bf16、double quant 再壓 scale 記憶體
-            load_kwargs["torch_dtype"] = torch.bfloat16
-            load_kwargs["quantization_config"] = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_quant_type="nf4",
-                bnb_4bit_compute_dtype=torch.bfloat16,
-                bnb_4bit_use_double_quant=True,
-            )
-        else:
-            # 8-bit 後備路徑：bitsandbytes 8-bit，供品質回歸 A/B
-            load_kwargs["torch_dtype"] = torch.float16
-            load_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
+        # 量化策略分派表：mode → 套用對應 load kwargs 的方法（Strategy Pattern，免散落 if/elif）
+        quant_strategies = {
+            QWEN_QUANT_MODE_BF16: self._apply_bf16_kwargs,
+            QWEN_QUANT_MODE_NF4: self._apply_nf4_kwargs,
+            QWEN_QUANT_MODE_INT8: self._apply_int8_kwargs,
+        }
+        # 未知 mode 退回 bf16（最快、最穩）
+        apply_strategy = quant_strategies.get(QWEN_QUANT_MODE, self._apply_bf16_kwargs)
+        apply_strategy(load_kwargs)
         return load_kwargs
+
+    @staticmethod
+    def _apply_bf16_kwargs(load_kwargs: dict) -> None:
+        """bf16 策略（預設）：不量化、bf16 權重。VRAM 最大但單次 forward 最快（無即時反量化開銷）。"""
+        load_kwargs["torch_dtype"] = torch.bfloat16
+
+    @staticmethod
+    def _apply_nf4_kwargs(load_kwargs: dict) -> None:
+        """
+        nf4 策略：bitsandbytes 4-bit NF4，最省 VRAM。
+
+        權重在 runtime 保持 4-bit（不解壓），4B 模型約 2.5-3GB；compute dtype 用 bf16、
+        double quant 再壓 scale 記憶體。代價是每個 matmul 即時反量化，單次 forward 慢於 bf16。
+        """
+        load_kwargs["torch_dtype"] = torch.bfloat16
+        load_kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=True,
+        )
+
+    @staticmethod
+    def _apply_int8_kwargs(load_kwargs: dict) -> None:
+        """int8 策略：bitsandbytes 8-bit，VRAM / 速度介於中間，供品質回歸 A/B。"""
+        load_kwargs["torch_dtype"] = torch.float16
+        load_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
 
     def set_prompt_manager(self, prompt_manager: BasePromptManager):
         """替換 Prompt Manager（Strategy Pattern）。"""

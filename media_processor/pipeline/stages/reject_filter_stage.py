@@ -15,7 +15,7 @@ class RejectFilterStage(Stage):
     Early Rejection 短路點:當前幀 ``tech_score`` 低於門檻時把 asset 標記為 rejected。
 
     **image / video(Simple)共用**。設定 ``context.status=REJECTED`` 後,Pipeline 會讓後續才解除依賴的
-    Stage(Qwen / saliency / aes / 音訊推論等)全部跳過 —— 這就是 plan §4.4 的「白送加速」。
+    Stage(Qwen / saliency / aes / 音訊推論等)全部跳過 —— 等於「白送加速」。
     純比較邏輯,標記為 CPU 資源。reason 字串與原 processor 逐字對齊。
     """
 

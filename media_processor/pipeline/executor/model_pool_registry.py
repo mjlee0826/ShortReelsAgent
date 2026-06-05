@@ -1,8 +1,8 @@
 """
 ModelPoolRegistry:集中管理各模型的 ModelPool (Registry + Singleton Pattern)。
 
-職責 (Week 3b 起正式啟用)
--------------------------
+職責
+----
 - 啟動時用 :class:`GpuCapacityManager` 掃描 free VRAM,決定每個模型鋪在哪些 ``(device, slot)``、
   每卡 BudgetGate 預算,並 eager 預載熱門模型(Qwen 等)。
 - ``get_pool(model_class)`` 延遲建立並快取「依 capacity 規劃槽位」的 :class:`ModelPool`,
@@ -10,10 +10,10 @@ ModelPoolRegistry:集中管理各模型的 ModelPool (Registry + Singleton Patte
 - **process 級共享單例**(:meth:`instance`):stage 與 batch_fn 不必穿參數即可取得同一個 registry
   (對齊 ``BatchCollectorRegistry`` 的 class-level 單例做法),由 ``PipelineRunner`` 建構時自動註冊。
 
-Week 3b 之前
-------------
-Week 2a–3a 期間本 Registry 建好但 stage 仍直接用 device-0 singleton;Week 3b 起 semantic stage 與
-GPU batch_fn 改走 ``ModelPoolRegistry.instance().get_pool(...).borrow()``,真正分散到多卡。
+使用方式
+--------
+semantic stage 與 GPU batch_fn 透過 ``ModelPoolRegistry.instance().get_pool(...).borrow()``
+取得模型,真正分散到多卡。
 """
 from __future__ import annotations
 
@@ -346,11 +346,11 @@ def borrow_for_batch(
     fn: Callable[[_M], _R],
 ) -> _R:
     """
-    供 GPU batch_fn 使用:依 ``GPU_POOL_ENABLED`` 走多卡 pool 借出或 device-0 singleton (Week 3b)。
+    供 GPU batch_fn 使用:依 ``GPU_POOL_ENABLED`` 走多卡 pool 借出或 device-0 singleton。
 
     batch_fn 在 ``BatchCollector`` 的 worker thread 上跨多 asset 執行、無單一 asset 歸屬,
     故 borrow 即時 VRAM 等待事件走 registry 啟動期 tracker(asset_id=None)。
-    ``GPU_POOL_ENABLED=false`` 時直接用 ``model_class()`` device-0 singleton(Week 3a 行為)。
+    ``GPU_POOL_ENABLED=false`` 時直接用 ``model_class()`` device-0 singleton。
     """
     if not GPU_POOL_ENABLED:
         return fn(model_class())

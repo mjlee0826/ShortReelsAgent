@@ -4,11 +4,11 @@ BaseModelManager：執行緒安全的多 GPU Singleton 基底類別。
 設計模式
 --------
 - **Template Method**：子類別只需實作 ``_initialize(device_id)``。
-- **Registry**：以 ``(device_id, slot_id)`` 為 key，每個槽位保有獨立實例。
-  Week 1 起 key 從單一 ``device_id`` 升級為 tuple，預備 Week 3b 同卡多 instance Pool。
+- **Registry**：以 ``(device_id, slot_id)`` tuple 為 key，每個槽位保有獨立實例，
+  支援同卡多 instance Pool。
 - **Double-Checked Locking**：建立實例時避免 race condition。
-- **Strategy**：L2 ``GpuGate`` 為可替換策略，Week 1 預設 ``BinaryGate``，
-  Week 3b GPU Capacity Manager 透過 :meth:`BaseModelManager.register_gate_factory`
+- **Strategy**：L2 ``GpuGate`` 為可替換策略，預設 ``BinaryGate``，
+  GPU Capacity Manager 透過 :meth:`BaseModelManager.register_gate_factory`
   一行替換成 ``BudgetGate``，Manager 子類零改動。
 - **synchronized_inference 裝飾器**：對推論方法零侵入地套用「L2 GPU gate → L3 model lock」鎖序。
 
@@ -49,9 +49,9 @@ _DEFAULT_SLOT_ID = 0
 
 def _default_gate_factory(device_id: int) -> GpuGate:
     """
-    預設 Gate 工廠：每張 GPU 一個 ``BinaryGate``（Week 1 行為）。
+    預設 Gate 工廠：每張 GPU 一個 ``BinaryGate``。
 
-    簽名收 ``device_id`` 以對齊 Week 3b ``BudgetGate`` 需要的 per-device 預算
+    簽名收 ``device_id`` 以對齊 ``BudgetGate`` 需要的 per-device 預算
     （``BinaryGate`` 不需要 device_id，單純忽略），讓 :meth:`register_gate_factory`
     的工廠簽名統一為 ``Callable[[int], GpuGate]``。
     """
@@ -76,7 +76,7 @@ def synchronized_inference(method):
 
 def is_cuda_oom(exc: Exception) -> bool:
     """
-    判斷例外是否為 CUDA 顯存不足 (Week 3b OOM 重試用)。
+    判斷例外是否為 CUDA 顯存不足 (OOM 重試用)。
 
     同時涵蓋 ``torch.cuda.OutOfMemoryError`` 與部分版本只丟「訊息含 out of memory」的
     ``RuntimeError``，讓 OOM 重試不漏接;非 OOM 例外回 False 由呼叫端原樣處理。
@@ -94,11 +94,11 @@ def is_cuda_oom(exc: Exception) -> bool:
 
 def oom_resilient(method):
     """
-    裝飾器：推論方法遇 CUDA OOM 時釋放 VRAM + backoff 後重試，耗盡仍 OOM 才往上拋 (Week 3b)。
+    裝飾器：推論方法遇 CUDA OOM 時釋放 VRAM + backoff 後重試，耗盡仍 OOM 才往上拋。
 
     **必須套在 ``@synchronized_inference`` 外層**（寫在其上方），使每次重試都在鎖外
     先釋放 VRAM、再重新取得 L2 GpuGate / L3 model lock，讓同卡其他 forward 或鄰居 process
-    有機會把 VRAM 排空（plan §5.3 note 1：優先「等待 / 重試」而非「卸載重載」以避免 thrash）。
+    有機會把 VRAM 排空（優先「等待 / 重試」而非「卸載重載」以避免 thrash）。
 
     耗盡 ``OOM_RETRY_MAX_ATTEMPTS`` 次後 re-raise（由 Pipeline 隔離成 asset error），
     刻意**不**靜默吞成 null object —— OOM 失敗的 asset 應顯式標記 error。
@@ -138,12 +138,12 @@ class BaseModelManager(ABC):
     _GPU_GATES: dict[int, GpuGate] = {}
     # 建立新 Gate 時的互斥鎖（與 _instances 的建立鎖分開，避免不必要爭用）
     _GPU_GATES_LOCK = threading.Lock()
-    # Gate 工廠：Week 1 預設 per-device BinaryGate，Week 3b 由 Capacity Manager 換 BudgetGate。
+    # Gate 工廠：預設 per-device BinaryGate，由 Capacity Manager 換成 BudgetGate。
     # 簽名為 Callable[[int], GpuGate]（收 device_id），讓 BudgetGate 能依卡別給不同預算。
     _gate_factory: Callable[[int], GpuGate] = _default_gate_factory
 
     # 子類別可 override 提供 per-model「單次 forward 暫態峰值」VRAM 成本（單位 GB），
-    # Week 1 預設 0（BinaryGate 忽略），Week 3b BudgetGate 以此做預算記帳。
+    # 預設 0（BinaryGate 忽略），BudgetGate 以此做預算記帳。
     # ⚠️ 應填 forward 暫態峰值（activation/KV cache/workspace），非常駐權重大小。
     INFERENCE_VRAM_COST_GB: float = 0.0
 
@@ -154,7 +154,7 @@ class BaseModelManager(ABC):
     def __init_subclass__(cls, **kwargs):
         """每個子類別擁有獨立的實例字典與建構鎖，避免不同 Manager 間互相干擾。"""
         super().__init_subclass__(**kwargs)
-        # Key 為 (device_id, slot_id) tuple，支援同卡多 instance（Week 3b 紅利）
+        # Key 為 (device_id, slot_id) tuple，支援同卡多 instance
         cls._instances: dict[tuple[int, int], 'BaseModelManager'] = {}
         cls._creation_lock = threading.Lock()
 
@@ -208,10 +208,10 @@ class BaseModelManager(ABC):
     @classmethod
     def register_gate_factory(cls, factory: Callable[[int], GpuGate]) -> None:
         """
-        替換全域 Gate 工廠，並清空既有 Gate 快取（Week 3b 升級 BudgetGate 用）。
+        替換全域 Gate 工廠，並清空既有 Gate 快取（升級 BudgetGate 用）。
 
         工廠簽名為 ``Callable[[int], GpuGate]``（收 ``device_id``），讓每張卡能拿到
-        依自身 free VRAM 算出的不同預算。典型用法（Week 3b GPU Capacity Manager 啟動時）::
+        依自身 free VRAM 算出的不同預算。典型用法（GPU Capacity Manager 啟動時）::
 
             BaseModelManager.register_gate_factory(
                 lambda device_id: BudgetGate(

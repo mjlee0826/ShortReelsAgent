@@ -1,10 +1,10 @@
 """
 ImageWork:圖片各細粒度 Stage 之間傳遞的中間狀態容器 (Blackboard / Value Object Pattern)。
 
-Week 2b 把 ``AbstractImageProcessor.process()`` 拆成多個 Stage 後,中間結果需在 Stage 間流動,
+``AbstractImageProcessor.process()`` 拆成多個 Stage 後,中間結果需在 Stage 間流動,
 集中存放於 ``AssetContext.scratch[IMAGE_WORK_KEY]``。
 
-Week 2c 重構:把「對一張 PIL 幀的 per-frame 分析」(pil_image / tech / aes / 色彩 / 臉)抽到共用的
+把「對一張 PIL 幀的 per-frame 分析」(pil_image / tech / aes / 色彩 / 臉)抽到共用的
 :class:`~media_processor.pipeline.stages.frame_analysis.FrameAnalysis`,改由 ``ImageWork.frame`` 持有,
 讓 image / video 共用同一組 per-frame Stage(TechScore / AesScore / CVFeatures / FaceDetect / RejectFilter)。
 ImageWork 自身只保留圖片**專有**的欄位:整張圖尺寸、整張圖 saliency bbox、EXIF、語意結果。

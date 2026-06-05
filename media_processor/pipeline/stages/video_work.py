@@ -1,7 +1,7 @@
 """
 VideoWork:影片各細粒度 Stage 之間傳遞的中間狀態容器 (Blackboard / Value Object Pattern)。
 
-Week 2c 把 ``AbstractVideoProcessor.process()`` 拆成多個 Stage 後,中間結果需在 Stage 間流動,
+``AbstractVideoProcessor.process()`` 拆成多個 Stage 後,中間結果需在 Stage 間流動,
 集中存放於 ``AssetContext.scratch[VIDEO_WORK_KEY]``。與 ImageWork 比照:把「對中間代表幀的 per-frame
 分析」抽到共用的 :class:`FrameAnalysis`(``VideoWork.frame``),讓 TechScore / AesScore / CVFeatures /
 FaceDetect / RejectFilter 五個 Stage 與圖片共用;VideoWork 自身保留影片**專有**欄位(metadata、

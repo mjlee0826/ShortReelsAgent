@@ -28,7 +28,7 @@ class SemanticImageStage(Stage):
     resource_type 依策略決定:SIMPLE→GPU(Qwen)、COMPLEX→API(Gemini),供 ExecutorRegistry 路由。
 
     現狀 ``PipelineRunner`` 不傳 image_strategy(恆 SIMPLE)→ 走 Qwen,與 Legacy 逐欄一致;
-    COMPLEX 分支先接好,待 Week 4 前端傳 per-asset 策略時即生效。
+    COMPLEX 分支已接好,待前端傳 per-asset 策略時即生效。
     """
 
     def __init__(self, image_strategy: ImageStrategy = ImageStrategy.SIMPLE):
@@ -68,7 +68,7 @@ class SemanticImageStage(Stage):
     def _analyze_with_qwen(self, pil_image, context: AssetContext) -> dict:
         """
         SIMPLE 本地 Qwen 全局分析:``GPU_POOL_ENABLED`` 時從 capacity 規劃的多卡 pool 借出
-        (享多卡分散 + borrow 即時 VRAM 重檢事件),否則回退 device-0 singleton(Week 3a 行為)。
+        (享多卡分散 + borrow 即時 VRAM 重檢事件),否則回退 device-0 singleton。
         """
         if not GPU_POOL_ENABLED:
             return self._qwen_engine().analyze_media(

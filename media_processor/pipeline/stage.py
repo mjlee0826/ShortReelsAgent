@@ -4,8 +4,8 @@ Stage 抽象:Pipeline 的最小執行單元 (Strategy / Command Pattern)。
 每個 Stage 宣告自己屬於哪種資源(``ResourceType``),讓 ExecutorRegistry 能把它路由到對應的
 Worker Pool(IO / CPU / GPU / API),達成「IO 與 GPU 同時工作、不互相阻塞」的重疊紅利。
 
-Week 2a 只有 LegacyStage 一種具體 Stage;Week 2b/2c 會新增 DecodeStage / TechScoreStage 等細粒度 Stage,
-全部沿用本介面,排程器與 Pipeline 邏輯完全不需改動。
+不論是 Legacy 包裝 Stage 或 Decode / TechScore 等細粒度 Stage,全部沿用本介面,
+排程器與 Pipeline 邏輯完全不需改動。
 """
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ class StageError(Exception):
     Stage 執行失敗的統一例外型別。
 
     Pipeline 會捕捉 Stage 內拋出的任何例外並包裝成本型別(或直接寫入 AssetContext.error),
-    確保「單一 asset / 單一 Stage 失敗不影響其他 asset」(plan §6.5)。
+    確保「單一 asset / 單一 Stage 失敗不影響其他 asset」。
     """
 
     def __init__(self, stage_name: str, message: str):
