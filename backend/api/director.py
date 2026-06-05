@@ -1,18 +1,25 @@
 import asyncio
 import os
 import traceback
+import uuid
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, Dict
 from backend.services.director_service import DirectorService
 from backend.services.render_service import RenderService
+from backend.services.job_manager import job_manager
 from backend.auth.logto_jwt_verifier import verify_token
+from backend.api.progress import progress_hub, ws_progress_observer
+from media_processor.pipeline.progress import ProgressTracker
 from config.app_config import ASSETS_DIR
 
 router = APIRouter()
 director_service = DirectorService()
 render_service = RenderService()
+
+# 保存背景 job 的 asyncio.Task 參考,避免 task 在執行中被 GC 提前回收
+_background_tasks: set = set()
 
 # 允許上傳的音訊副檔名白名單
 _ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"}
@@ -56,6 +63,69 @@ async def generate_timeline(req: GenerateRequest, user_id: str = Depends(verify_
         print("\n❌ [後端發生錯誤] 詳細報錯資訊如下：")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _run_job(job_id: str, tracker: ProgressTracker, req: GenerateRequest, user_id: str):
+    """
+    背景執行一次完整生成工作流:把 Phase 1 進度經 tracker 推給 WebSocket,
+    結束時把結果 / 錯誤寫回 JobManager、發 JOB_FINISHED / JOB_ERROR 終端事件,並收尾 WS 連線。
+    """
+    try:
+        result = await asyncio.to_thread(
+            director_service.run_workflow,
+            prompt=req.user_prompt,
+            folder_name=req.asset_folder_name,
+            user_id=user_id,
+            template=req.template_source,
+            subtitles=req.enable_subtitles,
+            filters=req.enable_filters,
+            old_timeline=req.previous_timeline,
+            video_strategy=req.video_strategy,
+            music_strategy=req.music_strategy,
+            user_music_file=req.user_music_file,
+            tracker=tracker,
+        )
+        job_manager.mark_done(job_id, result)
+        tracker.emit_job_finished(payload={"result": result})
+    except Exception as e:
+        print("\n❌ [背景生成發生錯誤] 詳細報錯資訊如下：")
+        traceback.print_exc()
+        job_manager.mark_error(job_id, str(e))
+        tracker.emit_job_error(error=str(e))
+    finally:
+        # 推哨兵讓 WS 迴圈優雅收尾,並排程清除該 job 的 replay buffer
+        progress_hub.finish(job_id)
+
+
+@router.post("/jobs/generate")
+async def start_generate_job(req: GenerateRequest, user_id: str = Depends(verify_token)):
+    """
+    建立背景生成 job 並立即回 job_id(不等工作流跑完)。
+
+    前端據此開 ``WS /ws/progress/{job_id}`` 看即時進度、用 ``GET /api/jobs/{job_id}`` 取最終結果。
+    """
+    job_id = uuid.uuid4().hex
+    job_manager.create(job_id, user_id)
+    # 進度 tracker 帶此 job_id,訂閱 WebSocket Observer;事件依 job_id 分流到對應連線
+    tracker = ProgressTracker(job_id=job_id)
+    tracker.subscribe(ws_progress_observer)
+    # 先在此 event loop 執行緒捕捉 loop,讓 worker thread 的事件能排回本 loop
+    progress_hub.ensure_loop()
+    task = asyncio.create_task(_run_job(job_id, tracker, req, user_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return {"job_id": job_id}
+
+
+@router.get("/jobs/{job_id}")
+async def get_job(job_id: str, user_id: str = Depends(verify_token)):
+    """查詢背景生成 job 的狀態與最終結果;不存在回 404、非擁有者回 403。"""
+    job = job_manager.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"找不到 job: {job_id}")
+    if job.user_id != user_id:
+        raise HTTPException(status_code=403, detail="無權存取此 job")
+    return job
 
 
 @router.post("/upload_music/{folder_name}")

@@ -15,3 +15,23 @@ TEMP_TEMPLATES_DIR = os.environ.get("TEMP_TEMPLATES_DIR", "/data1/cache/mjlee/te
 
 # SSR 算圖暫存工作區：每次 render 建一個子目錄，render 完成後自動清除
 TEMP_WORKSPACES_DIR = os.environ.get("TEMP_WORKSPACES_DIR", "/data1/cache/mjlee/temp_workspaces")
+
+# --- 進度推播 / 背景生成 job 的執行期常數 ---
+
+# 每個 job 的進度事件 replay buffer 上限：WS 晚連時可補播開頭事件，避免漏掉。
+# 取值需覆蓋單批所有 asset × stage 的事件量（含 resource_wait），預設留足裕度。
+PROGRESS_BUFFER_MAXLEN = int(os.environ.get("PROGRESS_BUFFER_MAXLEN", "2000"))
+
+# job 結果與其 replay buffer 完成後的保留秒數：讓 WS 重連 / GET 仍能補取，逾時即清除。
+PROGRESS_JOB_RETENTION_SEC = int(os.environ.get("PROGRESS_JOB_RETENTION_SEC", "1800"))
+
+# --- 素材縮圖（前端 Asset Management 網格用）---
+
+# 縮圖快取子目錄：位於 TEMP_TEMPLATES_DIR 之下，沿用既有 /cache 靜態路由對外服務。
+THUMBNAIL_SUBDIR = "thumbnails"
+# 縮圖統一輸出為 JPEG。
+THUMBNAIL_EXT = ".jpg"
+# 縮圖長邊像素上限：網格只需小圖，過大徒增產生與傳輸成本。
+THUMBNAIL_MAX_PX = int(os.environ.get("THUMBNAIL_MAX_PX", "320"))
+# 縮圖 JPEG 壓縮品質（1–95）。
+THUMBNAIL_JPEG_QUALITY = int(os.environ.get("THUMBNAIL_JPEG_QUALITY", "80"))

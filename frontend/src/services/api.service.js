@@ -148,6 +148,41 @@ class DirectorApiService {
   async deleteProject(projectName) {
     await apiClient.delete(`/api/projects/${projectName}`);
   }
+
+  // ── 素材管理（Asset Management UI）─────────────────────────────────────────
+
+  // 列出某專案的所有素材檢視（狀態 / 策略 / dirty / 縮圖 URL）
+  async fetchAssets(projectName) {
+    const response = await apiClient.get(`/api/projects/${projectName}/assets`);
+    return response.data;
+  }
+
+  // 更新單一素材的 Simple/Complex 策略並標記 dirty，回傳更新後的素材檢視
+  async setAssetStrategy(projectName, filename, strategy) {
+    const response = await apiClient.patch(
+      `/api/projects/${projectName}/assets/${encodeURIComponent(filename)}/strategy`,
+      { strategy }
+    );
+    return response.data;
+  }
+
+  // 強制重跑 Phase 1（assetIds=null 代表全部），回傳 { job_id } 供訂閱 WebSocket 進度
+  async reanalyzeAssets(projectName, assetIds = null) {
+    const response = await apiClient.post(
+      `/api/projects/${projectName}/reanalyze`,
+      { asset_ids: assetIds }
+    );
+    return response.data;
+  }
+
+  // 開始生成：套用逐檔策略後只重跑 dirty+未處理素材的 Phase 1，回傳 { job_id }
+  async startAssetGenerate(projectName, assetStrategies = null) {
+    const response = await apiClient.post(
+      `/api/projects/${projectName}/generate`,
+      { asset_strategies: assetStrategies }
+    );
+    return response.data;
+  }
 }
 
 export const apiService = new DirectorApiService();

@@ -6,6 +6,7 @@ import LoginPage from './pages/LoginPage';
 import CallbackPage from './pages/CallbackPage';
 import ProjectDashboard from './pages/ProjectDashboard';
 import EditorPage from './pages/EditorPage';
+import AssetListPage from './pages/AssetListPage';
 
 /**
  * AuthGuard：保護需要登入才能存取的路由。
@@ -54,6 +55,7 @@ export default function App() {
         <Route path="/login"    element={<LoginPage />} />
         <Route path="/callback" element={<CallbackPage />} />
         <Route path="/"         element={<AuthGuard><ProjectDashboard /></AuthGuard>} />
+        <Route path="/projects/:projectId/assets" element={<AuthGuard><AssetListPage /></AuthGuard>} />
         <Route path="/editor"   element={<AuthGuard><EditorPage /></AuthGuard>} />
         {/* 未知路徑一律導回首頁 */}
         <Route path="*"         element={<Navigate to="/" replace />} />

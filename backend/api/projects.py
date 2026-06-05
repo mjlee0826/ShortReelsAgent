@@ -5,17 +5,38 @@ Facade Pattern：專案管理 API 端點
 以 JWT 驗證確保使用者只能存取自己的專案。
 """
 
+import asyncio
 import os
 import re
 import json
 import shutil
 from datetime import datetime, timezone
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from backend.auth.logto_jwt_verifier import verify_token
+from backend.services.ingestion_provider import cloud_ingestion_service
 from config.app_config import ASSETS_DIR
+from ingestion_engine.models import (
+    META_KEY_DRIVE_FOLDER_ID,
+    META_KEY_LAST_SIGNATURE,
+    META_KEY_LAST_SYNC_ERROR,
+    META_KEY_LAST_SYNCED_AT,
+    META_KEY_PHASE1_STATUS,
+    META_KEY_PHASE1_UPDATED_AT,
+    META_KEY_SOURCE,
+    META_KEY_SOURCE_URL,
+    META_KEY_SYNC_STATUS,
+    PHASE1_STATUS_PENDING,
+    SOURCE_GDRIVE,
+    SYNC_STATUS_ACTIVE,
+    SyncReport,
+)
 
 router = APIRouter()
+
+# 背景首同步任務的強參照集合：避免 asyncio.create_task 的任務被 GC 提早回收
+_background_tasks: set[asyncio.Task] = set()
 
 _ASSETS_BASE_PATH = ASSETS_DIR
 
@@ -25,16 +46,35 @@ _META_FILENAME = "project_meta.json"
 
 
 class CreateProjectRequest(BaseModel):
+    """以顯示名稱建立空白本地專案的請求體。"""
+
     display_name: str
 
 
+class CreateFromDriveRequest(BaseModel):
+    """以 Drive 公開資料夾連結建立雲端來源專案的請求體。"""
+
+    display_name: str
+    # Google Drive 資料夾分享連結（需設為「知道連結的人可檢視」）；亦接受裸資料夾 ID
+    source_url: str
+
+
 class ProjectMeta(BaseModel):
+    """專案中繼資料；雲端來源欄位僅雲端 project 有值，手動建立的本地 project 為 None。"""
+
     name: str
     display_name: str
     created_at: str
     last_modified: str
     asset_count: int
     has_blueprint: bool
+    # 雲端來源同步觀測欄位（對應 project_meta.json 的雲端鍵）
+    source: Optional[str] = None
+    source_url: Optional[str] = None
+    phase1_status: Optional[str] = None
+    sync_status: Optional[str] = None
+    last_synced_at: Optional[str] = None
+    last_sync_error: Optional[str] = None
 
 
 # --- 工具函式 ---
@@ -86,6 +126,17 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _allocate_unique_name(user_root: str, base_name: str) -> str:
+    """在 user 根目錄下為 base_name 配置不衝突的資料夾名（重名時加時間戳與序號後綴）。"""
+    name = base_name
+    counter = 1
+    while os.path.exists(os.path.join(user_root, name)):
+        suffix = datetime.now().strftime("%m%d%H%M")
+        name = f"{base_name}_{suffix}_{counter}"
+        counter += 1
+    return name
+
+
 # --- API 端點 ---
 
 @router.get("/projects", response_model=list[ProjectMeta])
@@ -121,15 +172,7 @@ async def create_project(req: CreateProjectRequest, user_id: str = Depends(verif
         raise HTTPException(status_code=400, detail="專案名稱不能為空")
 
     user_root = _user_dir(user_id)
-    base_name = _slugify(req.display_name)
-
-    # 處理重名：加時間戳後綴
-    name = base_name
-    counter = 1
-    while os.path.exists(os.path.join(user_root, name)):
-        suffix = datetime.now().strftime("%m%d%H%M")
-        name = f"{base_name}_{suffix}_{counter}"
-        counter += 1
+    name = _allocate_unique_name(user_root, _slugify(req.display_name))
 
     project_dir = os.path.join(user_root, name)
     os.makedirs(project_dir, exist_ok=True)
@@ -147,6 +190,73 @@ async def create_project(req: CreateProjectRequest, user_id: str = Depends(verif
 
     print(f"[Projects] 建立新專案: '{name}' (使用者 '{user_id[:8]}...')")
     return meta
+
+
+@router.post("/projects/from-drive", response_model=ProjectMeta, status_code=201)
+async def create_project_from_drive(req: CreateFromDriveRequest, user_id: str = Depends(verify_token)):
+    """
+    以 Drive 公開資料夾連結建立一個雲端來源專案，並立即在背景啟動首次同步。
+
+    解析連結取得資料夾 ID → 建立 project 資料夾與含雲端來源欄位的 meta → 排程背景首同步
+    （下載素材 + 觸發 Phase 1）；同步失敗會由背景 poller 下輪自動重試。
+    """
+    if not req.display_name.strip():
+        raise HTTPException(status_code=400, detail="專案名稱不能為空")
+    try:
+        folder_id = cloud_ingestion_service.parse_source(req.source_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    user_root = _user_dir(user_id)
+    name = _allocate_unique_name(user_root, _slugify(req.display_name))
+    project_dir = os.path.join(user_root, name)
+    os.makedirs(project_dir, exist_ok=True)
+
+    now = _now_iso()
+    meta = {
+        "name": name,
+        "display_name": req.display_name.strip(),
+        "created_at": now,
+        "last_modified": now,
+        "asset_count": 0,
+        "has_blueprint": False,
+        # 雲端來源連結與同步狀態欄位（poller 以 source=gdrive 辨識需同步的 project）
+        META_KEY_SOURCE: SOURCE_GDRIVE,
+        META_KEY_DRIVE_FOLDER_ID: folder_id,
+        META_KEY_SOURCE_URL: req.source_url.strip(),
+        META_KEY_SYNC_STATUS: SYNC_STATUS_ACTIVE,
+        META_KEY_PHASE1_STATUS: PHASE1_STATUS_PENDING,
+        META_KEY_PHASE1_UPDATED_AT: None,
+        META_KEY_LAST_SIGNATURE: "",
+        META_KEY_LAST_SYNCED_AT: None,
+        META_KEY_LAST_SYNC_ERROR: None,
+    }
+    _write_meta(project_dir, meta)
+    _schedule_first_sync(user_id, name)
+
+    print(f"[Projects] 建立雲端來源專案: '{name}' (使用者 '{user_id[:8]}...')")
+    return meta
+
+
+@router.post("/projects/{project_name}/sync", response_model=SyncReport)
+async def sync_project(project_name: str, user_id: str = Depends(verify_token)):
+    """手動觸發一次雲端同步；阻塞的 Drive API／Phase 1 丟到 thread 執行，不卡 event loop。"""
+    project_dir = os.path.join(_user_dir(user_id), project_name)
+    if not os.path.isdir(project_dir):
+        raise HTTPException(status_code=404, detail=f"找不到專案: {project_name}")
+    try:
+        return await asyncio.to_thread(cloud_ingestion_service.sync_project, user_id, project_name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"找不到專案: {project_name}")
+
+
+def _schedule_first_sync(user_id: str, project_name: str) -> None:
+    """排程一次背景首同步（不阻塞請求）；任務參照存入集合避免被 GC 提早回收。"""
+    task = asyncio.create_task(
+        asyncio.to_thread(cloud_ingestion_service.sync_project, user_id, project_name)
+    )
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 
 @router.delete("/projects/{project_name}", status_code=204)

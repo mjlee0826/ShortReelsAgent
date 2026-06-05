@@ -3,16 +3,17 @@ import json
 from datetime import datetime, timezone
 from config.app_config import ASSETS_DIR, TEMP_TEMPLATES_DIR
 from media_processor.video_strategy import VideoStrategy
-from media_processor.pipeline import PipelineRunner
+from media_processor.pipeline import PipelineRunner, ProgressTracker
 from media_tools.media_standardizer import MediaStandardizer
 from template_engine.template_analyzer_facade import TemplateAnalyzerFacade
 from director_agent.director_facade import DirectorFacade
+from backend.services.asset_discovery import PHASE1_STATUS_FILENAME, collect_asset_files
 
 # 計算素材數量時認定的媒體副檔名
 _MEDIA_EXTENSIONS = {'.mp4', '.mov', '.jpg', '.jpeg', '.png', '.heic', '.heif', '.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg'}
 
-# Phase 1 感知分析支援的媒體副檔名（不含純音訊；音訊由 Phase 3 處理）
-_SUPPORTED_MEDIA_EXTENSIONS = {'.mp4', '.mov', '.jpg', '.jpeg', '.png', '.heic', '.heif'}
+# success-only 感知結果落地檔（供 Phase 4 使用，與全狀態的 PHASE1_STATUS_FILENAME 區分）
+_PHASE1_METADATA_FILENAME = "phase1_assets_metadata.json"
 
 # 前端影片品質選項：'1' 代表高品質（Gemini 深度索引），其餘為快速本地 Qwen 分析
 _COMPLEX_VIDEO_OPTION = "1"
@@ -50,41 +51,115 @@ class DirectorService:
         except Exception as e:
             print(f"⚠️ [Service] 更新專案 meta 失敗: {e}")
 
-    def _collect_asset_files(self, target_dir: str) -> list[str]:
-        """
-        列出資料夾內待 Phase 1 處理的媒體檔案絕對路徑（沿用原序列迴圈的過濾規則）。
+    def _resolve_target_dir(self, folder_name: str, user_id: str = None) -> str:
+        """依是否有 user_id 決定素材資料夾路徑（user 資料隔離）。"""
+        if user_id:
+            return os.path.join(self.base_assets_path, user_id, folder_name)
+        return os.path.join(self.base_assets_path, folder_name)
 
-        - 原始檔若已有對應 _std 標準化版本，跳過原始檔只處理標準化版本（避免重複）。
-        - 僅保留圖片／影片副檔名白名單內的檔案。
-        回傳順序即 os.listdir 順序，確保 Pipeline 輸出與舊版逐欄一致。
+    def run_phase1(self, folder_name: str, user_id: str = None,
+                   video_strategy: str = "2",
+                   tracker: ProgressTracker = None,
+                   asset_filenames: list[str] = None,
+                   asset_strategies: dict = None,
+                   require_success: bool = True) -> list[dict]:
         """
-        all_files = [
-            f for f in os.listdir(target_dir)
-            if os.path.isfile(os.path.join(target_dir, f))
-        ]
-        asset_files: list[str] = []
-        for filename in all_files:
-            # 原始檔若已有對應 _std 版本，跳過原始檔（只處理標準化後的版本）
-            if "_std." not in filename:
-                std_version = os.path.splitext(filename)[0] + "_std"
-                if any(std_version in f for f in all_files):
-                    continue
-            ext = os.path.splitext(filename)[1].lower()
-            if ext not in _SUPPORTED_MEDIA_EXTENSIONS:
-                continue
-            asset_files.append(os.path.join(target_dir, filename))
-        return asset_files
+        只執行 Phase 1（per-asset 感知分析）：標準化 → 收集素材 → 並行 Pipeline → 落地 metadata。
+
+        供多種呼叫端共用：run_workflow 完整流程、雲端攝取背景預跑，以及素材頁的重新分析 / 開始生成。
+
+        Args:
+            asset_filenames: 只重跑這些檔名（子集重分析）；None 代表全部素材。
+            asset_strategies: 逐檔策略覆寫 ``{檔名: "simple"|"complex"}``，透傳給 Pipeline。
+            require_success: 為 True 且全部失敗時拋例外（完整生成需 ≥1 success）；
+                             子集重分析設 False（重跑單張被 reject 的素材是合法情境）。
+
+        回傳 success-only 的 raw_assets_metadata 列表。
+        """
+        target_dir = self._resolve_target_dir(folder_name, user_id)
+        if not os.path.isdir(target_dir):
+            raise ValueError(f"找不到素材資料夾: {target_dir}")
+
+        self.standardizer.standardize_folder(target_dir)
+
+        # 前端影片品質選項轉策略列舉；工廠依副檔名路由，圖片一律走 SIMPLE，僅影片套用此值
+        video_strategy_enum = (
+            VideoStrategy.COMPLEX if video_strategy == _COMPLEX_VIDEO_OPTION
+            else VideoStrategy.SIMPLE
+        )
+
+        # 收集待處理素材（沿用跳過 _std 重複 + 副檔名白名單邏輯）；子集重分析只留指定檔名
+        asset_files = collect_asset_files(target_dir)
+        is_subset = asset_filenames is not None
+        if is_subset:
+            wanted = set(asset_filenames)
+            asset_files = [p for p in asset_files if os.path.basename(p) in wanted]
+        print(f"[Service] 正在處理 {len(asset_files)} 個素材...")
+
+        # 以 Pipeline 框架並行跑感知分析：asset 間並行，輸出依輸入順序、僅收 success；
+        # status_sink 另收每個 asset（含 rejected / error）的精簡狀態供 UI 落地
+        status_sink: list[dict] = []
+        raw_assets_metadata = self.pipeline_runner.run(
+            asset_files, target_dir, video_strategy_enum, tracker=tracker,
+            asset_strategies=asset_strategies, status_sink=status_sink,
+        )
+        if require_success and not raw_assets_metadata:
+            raise ValueError("資料夾內沒有成功解析的有效素材！")
+
+        # 本次實際重跑到的檔名（子集合併時用來移除舊條目）
+        reprocessed_ids = {entry["asset_id"] for entry in status_sink}
+        self._dump_phase1_metadata(target_dir, raw_assets_metadata, reprocessed_ids, merge=is_subset)
+        self._dump_phase1_status(target_dir, status_sink, merge=is_subset)
+
+        # 更新專案 meta 的素材數量／最後修改時間（雲端預跑時讓專案列表即時反映）
+        self._update_project_meta(target_dir, folder_name)
+        return raw_assets_metadata
+
+    def _dump_phase1_metadata(self, target_dir: str, success_assets: list[dict],
+                              reprocessed_ids: set, merge: bool) -> None:
+        """
+        落地 success-only 感知結果（Phase 4 用）。
+
+        全量重跑直接覆寫；子集重分析則保留未重跑的舊條目、移除本次重跑者的舊條目、append 新成功者
+        （以 file 的 basename 為鍵；重跑後變 rejected/error 者自然從 success 清單消失）。
+        """
+        dump_path = os.path.join(target_dir, _PHASE1_METADATA_FILENAME)
+        if merge and os.path.exists(dump_path):
+            with open(dump_path, 'r', encoding='utf-8') as f:
+                existing = json.load(f)
+            kept = [e for e in existing if os.path.basename(e.get("file", "")) not in reprocessed_ids]
+            merged = kept + success_assets
+        else:
+            merged = success_assets
+        with open(dump_path, 'w', encoding='utf-8') as f:
+            json.dump(merged, f, ensure_ascii=False, indent=2)
+            print(f"💾 [Dump] 素材特徵已儲存至 {dump_path}")
+
+    def _dump_phase1_status(self, target_dir: str, status_entries: list[dict], merge: bool) -> None:
+        """
+        落地全狀態檔（UI 用，dict 以檔名為鍵，含 success / rejected / error）。
+
+        全量重跑從頭建表（順手汰除已刪素材的舊狀態）；子集重分析則合併進既有表只更新重跑者。
+        """
+        dump_path = os.path.join(target_dir, PHASE1_STATUS_FILENAME)
+        status_map: dict = {}
+        if merge and os.path.exists(dump_path):
+            with open(dump_path, 'r', encoding='utf-8') as f:
+                status_map = json.load(f)
+        for entry in status_entries:
+            status_map[entry["asset_id"]] = entry
+        with open(dump_path, 'w', encoding='utf-8') as f:
+            json.dump(status_map, f, ensure_ascii=False, indent=2)
 
     def run_workflow(self, prompt: str, folder_name: str, user_id: str = None,
                     template: str = None,
                     subtitles: bool = True, filters: bool = True, old_timeline: dict = None,
                     video_strategy: str = "2", music_strategy: str = "search_copyright",
-                    user_music_file: str = None):
+                    user_music_file: str = None,
+                    tracker: ProgressTracker = None):
+        """執行完整生成工作流；tracker 非 None 時把 Phase 1 進度事件廣播給其訂閱者（WebSocket）。"""
         # 若有 user_id，素材路徑改為 assets/{user_id}/{folder_name}/，實現使用者資料隔離
-        if user_id:
-            target_dir = os.path.join(self.base_assets_path, user_id, folder_name)
-        else:
-            target_dir = os.path.join(self.base_assets_path, folder_name)
+        target_dir = self._resolve_target_dir(folder_name, user_id)
         if not os.path.isdir(target_dir):
             raise ValueError(f"找不到素材資料夾: {target_dir}")
         
@@ -119,31 +194,10 @@ class DirectorService:
         
         # --- 否則，執行完整的新生成流程 ---
         else:
-            self.standardizer.standardize_folder(target_dir)
-
-            # 前端傳入的影片品質選項轉為策略列舉；工廠會依副檔名路由，
-            # 故圖片一律走預設 SIMPLE，僅影片會套用此處的 video_strategy
-            video_strategy_enum = (
-                VideoStrategy.COMPLEX if video_strategy == _COMPLEX_VIDEO_OPTION
-                else VideoStrategy.SIMPLE
+            # Phase 1：per-asset 感知分析（抽成獨立方法，與雲端攝取背景預跑共用）
+            raw_assets_metadata = self.run_phase1(
+                folder_name, user_id=user_id, video_strategy=video_strategy, tracker=tracker
             )
-
-            # 收集待處理素材（沿用原跳過 _std 重複 + 副檔名白名單邏輯）
-            asset_files = self._collect_asset_files(target_dir)
-            print(f"[Service] 正在處理 {len(asset_files)} 個素材...")
-
-            # 以 Pipeline 框架取代原序列迴圈：asset 間並行，輸出依輸入順序、僅收 success，
-            # 與舊版逐欄一致（Week 2a：LegacyStage 內部仍呼叫既有 process()）
-            raw_assets_metadata = self.pipeline_runner.run(
-                asset_files, target_dir, video_strategy_enum
-            )
-
-            if not raw_assets_metadata:
-                raise ValueError("資料夾內沒有成功解析的有效素材！")
-
-            with open(phase1_dump_path, 'w', encoding='utf-8') as f:
-                json.dump(raw_assets_metadata, f, ensure_ascii=False, indent=2)
-                print(f"💾 [Dump] 素材特徵已儲存至 {phase1_dump_path}")
 
             if template:
                 print(f"[Service] 正在提取範本 DNA: {template}")

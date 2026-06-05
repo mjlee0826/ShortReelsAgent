@@ -194,3 +194,21 @@ class ProgressTracker:
             stage_name=stage_name,
             payload=payload or {},
         ))
+
+    # ── Job 級別終端事件（整個 generate 工作流結束時由背景 job runner 發送） ──
+    def emit_job_finished(self, payload: Optional[dict] = None) -> None:
+        """送出 JOB_FINISHED 事件；payload 可帶最終結果（例如 blueprint）供前端直接取用。"""
+        self.publish(ProgressEvent(
+            event_type=ProgressEventType.JOB_FINISHED,
+            job_id=self._job_id,
+            payload=payload or {},
+        ))
+
+    def emit_job_error(self, error: str, payload: Optional[dict] = None) -> None:
+        """送出 JOB_ERROR 事件，帶工作流失敗的錯誤訊息。"""
+        self.publish(ProgressEvent(
+            event_type=ProgressEventType.JOB_ERROR,
+            job_id=self._job_id,
+            error=error,
+            payload=payload or {},
+        ))

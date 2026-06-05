@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FaPlus, FaTrash, FaFilm, FaExclamationCircle } from 'react-icons/fa';
+import { FaPlus, FaTrash, FaFilm, FaExclamationCircle, FaThLarge } from 'react-icons/fa';
 import useProjectStore from '../store/useProjectStore';
 import AppHeader from '../components/AppHeader/AppHeader';
 
@@ -58,7 +58,7 @@ function CreateProjectModal({ onClose, onCreate }) {
 }
 
 // 專案卡片元件
-function ProjectCard({ project, onOpen, onDelete }) {
+function ProjectCard({ project, onOpen, onManage, onDelete }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const handleDeleteClick = (e) => {
@@ -69,6 +69,11 @@ function ProjectCard({ project, onOpen, onDelete }) {
   const handleConfirmDelete = async (e) => {
     e.stopPropagation();
     await onDelete(project.name);
+  };
+
+  const handleManageClick = (e) => {
+    e.stopPropagation();
+    onManage(project);
   };
 
   const lastModified = new Date(project.last_modified).toLocaleDateString('zh-TW', {
@@ -97,6 +102,14 @@ function ProjectCard({ project, onOpen, onDelete }) {
         <h3 className="text-white font-semibold text-base leading-tight truncate">{project.display_name}</h3>
         <p className="text-gray-500 text-xs mt-1">{project.asset_count} 個素材・{lastModified}</p>
       </div>
+
+      {/* 管理素材按鈕（進入素材審閱頁；點卡片本身仍進編輯器）*/}
+      <button
+        onClick={handleManageClick}
+        className="flex items-center justify-center gap-2 w-full px-3 py-2 text-xs font-medium text-gray-300 bg-gray-800 hover:bg-gray-700 hover:text-white rounded-lg transition-colors"
+      >
+        <FaThLarge size={11} /> 管理素材
+      </button>
 
       {/* 刪除按鈕（hover 才顯示）*/}
       <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -141,6 +154,12 @@ export default function ProjectDashboard() {
   const handleOpenProject = (project) => {
     selectProject(project);
     navigate('/editor');
+  };
+
+  // 進入素材管理頁：先選定專案（讓素材頁可取用 display_name），再導向
+  const handleManageProject = (project) => {
+    selectProject(project);
+    navigate(`/projects/${project.name}/assets`);
   };
 
   return (
@@ -200,6 +219,7 @@ export default function ProjectDashboard() {
                 key={project.name}
                 project={project}
                 onOpen={handleOpenProject}
+                onManage={handleManageProject}
                 onDelete={deleteProject}
               />
             ))}

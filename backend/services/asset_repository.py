@@ -1,0 +1,202 @@
+"""
+素材狀態與策略儲存庫 (Repository Pattern)。
+
+封裝 Asset Management UI 需要的素材檢視:把「磁碟上的素材檔」「Phase 1 全狀態檔」「逐檔策略 /
+dirty 標記(折進 project_meta.json)」「縮圖」這幾個來源 join 成單一 ``AssetView`` 清單。
+逐檔策略與 dirty 比照雲端同步狀態,折進 project_meta.json,不另建註冊檔。
+"""
+from __future__ import annotations
+
+import json
+import os
+from enum import Enum
+from typing import Optional
+
+from pydantic import BaseModel
+
+from backend.services.asset_discovery import PHASE1_STATUS_FILENAME, collect_asset_files
+from backend.services.thumbnail_service import ThumbnailService
+from config.app_config import ASSETS_DIR
+from media_processor.pipeline.context import derive_media_kind
+
+# project_meta.json 內逐檔策略 / dirty 相關欄位鍵(具名常數,避免散落 magic string)
+META_KEY_ASSET_STRATEGIES = "asset_strategies"  # {檔名: "simple"|"complex"}
+META_KEY_DIRTY_ASSETS = "dirty_assets"          # 策略變更後待重跑 Phase 1 的檔名清單
+
+# 全狀態落地檔 PHASE1_STATUS_FILENAME 由 asset_discovery 定義(director_service 寫入、本庫讀取)
+_META_FILENAME = "project_meta.json"
+
+# 素材尚未被 Phase 1 分析過(全狀態檔內查無此檔)時的 UI 狀態
+ASSET_STATUS_UNPROCESSED = "unprocessed"
+
+
+class AssetStrategy(str, Enum):
+    """逐檔感知策略(API 契約用,與 media_processor 的列舉解耦)。"""
+
+    SIMPLE = "simple"   # 本地 Qwen 全局分析
+    COMPLEX = "complex"  # Gemini 深度分析
+
+
+class AssetView(BaseModel):
+    """單一素材給前端網格的檢視模型 (Value Object)。"""
+
+    filename: str
+    media_kind: str                          # "image" | "video"
+    status: str                              # unprocessed | success | rejected | error
+    strategy: str = AssetStrategy.SIMPLE.value
+    dirty: bool = False                      # 策略已變更、待下次「開始生成」重跑
+    technical_score: Optional[float] = None
+    reason: Optional[str] = None             # rejected 時的原因(技術分過低)
+    error: Optional[str] = None              # error 時的錯誤訊息
+    thumbnail_url: Optional[str] = None
+    size_bytes: int = 0
+    modified_at: str = ""
+
+
+class AssetRepository:
+    """讀寫素材檢視 / 策略 / dirty 的儲存庫;縮圖產生委派給注入的 ThumbnailService。"""
+
+    def __init__(self, assets_dir: str = ASSETS_DIR, thumbnail_service: Optional[ThumbnailService] = None):
+        """設定素材根目錄並注入縮圖服務(預設自建一個)。"""
+        self._assets_dir = assets_dir
+        self._thumbnails = thumbnail_service or ThumbnailService()
+
+    # ── 路徑與 JSON 讀寫 ─────────────────────────────────────────────────────
+
+    def _project_dir(self, user_id: str, project: str) -> str:
+        """取得使用者某專案的資料夾路徑;不存在則拋 FileNotFoundError。"""
+        path = os.path.join(self._assets_dir, user_id, project)
+        if not os.path.isdir(path):
+            raise FileNotFoundError(f"找不到專案: {project}")
+        return path
+
+    @staticmethod
+    def _read_meta(project_dir: str) -> dict:
+        """讀取 project_meta.json;不存在回空 dict(讀-改-寫時保留既有欄位)。"""
+        meta_path = os.path.join(project_dir, _META_FILENAME)
+        if not os.path.exists(meta_path):
+            return {}
+        with open(meta_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    @staticmethod
+    def _write_meta(project_dir: str, meta: dict) -> None:
+        """寫回 project_meta.json(整份覆寫,保留呼叫端讀-改-寫的其餘欄位)。"""
+        meta_path = os.path.join(project_dir, _META_FILENAME)
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+
+    @staticmethod
+    def _read_status_map(project_dir: str) -> dict:
+        """讀取 Phase 1 全狀態檔(鍵為檔名);不存在回空 dict(全部視為未處理)。"""
+        status_path = os.path.join(project_dir, PHASE1_STATUS_FILENAME)
+        if not os.path.exists(status_path):
+            return {}
+        with open(status_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    # ── 對外操作 ─────────────────────────────────────────────────────────────
+
+    def list_assets(self, user_id: str, project: str) -> list[AssetView]:
+        """
+        列出某專案的所有素材檢視:磁碟素材檔為主,join 全狀態檔取狀態、meta 取策略 / dirty、
+        並順手 lazy 補產縮圖。查無狀態的素材一律標 ``unprocessed``。
+        """
+        project_dir = self._project_dir(user_id, project)
+        meta = self._read_meta(project_dir)
+        strategies = meta.get(META_KEY_ASSET_STRATEGIES, {})
+        dirty_set = set(meta.get(META_KEY_DIRTY_ASSETS, []))
+        status_map = self._read_status_map(project_dir)
+
+        views: list[AssetView] = []
+        for file_path in collect_asset_files(project_dir):
+            filename = os.path.basename(file_path)
+            try:
+                media_kind = derive_media_kind(file_path)
+            except ValueError:
+                # collect_asset_files 已過濾;防呆跳過
+                continue
+            status_entry = status_map.get(filename, {})
+            stat = os.stat(file_path)
+            views.append(AssetView(
+                filename=filename,
+                media_kind=media_kind.value,
+                status=status_entry.get("status", ASSET_STATUS_UNPROCESSED),
+                strategy=strategies.get(filename, AssetStrategy.SIMPLE.value),
+                dirty=filename in dirty_set,
+                technical_score=status_entry.get("technical_score"),
+                reason=status_entry.get("reason"),
+                error=status_entry.get("error"),
+                thumbnail_url=self._thumbnails.ensure_url(
+                    user_id, project, filename, file_path, media_kind
+                ),
+                size_bytes=stat.st_size,
+                modified_at=_iso_from_mtime(stat.st_mtime),
+            ))
+        return views
+
+    def set_strategy(self, user_id: str, project: str, filename: str, strategy: str) -> AssetView:
+        """
+        設定單一素材的策略並標記 dirty(讀-改-寫整份 meta,保留雲端來源等其餘欄位),回傳更新後的檢視。
+        """
+        if strategy not in (AssetStrategy.SIMPLE.value, AssetStrategy.COMPLEX.value):
+            raise ValueError(f"不支援的策略: {strategy}")
+        project_dir = self._project_dir(user_id, project)
+        if not self._asset_exists(project_dir, filename):
+            raise FileNotFoundError(f"找不到素材: {filename}")
+
+        meta = self._read_meta(project_dir)
+        meta.setdefault(META_KEY_ASSET_STRATEGIES, {})[filename] = strategy
+        dirty = set(meta.get(META_KEY_DIRTY_ASSETS, []))
+        dirty.add(filename)
+        meta[META_KEY_DIRTY_ASSETS] = sorted(dirty)
+        self._write_meta(project_dir, meta)
+
+        # 回傳該檔最新檢視(策略已更新、dirty=True)
+        return next(v for v in self.list_assets(user_id, project) if v.filename == filename)
+
+    def select_pending(self, user_id: str, project: str) -> list[str]:
+        """回傳「dirty(策略變更)∪ 未處理」的檔名清單,供「開始生成」只重跑需要的素材。"""
+        project_dir = self._project_dir(user_id, project)
+        meta = self._read_meta(project_dir)
+        dirty = set(meta.get(META_KEY_DIRTY_ASSETS, []))
+        status_map = self._read_status_map(project_dir)
+        pending: list[str] = []
+        for file_path in collect_asset_files(project_dir):
+            filename = os.path.basename(file_path)
+            if filename in dirty or filename not in status_map:
+                pending.append(filename)
+        return pending
+
+    def get_asset_strategies(self, user_id: str, project: str) -> dict[str, str]:
+        """取得逐檔策略表(供 run_phase1 套用);無設定回空 dict。"""
+        project_dir = self._project_dir(user_id, project)
+        return self._read_meta(project_dir).get(META_KEY_ASSET_STRATEGIES, {})
+
+    def clear_dirty(self, user_id: str, project: str, filenames: Optional[list[str]] = None) -> None:
+        """
+        Phase 1 成功後把 dirty 標記清掉(讀-改-寫整份 meta)。
+
+        ``filenames`` 為 None 代表清空整份 dirty(重新分析全部時用);否則只移除指定檔名。
+        """
+        project_dir = self._project_dir(user_id, project)
+        meta = self._read_meta(project_dir)
+        dirty = set(meta.get(META_KEY_DIRTY_ASSETS, []))
+        if not dirty:
+            return
+        remaining = set() if filenames is None else dirty - set(filenames)
+        meta[META_KEY_DIRTY_ASSETS] = sorted(remaining)
+        self._write_meta(project_dir, meta)
+
+    @staticmethod
+    def _asset_exists(project_dir: str, filename: str) -> bool:
+        """確認某檔名確實是該專案的素材(經同一套探索規則,擋掉路徑穿越與非素材檔)。"""
+        return any(
+            os.path.basename(p) == filename for p in collect_asset_files(project_dir)
+        )
+
+
+def _iso_from_mtime(mtime: float) -> str:
+    """把檔案 mtime(unix 秒)轉成 UTC ISO8601 字串(與專案其餘時間格式一致)。"""
+    from datetime import datetime, timezone
+    return datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()

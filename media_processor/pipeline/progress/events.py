@@ -20,9 +20,14 @@ class ProgressEventType(str, Enum):
     STAGE_FINISH = "stage_finish"
     STAGE_ERROR  = "stage_error"
 
-    # ── Pipeline 級別 ────────────────────────────────────────────────────────
+    # ── Pipeline 級別（單一 asset 的一條流水線起訖） ──────────────────────────
     PIPELINE_START  = "pipeline_start"
     PIPELINE_FINISH = "pipeline_finish"
+
+    # ── Job 級別（一次 generate 請求的工作流終端訊號，涵蓋 Phase 1–4） ────────
+    # 與 per-asset 的 PIPELINE_FINISH 區隔：前端據此關閉進度面板並取最終結果
+    JOB_FINISHED = "job_finished"
+    JOB_ERROR    = "job_error"
 
     # ── 啟動期 ────────────────────────────────────────────────────────────────
     # Eager warm up 模型載入事件，由 ModelPoolRegistry.warm_up 發送

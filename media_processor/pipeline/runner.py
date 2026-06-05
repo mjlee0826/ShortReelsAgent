@@ -21,7 +21,7 @@ from config.pipeline_config import (
 )
 from media_processor.pipeline.batch_collector import BatchCollectorRegistry
 from media_processor.pipeline.builder import PipelineBuilder
-from media_processor.pipeline.context import AssetContext, derive_media_kind
+from media_processor.pipeline.context import AssetContext, MediaKind, derive_media_kind
 from media_processor.pipeline.executor.executor_registry import ExecutorRegistry
 from media_processor.pipeline.executor.model_pool_registry import ModelPoolRegistry
 from media_processor.pipeline.progress import (
@@ -30,6 +30,7 @@ from media_processor.pipeline.progress import (
     ProgressTracker,
 )
 from media_processor.pipeline.progress.watchdog import StallWatchdog
+from media_processor.image_strategy import ImageStrategy
 from media_processor.pipeline.scheduler.hybrid_scheduler import HybridScheduler
 from media_processor.pipeline.startup_report import StartupReporter
 from media_processor.video_strategy import VideoStrategy
@@ -91,6 +92,9 @@ class PipelineRunner:
         asset_files: list[str],
         base_dir: str,
         video_strategy: VideoStrategy,
+        tracker: ProgressTracker | None = None,
+        asset_strategies: dict[str, str] | None = None,
+        status_sink: list[dict] | None = None,
     ) -> list[dict]:
         """
         並行跑完所有素材的 Phase 1 感知分析。
@@ -98,18 +102,26 @@ class PipelineRunner:
         Args:
             asset_files: 已過濾、依輸入順序排列的媒體檔案絕對路徑清單。
             base_dir:    素材資料夾(目前僅供日誌,實際路徑已在 asset_files)。
-            video_strategy: 影片策略(SIMPLE / COMPLEX);圖片不受影響(工廠依副檔名路由)。
+            video_strategy: 全域影片策略(SIMPLE / COMPLEX);未被 asset_strategies 逐檔覆寫時沿用。
+            tracker: 由呼叫端注入的進度 Tracker(帶外部 job_id 與已訂閱的 WebSocket observer);
+                     傳 ``None`` 時自建一個帶隨機 job_id 的 Tracker(CLI / 無前端場景)。
+            asset_strategies: 逐檔策略覆寫表 ``{檔名: "simple"|"complex"}``;
+                              依 media_kind 套到對應的 image / video 策略,未列出者用全域預設。
+            status_sink: 非 None 時,run 結束後把**每個** asset(含 rejected / error)的精簡狀態
+                         依輸入順序 append 進此清單,供 UI 層落地全狀態(回傳值仍只收 success)。
 
         Returns:
             僅含 ``status == "success"`` 的 metadata dict 列表,**依輸入順序排列**,
             與舊版序列迴圈輸出逐欄一致。
         """
-        contexts = self._build_contexts(asset_files, video_strategy)
+        contexts = self._build_contexts(asset_files, video_strategy, asset_strategies)
         if not contexts:
             return []
 
-        # 每次 run 一個 job_id + 一個 Tracker,訂閱設定的 observers
-        tracker = ProgressTracker(job_id=uuid.uuid4().hex)
+        # 注入則沿用其 job_id 與既有訂閱;未注入則自建一個帶隨機 job_id 的 Tracker。
+        # 無論來源為何,都把本 Runner 的標準 observers(PrintObserver)訂上,確保 server log 不漏。
+        if tracker is None:
+            tracker = ProgressTracker(job_id=uuid.uuid4().hex)
         for observer in self._observers:
             tracker.subscribe(observer)
 
@@ -138,15 +150,49 @@ class PipelineRunner:
                 f"總耗時 {self.last_run_elapsed_sec:.1f}s"
                 f"(平均 {self.last_run_elapsed_sec / len(contexts):.1f}s/素材)"
             )
+        # 需要全狀態(UI 用)時,把每個 asset 的精簡狀態(含 rejected / error)收進 sink
+        if status_sink is not None:
+            status_sink.extend(self._build_status_entry(ctx) for ctx in results)
+
         # 只收成功的 asset,順序已由 scheduler 依 index 排好
         return [ctx.result for ctx in results if ctx.is_success and ctx.result is not None]
+
+    @staticmethod
+    def _build_status_entry(context: AssetContext) -> dict:
+        """
+        把一個 asset 的處理結果壓成 UI 需要的精簡狀態(success / rejected / error 三態通用)。
+
+        success 取技術分、rejected 取 reason、error 取錯誤訊息;不含完整 metadata
+        (完整 metadata 仍只在 success 的 phase1_assets_metadata.json,供 Phase 4 使用)。
+        """
+        entry: dict = {
+            "asset_id": context.asset_id,
+            "type": context.media_kind.value,
+            "status": context.status,
+        }
+        result = context.result or {}
+        metadata = result.get("metadata") or {}
+        if "technical_score" in metadata:
+            entry["technical_score"] = metadata["technical_score"]
+        if result.get("reason"):
+            entry["reason"] = result["reason"]
+        if context.error:
+            entry["error"] = context.error
+        return entry
 
     def _build_contexts(
         self,
         asset_files: list[str],
-        video_strategy: VideoStrategy,
+        default_video_strategy: VideoStrategy,
+        asset_strategies: dict[str, str] | None = None,
     ) -> list[AssetContext]:
-        """把檔案路徑清單轉成帶輸入索引的 AssetContext 列表。"""
+        """
+        把檔案路徑清單轉成帶輸入索引的 AssetContext 列表,並套用逐檔策略覆寫。
+
+        逐檔策略以檔名為鍵:image 覆寫 ``image_strategy``、video 覆寫 ``video_strategy``;
+        未列出的檔案沿用全域預設(image 一律 SIMPLE、video 用 default_video_strategy)。
+        """
+        overrides = asset_strategies or {}
         contexts: list[AssetContext] = []
         for index, file_path in enumerate(asset_files):
             try:
@@ -155,14 +201,23 @@ class PipelineRunner:
                 # 理論上呼叫端已過濾;防呆跳過不支援的副檔名
                 print(f"[PipelineRunner] 跳過不支援的檔案: {os.path.basename(file_path)}")
                 continue
+            asset_id = os.path.basename(file_path)
+            # 逐檔覆寫是否選 COMPLEX(以列舉值字串比對,避免散落的 magic string)
+            wants_complex = overrides.get(asset_id) == ImageStrategy.COMPLEX.value
+            if media_kind == MediaKind.IMAGE:
+                image_strategy = ImageStrategy.COMPLEX if wants_complex else ImageStrategy.SIMPLE
+                video_strategy = default_video_strategy  # 圖片不會用到,僅佔位
+            else:
+                image_strategy = ImageStrategy.SIMPLE  # 影片不會用到,僅佔位
+                video_strategy = VideoStrategy.COMPLEX if wants_complex else default_video_strategy
             contexts.append(
                 AssetContext(
-                    asset_id=os.path.basename(file_path),
+                    asset_id=asset_id,
                     file_path=file_path,
                     media_kind=media_kind,
                     index=index,
-                    # 影片套用前端策略;圖片此值會被工廠忽略(沿用舊版傳法)
                     video_strategy=video_strategy,
+                    image_strategy=image_strategy,
                 )
             )
         return contexts
