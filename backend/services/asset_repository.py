@@ -15,6 +15,7 @@ from typing import Optional
 from pydantic import BaseModel
 
 from backend.services.asset_discovery import PHASE1_STATUS_FILENAME, collect_asset_files
+from backend.services.project_meta_store import project_meta_store
 from backend.services.thumbnail_service import ThumbnailService
 from config.app_config import ASSETS_DIR
 from media_processor.pipeline.context import derive_media_kind
@@ -22,9 +23,6 @@ from media_processor.pipeline.context import derive_media_kind
 # project_meta.json 內逐檔策略 / dirty 相關欄位鍵(具名常數,避免散落 magic string)
 META_KEY_ASSET_STRATEGIES = "asset_strategies"  # {檔名: "simple"|"complex"}
 META_KEY_DIRTY_ASSETS = "dirty_assets"          # 策略變更後待重跑 Phase 1 的檔名清單
-
-# 全狀態落地檔 PHASE1_STATUS_FILENAME 由 asset_discovery 定義(director_service 寫入、本庫讀取)
-_META_FILENAME = "project_meta.json"
 
 # 素材尚未被 Phase 1 分析過(全狀態檔內查無此檔)時的 UI 狀態
 ASSET_STATUS_UNPROCESSED = "unprocessed"
@@ -72,19 +70,13 @@ class AssetRepository:
 
     @staticmethod
     def _read_meta(project_dir: str) -> dict:
-        """讀取 project_meta.json;不存在回空 dict(讀-改-寫時保留既有欄位)。"""
-        meta_path = os.path.join(project_dir, _META_FILENAME)
-        if not os.path.exists(meta_path):
-            return {}
-        with open(meta_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+        """讀取 project_meta.json;缺檔 / 無法復原回空 dict(讀-改-寫時保留既有欄位)。委派容錯讀取。"""
+        return project_meta_store.read(project_dir) or {}
 
     @staticmethod
     def _write_meta(project_dir: str, meta: dict) -> None:
-        """寫回 project_meta.json(整份覆寫,保留呼叫端讀-改-寫的其餘欄位)。"""
-        meta_path = os.path.join(project_dir, _META_FILENAME)
-        with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump(meta, f, ensure_ascii=False, indent=2)
+        """原子寫回 project_meta.json(整份覆寫,保留呼叫端讀-改-寫的其餘欄位)。委派原子寫入。"""
+        project_meta_store.write(project_dir, meta)
 
     @staticmethod
     def _read_status_map(project_dir: str) -> dict:

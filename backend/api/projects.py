@@ -8,7 +8,6 @@ Facade Pattern：專案管理 API 端點
 import asyncio
 import os
 import re
-import json
 import shutil
 from datetime import datetime, timezone
 from typing import Optional
@@ -16,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from backend.auth.logto_jwt_verifier import verify_token
 from backend.services.ingestion_provider import cloud_ingestion_service
+from backend.services.project_meta_store import project_meta_store
 from config.app_config import ASSETS_DIR
 from ingestion_engine.models import (
     META_KEY_DRIVE_FOLDER_ID,
@@ -42,7 +42,6 @@ _ASSETS_BASE_PATH = ASSETS_DIR
 
 # --- 允許的媒體副檔名（用於計算素材數量）---
 _MEDIA_EXTENSIONS = {'.mp4', '.mov', '.jpg', '.jpeg', '.png', '.heic', '.heif', '.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg'}
-_META_FILENAME = "project_meta.json"
 
 
 class CreateProjectRequest(BaseModel):
@@ -96,22 +95,6 @@ def _user_dir(user_id: str) -> str:
     return path
 
 
-def _read_meta(project_dir: str) -> dict | None:
-    """讀取專案的 project_meta.json；不存在時回傳 None。"""
-    meta_path = os.path.join(project_dir, _META_FILENAME)
-    if not os.path.exists(meta_path):
-        return None
-    with open(meta_path, 'r', encoding='utf-8') as f:
-        return json.load(f)
-
-
-def _write_meta(project_dir: str, meta: dict):
-    """將 project_meta.json 寫入專案資料夾。"""
-    meta_path = os.path.join(project_dir, _META_FILENAME)
-    with open(meta_path, 'w', encoding='utf-8') as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
-
-
 def _count_assets(project_dir: str) -> int:
     """計算專案資料夾內的媒體素材數量（排除 JSON 快取與 meta）。"""
     count = 0
@@ -141,26 +124,31 @@ def _allocate_unique_name(user_root: str, base_name: str) -> str:
 
 @router.get("/projects", response_model=list[ProjectMeta])
 async def list_projects(user_id: str = Depends(verify_token)):
-    """列出目前登入使用者的所有專案。"""
+    """列出目前登入使用者的所有專案；單一專案 meta 損毀不影響其餘專案的列出。"""
     user_root = _user_dir(user_id)
     projects = []
     for name in sorted(os.listdir(user_root)):
         project_dir = os.path.join(user_root, name)
         if not os.path.isdir(project_dir):
             continue
-        meta = _read_meta(project_dir)
-        if meta is None:
-            # 沒有 meta 檔案的資料夾：自動補建（相容舊資料）
-            meta = {
-                "name": name,
-                "display_name": name,
-                "created_at": _now_iso(),
-                "last_modified": _now_iso(),
-                "asset_count": _count_assets(project_dir),
-                "has_blueprint": os.path.exists(os.path.join(project_dir, "phase4_blueprint.json")),
-            }
-            _write_meta(project_dir, meta)
-        projects.append(meta)
+        try:
+            # store.read 已容錯：缺檔 / 無法復原回 None，損毀但可復原則自動修復後回傳
+            meta = project_meta_store.read(project_dir)
+            if meta is None:
+                # 沒有 meta（或損毀到無法復原）的資料夾：自動補建（相容舊資料 + 自我修復）
+                meta = {
+                    "name": name,
+                    "display_name": name,
+                    "created_at": _now_iso(),
+                    "last_modified": _now_iso(),
+                    "asset_count": _count_assets(project_dir),
+                    "has_blueprint": os.path.exists(os.path.join(project_dir, "phase4_blueprint.json")),
+                }
+                project_meta_store.write(project_dir, meta)
+            projects.append(meta)
+        except Exception as exc:  # noqa: BLE001 - 單一專案的任何意外都不該讓整份列表 500
+            print(f"[Projects Error] 略過無法讀取的專案 '{name}': {exc}")
+            continue
     print(f"[Projects] 列出使用者 '{user_id[:8]}...' 的 {len(projects)} 個專案")
     return projects
 
@@ -186,7 +174,7 @@ async def create_project(req: CreateProjectRequest, user_id: str = Depends(verif
         "asset_count": 0,
         "has_blueprint": False,
     }
-    _write_meta(project_dir, meta)
+    project_meta_store.write(project_dir, meta)
 
     print(f"[Projects] 建立新專案: '{name}' (使用者 '{user_id[:8]}...')")
     return meta
@@ -231,7 +219,7 @@ async def create_project_from_drive(req: CreateFromDriveRequest, user_id: str = 
         META_KEY_LAST_SYNCED_AT: None,
         META_KEY_LAST_SYNC_ERROR: None,
     }
-    _write_meta(project_dir, meta)
+    project_meta_store.write(project_dir, meta)
     _schedule_first_sync(user_id, name)
 
     print(f"[Projects] 建立雲端來源專案: '{name}' (使用者 '{user_id[:8]}...')")

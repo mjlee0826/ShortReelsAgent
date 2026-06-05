@@ -8,6 +8,7 @@ from media_tools.media_standardizer import MediaStandardizer
 from template_engine.template_analyzer_facade import TemplateAnalyzerFacade
 from director_agent.director_facade import DirectorFacade
 from backend.services.asset_discovery import PHASE1_STATUS_FILENAME, collect_asset_files
+from backend.services.project_meta_store import project_meta_store
 
 # 計算素材數量時認定的媒體副檔名
 _MEDIA_EXTENSIONS = {'.mp4', '.mov', '.jpg', '.jpeg', '.png', '.heic', '.heif', '.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg'}
@@ -32,13 +33,12 @@ class DirectorService:
         self.backend_url = os.getenv("BACKEND_URL", "http://localhost:5174")
 
     def _update_project_meta(self, project_dir: str, folder_name: str):
-        """生成完成後更新 project_meta.json 的最後修改時間、素材數量與藍圖狀態。"""
-        meta_path = os.path.join(project_dir, "project_meta.json")
-        if not os.path.exists(meta_path):
-            return
+        """生成完成後更新 project_meta.json 的最後修改時間、素材數量與藍圖狀態(容錯讀取 + 原子寫入)。"""
         try:
-            with open(meta_path, 'r', encoding='utf-8') as f:
-                meta = json.load(f)
+            # 委派容錯讀取:缺檔 / 無法復原回 None,維持原本「無 meta 不強建」行為
+            meta = project_meta_store.read(project_dir)
+            if meta is None:
+                return
             asset_count = sum(
                 1 for fname in os.listdir(project_dir)
                 if os.path.splitext(fname)[1].lower() in _MEDIA_EXTENSIONS
@@ -46,8 +46,8 @@ class DirectorService:
             meta["last_modified"] = datetime.now(timezone.utc).isoformat()
             meta["asset_count"] = asset_count
             meta["has_blueprint"] = os.path.exists(os.path.join(project_dir, "phase4_blueprint.json"))
-            with open(meta_path, 'w', encoding='utf-8') as f:
-                json.dump(meta, f, ensure_ascii=False, indent=2)
+            # 原子寫回,避免與 poller / REST 請求併發寫造成 Extra data 損毀
+            project_meta_store.write(project_dir, meta)
         except Exception as e:
             print(f"⚠️ [Service] 更新專案 meta 失敗: {e}")
 
