@@ -18,7 +18,7 @@ from backend.services.ingestion_provider import cloud_ingestion_service
 from backend.services.project_cover_service import ProjectCoverService
 from backend.services.project_meta_store import project_meta_store
 from backend.services.thumbnail_service import ThumbnailService
-from config.app_config import ASSETS_DIR
+from config.app_config import ASSETS_DIR, COVER_THUMBNAIL_MAX_PX, COVER_THUMBNAIL_SUBDIR
 from ingestion_engine.models import (
     META_KEY_DRIVE_FOLDER_ID,
     META_KEY_LAST_SIGNATURE,
@@ -42,9 +42,12 @@ _background_tasks: set[asyncio.Task] = set()
 
 _ASSETS_BASE_PATH = ASSETS_DIR
 
-# 模組層級單例：縮圖服務與封面挑選服務（跨請求共享；縮圖 lazy 產生後快取）
-_thumbnail_service = ThumbnailService()
-_cover_service = ProjectCoverService(thumbnail_service=_thumbnail_service)
+# 模組層級單例：封面縮圖服務 + 封面挑選服務（跨請求共享；縮圖 lazy 產生後快取）。
+# 封面用較大尺寸（640px）且放獨立快取目錄，與素材網格的 320px 縮圖分開、互不覆蓋。
+_cover_thumbnail_service = ThumbnailService(
+    max_px=COVER_THUMBNAIL_MAX_PX, subdir=COVER_THUMBNAIL_SUBDIR,
+)
+_cover_service = ProjectCoverService(thumbnail_service=_cover_thumbnail_service)
 
 # --- 允許的媒體副檔名（用於計算素材數量）---
 _MEDIA_EXTENSIONS = {'.mp4', '.mov', '.jpg', '.jpeg', '.png', '.heic', '.heif', '.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg'}

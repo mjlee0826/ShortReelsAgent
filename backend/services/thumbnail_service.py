@@ -34,11 +34,23 @@ _DEFAULT_BACKEND_URL = "http://localhost:5174"
 class ThumbnailService:
     """產生 / 快取素材縮圖,並回傳可直接給前端 ``<img src>`` 的 /cache URL。"""
 
-    def __init__(self, cache_root: str = TEMP_TEMPLATES_DIR, backend_url: Optional[str] = None):
-        """設定縮圖快取根目錄與後端對外位址(URL 組裝用)。"""
+    def __init__(
+        self,
+        cache_root: str = TEMP_TEMPLATES_DIR,
+        backend_url: Optional[str] = None,
+        max_px: int = THUMBNAIL_MAX_PX,
+        subdir: str = THUMBNAIL_SUBDIR,
+    ):
+        """
+        設定縮圖快取根目錄與後端對外位址(URL 組裝用)。
+
+        max_px / subdir 可覆寫,讓不同版位(如較大的專案封面)用各自的尺寸與獨立快取目錄、
+        彼此不覆蓋;預設沿用素材網格的 320px 與 thumbnails/,行為向後相容。
+        """
         self._cache_root = cache_root
-        self._thumb_root = os.path.join(cache_root, THUMBNAIL_SUBDIR)
+        self._thumb_root = os.path.join(cache_root, subdir)
         self._backend_url = backend_url or os.getenv("BACKEND_URL", _DEFAULT_BACKEND_URL)
+        self._max_px = max_px
 
     def ensure_url(
         self,
@@ -70,8 +82,8 @@ class ThumbnailService:
             if image is None:
                 return False
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
-            # 等比縮到長邊不超過上限;RGB 轉換確保可存 JPEG(去除 alpha / palette)
-            image.thumbnail((THUMBNAIL_MAX_PX, THUMBNAIL_MAX_PX), Image.LANCZOS)
+            # 等比縮到長邊不超過上限(依本 instance 的 max_px);RGB 轉換確保可存 JPEG(去除 alpha / palette)
+            image.thumbnail((self._max_px, self._max_px), Image.LANCZOS)
             image.convert("RGB").save(out_path, format="JPEG", quality=THUMBNAIL_JPEG_QUALITY)
             return True
         except Exception as exc:  # noqa: BLE001 - 縮圖非關鍵路徑,任何失敗都退佔位

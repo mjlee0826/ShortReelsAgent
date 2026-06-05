@@ -35,3 +35,10 @@ THUMBNAIL_EXT = ".jpg"
 THUMBNAIL_MAX_PX = int(os.environ.get("THUMBNAIL_MAX_PX", "320"))
 # 縮圖 JPEG 壓縮品質（1–95）。
 THUMBNAIL_JPEG_QUALITY = int(os.environ.get("THUMBNAIL_JPEG_QUALITY", "80"))
+
+# --- 專案總覽封面縮圖（卡片較大，需較高解析度）---
+
+# 封面縮圖獨立快取子目錄：與 320px 的素材網格縮圖分開存放，避免同檔名互相覆蓋。
+COVER_THUMBNAIL_SUBDIR = "thumbnails_cover"
+# 封面縮圖長邊像素上限：總覽卡片約 354px 寬，Retina 需 ~700px，故預設 640px（可調 768 更銳利）。
+COVER_THUMBNAIL_MAX_PX = int(os.environ.get("COVER_THUMBNAIL_MAX_PX", "640"))
