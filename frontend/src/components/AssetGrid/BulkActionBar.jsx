@@ -1,11 +1,12 @@
 import React from 'react';
 import { FaCheckDouble, FaRegSquare, FaSync, FaPlay, FaEdit } from 'react-icons/fa';
+import { Button } from '../ui';
 
 /**
  * BulkActionBar：頂部批量操作列。
  *
  * 提供全選 / 清除、批量設策略、重新分析（選中 / 全部）、開始生成、前往編輯器。
- * 工作進行中（jobRunning）時禁用會觸發新工作的按鈕,避免重複送出。
+ * 工作進行中（jobRunning）時禁用會觸發新工作的按鈕，避免重複送出。
  */
 export default function BulkActionBar({
   total,
@@ -20,50 +21,38 @@ export default function BulkActionBar({
   onGoEditor,
 }) {
   const hasSelection = selectedCount > 0;
-  const btnBase = 'flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed';
 
   return (
     <div className="flex flex-wrap items-center gap-2 mb-5">
-      {/* 選取狀態 */}
-      <span className="text-xs text-gray-500 mr-1">
-        已選 {selectedCount} / {total}
-      </span>
+      <span className="text-xs text-ink-faint mr-1">已選 {selectedCount} / {total}</span>
 
-      <button onClick={onSelectAll} disabled={jobRunning} className={`${btnBase} bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white`}>
-        <FaCheckDouble size={11} /> 全選
-      </button>
-      <button onClick={onClearSelection} disabled={jobRunning || !hasSelection} className={`${btnBase} bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white`}>
-        <FaRegSquare size={11} /> 清除選取
-      </button>
+      <Button variant="secondary" size="sm" onClick={onSelectAll} disabled={jobRunning} leftIcon={<FaCheckDouble size={11} />}>全選</Button>
+      <Button variant="secondary" size="sm" onClick={onClearSelection} disabled={jobRunning || !hasSelection} leftIcon={<FaRegSquare size={11} />}>清除選取</Button>
 
       {/* 批量設策略（套用到選中素材）*/}
-      <div className="flex items-center gap-1 pl-2 border-l border-gray-800">
-        <button onClick={() => onBulkStrategy('simple')} disabled={jobRunning || !hasSelection} className={`${btnBase} bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white`}>
-          選中設 Simple
-        </button>
-        <button onClick={() => onBulkStrategy('complex')} disabled={jobRunning || !hasSelection} className={`${btnBase} bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white`}>
-          選中設 Complex
-        </button>
+      <div className="flex items-center gap-1 pl-2 border-l border-border">
+        <Button variant="secondary" size="sm" onClick={() => onBulkStrategy('simple')} disabled={jobRunning || !hasSelection}>選中設 Simple</Button>
+        <Button variant="secondary" size="sm" onClick={() => onBulkStrategy('complex')} disabled={jobRunning || !hasSelection}>選中設 Complex</Button>
       </div>
 
       {/* 重新分析 */}
-      <div className="flex items-center gap-1 pl-2 border-l border-gray-800">
-        <button onClick={onReanalyzeSelected} disabled={jobRunning || !hasSelection} className={`${btnBase} bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white`}>
-          <FaSync size={11} /> 重新分析選中
-        </button>
-        <button onClick={onReanalyzeAll} disabled={jobRunning || total === 0} className={`${btnBase} bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white`}>
-          <FaSync size={11} /> 重新分析全部
-        </button>
+      <div className="flex items-center gap-1 pl-2 border-l border-border">
+        <Button variant="secondary" size="sm" onClick={onReanalyzeSelected} disabled={jobRunning || !hasSelection} leftIcon={<FaSync size={11} />}>重新分析選中</Button>
+        <Button variant="secondary" size="sm" onClick={onReanalyzeAll} disabled={jobRunning || total === 0} leftIcon={<FaSync size={11} />}>重新分析全部</Button>
       </div>
 
       {/* 右側主要動作 */}
       <div className="flex items-center gap-2 ml-auto">
-        <button onClick={onGoEditor} className={`${btnBase} bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white`}>
-          <FaEdit size={11} /> 前往編輯器
-        </button>
-        <button onClick={onGenerate} disabled={jobRunning || total === 0} className={`${btnBase} bg-blue-600 text-white hover:bg-blue-500 shadow-lg shadow-blue-500/20`}>
-          <FaPlay size={11} /> {jobRunning ? '分析中...' : '開始生成'}
-        </button>
+        <Button variant="secondary" size="sm" onClick={onGoEditor} leftIcon={<FaEdit size={11} />}>前往編輯器</Button>
+        <Button
+          size="sm"
+          onClick={onGenerate}
+          disabled={jobRunning || total === 0}
+          loading={jobRunning}
+          leftIcon={!jobRunning ? <FaPlay size={11} /> : null}
+        >
+          {jobRunning ? '分析中...' : '開始生成'}
+        </Button>
       </div>
     </div>
   );

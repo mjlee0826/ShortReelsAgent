@@ -87,10 +87,11 @@ async def reanalyze_assets(
     asset_ids = req.asset_ids
 
     def work(tracker) -> dict:
-        """背景執行緒內跑 Phase 1 重分析,完成後清除這些素材的 dirty 標記。"""
+        """背景執行緒內跑 Phase 1 重分析(沿用逐檔 Simple/Complex 策略),完成後清除這些素材的 dirty 標記。"""
+        strategies = asset_repository.get_asset_strategies(user_id, project_name)
         success = director_service.run_phase1(
             project_name, user_id=user_id, tracker=tracker,
-            asset_filenames=asset_ids, require_success=False,
+            asset_filenames=asset_ids, asset_strategies=strategies, require_success=False,
         )
         asset_repository.clear_dirty(user_id, project_name, asset_ids)
         return {"success_count": len(success)}

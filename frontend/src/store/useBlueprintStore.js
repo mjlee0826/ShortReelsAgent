@@ -14,7 +14,6 @@ const useBlueprintStore = create((set, get) => ({
   templateSource: '',
   enableSubtitles: true,
   enableFilters: true,
-  videoStrategy: '1',
   musicStrategy: 'search_copyright',
 
   // --- 音訊上傳狀態 ---
@@ -96,7 +95,6 @@ const useBlueprintStore = create((set, get) => ({
         template_source: state.templateSource || null,
         enable_subtitles: state.enableSubtitles,
         enable_filters: state.enableFilters,
-        video_strategy: state.videoStrategy,
         previous_timeline: isRefinement && state.blueprint ? state.blueprint : null,
         music_strategy: state.musicStrategy,
         user_music_file: state.uploadedMusicFile || null,

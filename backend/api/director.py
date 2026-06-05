@@ -34,8 +34,6 @@ class GenerateRequest(BaseModel):
     enable_filters: bool = True
     previous_timeline: Optional[Dict] = None
 
-    # 影片分析策略 (1: Gemini 深度索引, 2: Qwen 一般模式)
-    video_strategy: str = "2"
     # 配樂策略：由前端明確選擇，不依賴 AI 推測
     music_strategy: str = "search_copyright"  # search_copyright | search_free | none
     # 用戶已上傳至 assets 資料夾的音訊檔名（有值時優先於 music_strategy）
@@ -54,7 +52,6 @@ async def generate_timeline(req: GenerateRequest, user_id: str = Depends(verify_
             subtitles=req.enable_subtitles,
             filters=req.enable_filters,
             old_timeline=req.previous_timeline,
-            video_strategy=req.video_strategy,
             music_strategy=req.music_strategy,
             user_music_file=req.user_music_file,
         )
@@ -80,7 +77,6 @@ async def _run_job(job_id: str, tracker: ProgressTracker, req: GenerateRequest, 
             subtitles=req.enable_subtitles,
             filters=req.enable_filters,
             old_timeline=req.previous_timeline,
-            video_strategy=req.video_strategy,
             music_strategy=req.music_strategy,
             user_music_file=req.user_music_file,
             tracker=tracker,

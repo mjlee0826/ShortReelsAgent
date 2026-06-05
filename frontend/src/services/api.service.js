@@ -145,6 +145,15 @@ class DirectorApiService {
     return response.data;
   }
 
+  // 以 Google Drive 公開資料夾連結建立雲端來源專案，後端會於背景啟動首次同步（下載素材 + Phase 1）
+  async createProjectFromDrive(displayName, sourceUrl) {
+    const response = await apiClient.post('/api/projects/from-drive', {
+      display_name: displayName,
+      source_url: sourceUrl,
+    });
+    return response.data;
+  }
+
   async deleteProject(projectName) {
     await apiClient.delete(`/api/projects/${projectName}`);
   }

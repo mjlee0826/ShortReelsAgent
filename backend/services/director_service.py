@@ -8,6 +8,7 @@ from media_tools.media_standardizer import MediaStandardizer
 from template_engine.template_analyzer_facade import TemplateAnalyzerFacade
 from director_agent.director_facade import DirectorFacade
 from backend.services.asset_discovery import PHASE1_STATUS_FILENAME, collect_asset_files
+from backend.services.asset_repository import AssetRepository
 from backend.services.project_meta_store import project_meta_store
 
 # 計算素材數量時認定的媒體副檔名
@@ -16,8 +17,6 @@ _MEDIA_EXTENSIONS = {'.mp4', '.mov', '.jpg', '.jpeg', '.png', '.heic', '.heif', 
 # success-only 感知結果落地檔（供 Phase 4 使用，與全狀態的 PHASE1_STATUS_FILENAME 區分）
 _PHASE1_METADATA_FILENAME = "phase1_assets_metadata.json"
 
-# 前端影片品質選項：'1' 代表高品質（Gemini 深度索引），其餘為快速本地 Qwen 分析
-_COMPLEX_VIDEO_OPTION = "1"
 
 class DirectorService:
     """
@@ -30,6 +29,8 @@ class DirectorService:
         self.pipeline_runner = PipelineRunner()
         self.template_analyzer = TemplateAnalyzerFacade()
         self.director = DirectorFacade()
+        # 素材策略 / dirty / 已分析基準的儲存庫;編輯器生成時據此沿用素材頁的逐檔策略與分析結果
+        self.asset_repository = AssetRepository()
         self.backend_url = os.getenv("BACKEND_URL", "http://localhost:5174")
 
     def _update_project_meta(self, project_dir: str, folder_name: str):
@@ -58,7 +59,6 @@ class DirectorService:
         return os.path.join(self.base_assets_path, folder_name)
 
     def run_phase1(self, folder_name: str, user_id: str = None,
-                   video_strategy: str = "2",
                    tracker: ProgressTracker = None,
                    asset_filenames: list[str] = None,
                    asset_strategies: dict = None,
@@ -82,12 +82,6 @@ class DirectorService:
 
         self.standardizer.standardize_folder(target_dir)
 
-        # 前端影片品質選項轉策略列舉；工廠依副檔名路由，圖片一律走 SIMPLE，僅影片套用此值
-        video_strategy_enum = (
-            VideoStrategy.COMPLEX if video_strategy == _COMPLEX_VIDEO_OPTION
-            else VideoStrategy.SIMPLE
-        )
-
         # 收集待處理素材（沿用跳過 _std 重複 + 副檔名白名單邏輯）；子集重分析只留指定檔名
         asset_files = collect_asset_files(target_dir)
         is_subset = asset_filenames is not None
@@ -97,10 +91,11 @@ class DirectorService:
         print(f"[Service] 正在處理 {len(asset_files)} 個素材...")
 
         # 以 Pipeline 框架並行跑感知分析：asset 間並行，輸出依輸入順序、僅收 success；
+        # 全域預設一律 SIMPLE，逐檔 COMPLEX（Gemini 深度索引）由 asset_strategies 覆寫；
         # status_sink 另收每個 asset（含 rejected / error）的精簡狀態供 UI 落地
         status_sink: list[dict] = []
         raw_assets_metadata = self.pipeline_runner.run(
-            asset_files, target_dir, video_strategy_enum, tracker=tracker,
+            asset_files, target_dir, VideoStrategy.SIMPLE, tracker=tracker,
             asset_strategies=asset_strategies, status_sink=status_sink,
         )
         if require_success and not raw_assets_metadata:
@@ -151,10 +146,41 @@ class DirectorService:
         with open(dump_path, 'w', encoding='utf-8') as f:
             json.dump(status_map, f, ensure_ascii=False, indent=2)
 
+    def _ensure_phase1_assets(self, folder_name: str, user_id: str,
+                              phase1_dump_path: str,
+                              tracker: ProgressTracker = None) -> list[dict]:
+        """
+        取得供 Phase 4 使用的 success-only 感知結果（編輯器生成用）。
+
+        直接沿用素材頁已分析的快取，只對「dirty（策略已變更）∪ 未處理」的素材，
+        用其逐檔 Simple/Complex 策略補跑 Phase 1（增量合併回 phase1_assets_metadata.json），
+        補跑後推進其 dirty / 已分析基準。無 user_id（CLI / 無認證）時退回整批分析。
+        """
+        # 無 user_id 無法套用逐檔策略，退回整批分析（維持 CLI 相容）
+        if not user_id:
+            return self.run_phase1(folder_name, user_id=user_id, tracker=tracker)
+
+        # 只補跑「dirty ∪ 未處理」的素材，沿用其逐檔策略；其餘沿用既有快取
+        pending = self.asset_repository.select_pending(user_id, folder_name)
+        if pending:
+            strategies = self.asset_repository.get_asset_strategies(user_id, folder_name)
+            self.run_phase1(
+                folder_name, user_id=user_id, tracker=tracker,
+                asset_filenames=pending, asset_strategies=strategies, require_success=False,
+            )
+            # 補跑完成，推進這些素材的 dirty / 已分析基準
+            self.asset_repository.clear_dirty(user_id, folder_name, pending)
+
+        # 載入（可能剛增量合併完成的）success-only 感知快取
+        if os.path.exists(phase1_dump_path):
+            with open(phase1_dump_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return []
+
     def run_workflow(self, prompt: str, folder_name: str, user_id: str = None,
                     template: str = None,
                     subtitles: bool = True, filters: bool = True, old_timeline: dict = None,
-                    video_strategy: str = "2", music_strategy: str = "search_copyright",
+                    music_strategy: str = "search_copyright",
                     user_music_file: str = None,
                     tracker: ProgressTracker = None):
         """執行完整生成工作流；tracker 非 None 時把 Phase 1 進度事件廣播給其訂閱者（WebSocket）。"""
@@ -194,10 +220,12 @@ class DirectorService:
         
         # --- 否則，執行完整的新生成流程 ---
         else:
-            # Phase 1：per-asset 感知分析（抽成獨立方法，與雲端攝取背景預跑共用）
-            raw_assets_metadata = self.run_phase1(
-                folder_name, user_id=user_id, video_strategy=video_strategy, tracker=tracker
+            # Phase 1：直接沿用素材頁分析結果，只補跑尚未分析 / 策略已變更的素材（移除編輯器全域策略）
+            raw_assets_metadata = self._ensure_phase1_assets(
+                folder_name, user_id, phase1_dump_path, tracker
             )
+            if not raw_assets_metadata:
+                raise ValueError("沒有可用的已分析素材，請先到素材頁完成分析。")
 
             if template:
                 print(f"[Service] 正在提取範本 DNA: {template}")

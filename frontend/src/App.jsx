@@ -7,6 +7,7 @@ import CallbackPage from './pages/CallbackPage';
 import ProjectDashboard from './pages/ProjectDashboard';
 import EditorPage from './pages/EditorPage';
 import AssetListPage from './pages/AssetListPage';
+import { Spinner } from './components/ui';
 
 /**
  * AuthGuard：保護需要登入才能存取的路由。
@@ -18,8 +19,8 @@ function AuthGuard({ children }) {
   // isLoading 也可能是 getAccessToken 代理觸發，不能用來卸載已認證的子元件
   if (isLoading && !isAuthenticated) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-black">
-        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+      <div className="flex h-screen w-full items-center justify-center bg-canvas">
+        <Spinner size="lg" />
       </div>
     );
   }

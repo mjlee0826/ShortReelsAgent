@@ -28,11 +28,11 @@ const useProjectStore = create((set, get) => ({
     }
   },
 
-  // 建立新專案並重新載入清單
-  createProject: async (displayName) => {
+  // 以 Google Drive 資料夾連結建立雲端來源專案並重新載入清單（素材於背景同步下載）
+  createProjectFromDrive: async (displayName, sourceUrl) => {
     set({ isLoading: true, errorMsg: '' });
     try {
-      await apiService.createProject(displayName);
+      await apiService.createProjectFromDrive(displayName, sourceUrl);
       await get().fetchProjects();
     } catch (error) {
       const msg = error.response?.data?.detail || error.message || String(error);

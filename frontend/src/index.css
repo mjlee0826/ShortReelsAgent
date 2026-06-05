@@ -1,6 +1,70 @@
 @import "tailwindcss";
 
-body {
-  background-color: #121212;
-  color: #ffffff;
+/*
+ * 設計系統 Design Token（Tailwind v4 @theme）
+ * 以語意化色票取代散落各檔的 gray-900 / blue-600 硬編碼，建立一致的深色「剪輯工作室」視覺。
+ * 命名規則：canvas/surface/elevated 為由深到淺的表面層；ink 為文字層級；accent 為品牌強調色。
+ */
+@theme {
+  /* 表面層（由最底頁面背景到浮起元素） */
+  --color-canvas: #0a0a0f;
+  --color-surface: #14141b;
+  --color-surface-2: #1c1c26;
+  --color-elevated: #23232f;
+
+  /* 邊框 */
+  --color-border: #2a2a38;
+  --color-border-strong: #3a3a4d;
+
+  /* 文字層級 */
+  --color-ink: #f4f4f7;
+  --color-ink-muted: #a2a2b8;
+  --color-ink-faint: #6c6c82;
+
+  /* 品牌強調色（靛紫系） */
+  --color-accent: #6d5efc;
+  --color-accent-hover: #8174fd;
+  --color-accent-ink: #c4bdff;
+  --color-accent-soft: #6d5efc24;
+
+  /* 狀態色 */
+  --color-success: #34d399;
+  --color-warning: #fbbf24;
+  --color-danger: #f87171;
+  --color-info: #60a5fa;
+
+  /* 圓角尺度 */
+  --radius-xl: 1rem;
+  --radius-2xl: 1.25rem;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* 統一細捲軸樣式，融入深色介面 */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border-strong) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--color-border-strong);
+    border-radius: 9999px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-ink-faint);
+  }
+
+  /* 選取色與品牌一致 */
+  ::selection {
+    background-color: var(--color-accent-soft);
+    color: var(--color-ink);
+  }
 }

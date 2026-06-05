@@ -38,7 +38,7 @@ export default function EditorPage() {
   }, [handleMouseMove, handleMouseUp]);
 
   return (
-    <div className="flex flex-col h-screen w-full font-sans bg-black overflow-hidden">
+    <div className="flex flex-col h-screen w-full font-sans bg-canvas overflow-hidden">
       <AppHeader />
 
       {/* 主要編輯區：左右兩欄 */}
@@ -51,7 +51,7 @@ export default function EditorPage() {
         {/* 垂直拖拉分隔線 */}
         <div
           onMouseDown={handleMouseDown}
-          className="w-1.5 hover:w-2 bg-gray-900 border-x border-gray-800 cursor-col-resize hover:bg-blue-600 active:bg-blue-500 transition-colors flex flex-col items-center justify-center shrink-0 z-20 group"
+          className="w-1.5 hover:w-2 bg-surface-2 border-x border-border cursor-col-resize hover:bg-accent active:bg-accent-hover transition-colors flex flex-col items-center justify-center shrink-0 z-20 group"
           title="左右拖曳調整控制台寬度"
         >
           <div className="h-10 flex gap-[2px] opacity-30 group-hover:opacity-100">

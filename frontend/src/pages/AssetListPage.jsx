@@ -8,6 +8,7 @@ import AppHeader from '../components/AppHeader/AppHeader';
 import AssetGrid from '../components/AssetGrid/AssetGrid';
 import BulkActionBar from '../components/AssetGrid/BulkActionBar';
 import ProgressOverlay from '../components/AssetGrid/ProgressOverlay';
+import { IconButton, Spinner, EmptyState } from '../components/ui';
 
 // 視為「需要重跑 Phase 1」的素材狀態（開始生成時挑這些 + dirty）
 const STATUS_UNPROCESSED = 'unprocessed';
@@ -198,31 +199,27 @@ export default function AssetListPage() {
   }, [currentProject, projectId, displayName, selectProject, navigate]);
 
   return (
-    <div className="flex flex-col h-screen bg-black font-sans">
+    <div className="flex flex-col h-screen bg-canvas font-sans">
       <AppHeader />
 
       <main className="flex-1 overflow-y-auto px-6 py-8 max-w-6xl mx-auto w-full">
         {/* 頁首：返回 + 標題 */}
         <div className="flex items-center gap-3 mb-6">
-          <button
-            onClick={() => navigate('/')}
-            className="p-2 text-gray-400 hover:text-white rounded-lg hover:bg-gray-800 transition-colors"
-            title="返回專案列表"
-          >
+          <IconButton onClick={() => navigate('/')} title="返回專案列表">
             <FaArrowLeft size={14} />
-          </button>
+          </IconButton>
           <div>
-            <h1 className="text-xl font-bold text-white">{displayName}</h1>
-            <p className="text-xs text-gray-500 mt-0.5">審閱素材、設定 Simple/Complex 策略,再開始分析</p>
+            <h1 className="text-xl font-bold text-ink">{displayName}</h1>
+            <p className="text-xs text-ink-faint mt-0.5">審閱素材、設定 Simple/Complex 策略，再開始分析</p>
           </div>
         </div>
 
         {/* 錯誤訊息 */}
         {errorMsg && (
-          <div className="flex items-center gap-2 mb-4 px-4 py-3 bg-red-950/50 border border-red-800/50 rounded-xl text-red-400 text-sm">
-            <FaExclamationCircle />
-            <span>{errorMsg}</span>
-            <button onClick={() => setErrorMsg('')} className="ml-auto text-gray-500 hover:text-white">✕</button>
+          <div className="flex items-center gap-2 mb-4 px-4 py-3 bg-danger/10 border border-danger/30 rounded-xl text-danger text-sm">
+            <FaExclamationCircle className="shrink-0" />
+            <span className="flex-1">{errorMsg}</span>
+            <button onClick={() => setErrorMsg('')} className="text-ink-faint hover:text-ink transition-colors">✕</button>
           </div>
         )}
 
@@ -245,21 +242,19 @@ export default function AssetListPage() {
 
         {/* 載入中 */}
         {isLoading && assets.length === 0 && (
-          <div className="flex items-center justify-center py-20 text-gray-600">
-            <div className="flex flex-col items-center gap-3">
-              <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-              <p className="text-sm">載入素材中...</p>
-            </div>
+          <div className="flex flex-col items-center gap-3 py-20 text-ink-faint">
+            <Spinner />
+            <p className="text-sm">載入素材中...</p>
           </div>
         )}
 
         {/* 空狀態 */}
         {!isLoading && assets.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-gray-600 gap-4">
-            <FaImages size={40} className="opacity-20" />
-            <p className="text-base">這個專案還沒有素材</p>
-            <p className="text-xs text-gray-700">透過雲端同步或上傳素材後即可在此審閱</p>
-          </div>
+          <EmptyState
+            icon={<FaImages />}
+            title="這個專案還沒有素材"
+            description="從 Google Drive 同步的素材下載完成後即可在此審閱。"
+          />
         ) : (
           <AssetGrid
             assets={assets}

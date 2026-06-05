@@ -1,11 +1,20 @@
 import React from 'react';
 import { useLogto } from '@logto/react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { FaThLarge } from 'react-icons/fa';
 import useProjectStore from '../../store/useProjectStore';
+import { Button } from '../ui';
 
+/**
+ * AppHeader：全站頂部導覽列。
+ *
+ * 顯示品牌 + 麵包屑（我的專案 / 當前專案）、編輯器頁專屬的「管理素材」捷徑（需求 5），
+ * 以及使用者頭像資訊與登出。
+ */
 export default function AppHeader() {
   const { signOut, fetchUserInfo } = useLogto();
   const navigate = useNavigate();
+  const location = useLocation();
   const currentProject = useProjectStore((s) => s.currentProject);
   const [userInfo, setUserInfo] = React.useState(null);
 
@@ -13,59 +22,64 @@ export default function AppHeader() {
     fetchUserInfo().then(setUserInfo).catch(() => {});
   }, [fetchUserInfo]);
 
-  const handleBackToDashboard = () => {
-    navigate('/');
-  };
+  const handleSignOut = () => signOut(`${window.location.origin}/login`);
 
-  const handleSignOut = () => {
-    signOut(`${window.location.origin}/login`);
-  };
+  // 僅在編輯器頁、且已選定專案時顯示「管理素材」捷徑，導向該專案的素材審閱頁
+  const showManageAssets = location.pathname === '/editor' && currentProject?.name;
+  const goManageAssets = () => navigate(`/projects/${currentProject.name}/assets`);
 
   const displayName = userInfo?.name || userInfo?.username || userInfo?.email || '使用者';
   const avatarLetter = displayName.charAt(0).toUpperCase();
 
   return (
-    <header className="flex items-center justify-between px-4 py-2.5 bg-gray-950 border-b border-gray-800 shrink-0 z-10">
-      {/* 左側：Logo + 返回按鈕 */}
-      <div className="flex items-center gap-3">
-        <span className="text-lg font-bold text-white tracking-tight select-none">🎬 Short Reels</span>
+    <header className="flex items-center justify-between px-5 py-3 bg-surface/80 backdrop-blur border-b border-border shrink-0 z-10">
+      {/* 左側：品牌 + 麵包屑 */}
+      <div className="flex items-center gap-2.5 min-w-0">
+        <button
+          onClick={() => navigate('/')}
+          className="flex items-center gap-2 text-base font-bold text-ink tracking-tight hover:opacity-80 transition-opacity shrink-0"
+          title="回首頁"
+        >
+          <span className="w-7 h-7 rounded-lg bg-accent/15 text-accent flex items-center justify-center text-sm">🎬</span>
+          <span className="hidden sm:block">Short Reels</span>
+        </button>
         {currentProject && (
           <>
-            <span className="text-gray-700">/</span>
+            <span className="text-ink-faint/50">/</span>
             <button
-              onClick={handleBackToDashboard}
-              className="text-sm text-gray-400 hover:text-white transition-colors"
-              title="返回專案列表"
+              onClick={() => navigate('/')}
+              className="text-sm text-ink-muted hover:text-ink transition-colors shrink-0"
             >
               我的專案
             </button>
-            <span className="text-gray-700">/</span>
-            <span className="text-sm text-blue-400 font-medium truncate max-w-[200px]">
+            <span className="text-ink-faint/50">/</span>
+            <span className="text-sm text-accent-ink font-medium truncate max-w-[180px]">
               {currentProject.display_name}
             </span>
           </>
         )}
       </div>
 
-      {/* 右側：使用者資訊 + 登出 */}
-      <div className="flex items-center gap-3">
+      {/* 右側：管理素材（編輯器頁）+ 使用者資訊 + 登出 */}
+      <div className="flex items-center gap-3 shrink-0">
+        {showManageAssets && (
+          <Button variant="secondary" size="sm" leftIcon={<FaThLarge size={11} />} onClick={goManageAssets}>
+            管理素材
+          </Button>
+        )}
         <div className="flex items-center gap-2">
-          {/* 頭像 */}
-          <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
+          <div className="w-8 h-8 rounded-full bg-accent flex items-center justify-center text-white text-xs font-bold shrink-0 overflow-hidden">
             {userInfo?.picture ? (
-              <img src={userInfo.picture} alt={displayName} className="w-full h-full rounded-full object-cover" />
+              <img src={userInfo.picture} alt={displayName} className="w-full h-full object-cover" />
             ) : (
               avatarLetter
             )}
           </div>
-          <span className="text-sm text-gray-300 hidden sm:block max-w-[120px] truncate">{displayName}</span>
+          <span className="text-sm text-ink-muted hidden md:block max-w-[120px] truncate">{displayName}</span>
         </div>
-        <button
-          onClick={handleSignOut}
-          className="text-xs text-gray-500 hover:text-red-400 transition-colors px-2 py-1 rounded border border-gray-800 hover:border-red-800"
-        >
+        <Button variant="ghost" size="sm" onClick={handleSignOut} className="hover:text-danger">
           登出
-        </button>
+        </Button>
       </div>
     </header>
   );
