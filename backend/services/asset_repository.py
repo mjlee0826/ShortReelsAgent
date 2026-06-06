@@ -11,6 +11,7 @@ import contextlib
 import json
 import os
 import tempfile
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 from urllib.parse import quote
@@ -41,6 +42,10 @@ META_KEY_ASSET_STRATEGIES = "asset_strategies"  # {relpath: "simple"|"complex"}
 META_KEY_DIRTY_ASSETS = "dirty_assets"          # 策略變更後待重跑 Phase 1 的 relpath 清單
 # {relpath: 上次 Phase 1 分析時所用策略};供「策略改回上次分析值即不再 dirty」的回退判斷
 META_KEY_ANALYZED_STRATEGIES = "analyzed_strategies"
+# 專案總覽卡片用的快取欄位(與 director_service._update_project_meta 寫入同名欄位一致):
+# asset_count = 去重後素材數量、last_modified = 內容最後變動時間
+META_KEY_ASSET_COUNT = "asset_count"
+META_KEY_LAST_MODIFIED = "last_modified"
 
 # 素材尚未被 Phase 1 分析過(全狀態檔內查無此檔)時的 UI 狀態
 ASSET_STATUS_UNPROCESSED = "unprocessed"
@@ -368,7 +373,7 @@ class AssetRepository:
         alive = set(collect_asset_files(project_dir))
         self._prune_json_dict(os.path.join(project_dir, PHASE1_STATUS_FILENAME), alive)
         self._prune_json_list(os.path.join(project_dir, PHASE1_METADATA_FILENAME), alive)
-        self._prune_meta_asset_keys(project_dir, alive)
+        self._reconcile_project_meta(project_dir, alive)
 
     @staticmethod
     def _prune_orphan_standardized(project_dir: str) -> None:
@@ -409,8 +414,16 @@ class AssetRepository:
             self._atomic_write_json(path, kept)
 
     @staticmethod
-    def _prune_meta_asset_keys(project_dir: str, alive: set[str]) -> None:
-        """剔除 project_meta 逐檔策略 / dirty / analyzed 內已不存在的 relpath(經鎖內讀-改-寫)。"""
+    def _reconcile_project_meta(project_dir: str, alive: set[str]) -> None:
+        """
+        把 project_meta 對齊磁碟真相(同一筆鎖內讀-改-寫,避免與併發寫互相覆蓋):
+        - 剔除逐檔策略 / dirty / analyzed 內已不存在的 relpath。
+        - 刷新總覽用的 asset_count(去重後存活素材數)與 last_modified。
+        asset_count 須在此補刷:純移除時 select_pending 為空 → run_phase1 不會跑,
+        否則計數會卡在含已刪素材的舊值(與 additions 經 run_phase1 更新計數的行為對稱)。
+        """
+        now_iso = datetime.now(timezone.utc).isoformat()
+
         def _mutate(meta: dict) -> None:
             for key in (META_KEY_ASSET_STRATEGIES, META_KEY_ANALYZED_STRATEGIES):
                 mapping = meta.get(key)
@@ -419,6 +432,9 @@ class AssetRepository:
             dirty = meta.get(META_KEY_DIRTY_ASSETS)
             if isinstance(dirty, list):
                 meta[META_KEY_DIRTY_ASSETS] = [r for r in dirty if r in alive]
+            # 移除 / 替換後磁碟素材數已變,刷新快取計數與最後變動時間
+            meta[META_KEY_ASSET_COUNT] = len(alive)
+            meta[META_KEY_LAST_MODIFIED] = now_iso
 
         project_meta_store.update(project_dir, _mutate)
 
@@ -463,5 +479,4 @@ class AssetRepository:
 
 def _iso_from_mtime(mtime: float) -> str:
     """把檔案 mtime(unix 秒)轉成 UTC ISO8601 字串(與專案其餘時間格式一致)。"""
-    from datetime import datetime, timezone
     return datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()

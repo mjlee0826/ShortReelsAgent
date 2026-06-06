@@ -13,3 +13,5 @@ backend/assets
 CLAUDE.md
 cookies.txt
 rclone*
+.ruff_cache
+.vscode
