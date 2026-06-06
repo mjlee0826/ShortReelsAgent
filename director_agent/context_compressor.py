@@ -1,5 +1,3 @@
-import os
-
 from config.media_processor_config import (
     TECHNICAL_SCORE_FILTER_THRESHOLD,
     TECHNICAL_SCORE_FORCE_PASS,
@@ -33,7 +31,8 @@ class ContextCompressor:
             faces = metadata.get("faces") or {}
 
             base_info = {
-                "id": os.path.basename(asset.get("file")),
+                # 素材 id = relpath 身分(如 raw/photo.jpg);與 blueprint clip_id、/static URL 片段一致
+                "id": asset.get("file"),
                 "type": asset.get("type"),
                 "res": {"w": metadata.get("width"), "h": metadata.get("height")},
                 "aes": metadata.get("aesthetic_score", 60.0),

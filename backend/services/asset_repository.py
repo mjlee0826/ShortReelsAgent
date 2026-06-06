@@ -19,6 +19,7 @@ from backend.services.asset_discovery import (
     PHASE1_METADATA_FILENAME,
     PHASE1_STATUS_FILENAME,
     collect_asset_files,
+    to_abs_path,
 )
 from backend.services.project_meta_store import project_meta_store
 from backend.services.thumbnail_service import ThumbnailService
@@ -26,9 +27,10 @@ from config.app_config import ASSETS_DIR
 from media_processor.pipeline.context import derive_media_kind
 
 # project_meta.json 內逐檔策略 / dirty 相關欄位鍵(具名常數,避免散落 magic string)
-META_KEY_ASSET_STRATEGIES = "asset_strategies"  # {檔名: "simple"|"complex"}
-META_KEY_DIRTY_ASSETS = "dirty_assets"          # 策略變更後待重跑 Phase 1 的檔名清單
-# {檔名: 上次 Phase 1 分析時所用策略};供「策略改回上次分析值即不再 dirty」的回退判斷
+# 鍵一律為素材身分 relpath(如 raw/photo.jpg),與 status / metadata / blueprint clip_id 全程一致
+META_KEY_ASSET_STRATEGIES = "asset_strategies"  # {relpath: "simple"|"complex"}
+META_KEY_DIRTY_ASSETS = "dirty_assets"          # 策略變更後待重跑 Phase 1 的 relpath 清單
+# {relpath: 上次 Phase 1 分析時所用策略};供「策略改回上次分析值即不再 dirty」的回退判斷
 META_KEY_ANALYZED_STRATEGIES = "analyzed_strategies"
 
 # 素材尚未被 Phase 1 分析過(全狀態檔內查無此檔)時的 UI 狀態
@@ -59,7 +61,8 @@ class AssetStrategy(str, Enum):
 class AssetView(BaseModel):
     """單一素材給前端網格的檢視模型 (Value Object)。"""
 
-    filename: str
+    path: str                                # 素材身分 relpath(如 raw/photo.jpg);前端識別 / API 鍵
+    filename: str                            # basename(純顯示用;含 / 的 path 不適合直接顯示)
     media_kind: str                          # "image" | "video"
     status: str                              # unprocessed | success | rejected | error
     strategy: str = AssetStrategy.SIMPLE.value
@@ -128,17 +131,17 @@ class AssetRepository:
     @staticmethod
     def _read_metadata_map(project_dir: str) -> dict:
         """
-        讀取 Phase 1 success-only 完整 metadata 檔,轉成「檔名 → 該筆紀錄」對照。
+        讀取 Phase 1 success-only 完整 metadata 檔,轉成「relpath 身分 → 該筆紀錄」對照。
 
-        檔內為 list(每筆含絕對路徑 ``file`` 與 ``metadata``);以 basename 當鍵與 ``AssetView.filename``
-        對齊(兩者同為 collect_asset_files 產出的標準化檔名)。不存在回空 dict(全部視為無 metadata)。
+        檔內為 list(每筆含 relpath ``file`` 與 ``metadata``);``file`` 即素材身分,直接當鍵與
+        ``AssetView.path`` 對齊。不存在回空 dict(全部視為無 metadata)。
         """
         metadata_path = os.path.join(project_dir, PHASE1_METADATA_FILENAME)
         if not os.path.exists(metadata_path):
             return {}
         with open(metadata_path, "r", encoding="utf-8") as f:
             records = json.load(f)
-        return {os.path.basename(rec["file"]): rec for rec in records if rec.get("file")}
+        return {rec["file"]: rec for rec in records if rec.get("file")}
 
     # ── 對外操作 ─────────────────────────────────────────────────────────────
 
@@ -154,110 +157,119 @@ class AssetRepository:
         status_map = self._read_status_map(project_dir)
 
         views: list[AssetView] = []
-        for file_path in collect_asset_files(project_dir):
-            filename = os.path.basename(file_path)
+        for relpath in collect_asset_files(project_dir):
+            file_path = to_abs_path(project_dir, relpath)
+            filename = os.path.basename(relpath)
             try:
-                media_kind = derive_media_kind(file_path)
+                media_kind = derive_media_kind(relpath)
             except ValueError:
                 # collect_asset_files 已過濾;防呆跳過
                 continue
-            status_entry = status_map.get(filename, {})
+            # status / strategy / dirty 一律以 relpath 身分為鍵
+            status_entry = status_map.get(relpath, {})
             stat = os.stat(file_path)
             views.append(AssetView(
+                path=relpath,
                 filename=filename,
                 media_kind=media_kind.value,
                 status=status_entry.get("status", ASSET_STATUS_UNPROCESSED),
-                strategy=strategies.get(filename, AssetStrategy.SIMPLE.value),
-                dirty=filename in dirty_set,
+                strategy=strategies.get(relpath, AssetStrategy.SIMPLE.value),
+                dirty=relpath in dirty_set,
                 technical_score=status_entry.get("technical_score"),
                 reason=status_entry.get("reason"),
                 error=status_entry.get("error"),
+                # 縮圖快取鍵用 relpath(避免 raw / standardized 同名 basename 互相覆蓋)
                 thumbnail_url=self._thumbnails.ensure_url(
-                    user_id, project, filename, file_path, media_kind
+                    user_id, project, relpath, file_path, media_kind
                 ),
                 size_bytes=stat.st_size,
                 modified_at=_iso_from_mtime(stat.st_mtime),
             ))
         return views
 
-    def get_asset_detail(self, user_id: str, project: str, filename: str) -> AssetDetailView:
+    def get_asset_detail(self, user_id: str, project: str, path: str) -> AssetDetailView:
         """
         取得單一素材的完整詳情:重用 ``list_assets`` 的 join 取得 ``AssetView``,再補上 /static
         原始媒體 URL(未裁切全圖 / 完整影片)與 Phase 1 完整感知 metadata。
 
-        重用 list_assets 而非另寫一份讀取,使狀態 / 策略 / dirty / 縮圖的 join 規則維持單一來源
-        (DRY);素材量級小,多掃一次目錄成本可忽略。查無該素材拋 FileNotFoundError(端點轉 404)。
+        ``path`` 為素材身分 relpath。重用 list_assets 而非另寫一份讀取,使狀態 / 策略 / dirty /
+        縮圖的 join 規則維持單一來源(DRY);素材量級小,多掃一次目錄成本可忽略。查無該素材拋
+        FileNotFoundError(端點轉 404)。
         """
         project_dir = self._project_dir(user_id, project)
         # 沿用既有 join 取單檔檢視(與 set_strategy 結尾同手法);查無視為素材不存在
         view = next(
-            (v for v in self.list_assets(user_id, project) if v.filename == filename),
+            (v for v in self.list_assets(user_id, project) if v.path == path),
             None,
         )
         if view is None:
-            raise FileNotFoundError(f"找不到素材: {filename}")
+            raise FileNotFoundError(f"找不到素材: {path}")
 
         # 只有 success 素材有完整 metadata;rejected / error / unprocessed 回 None,前端走狀態說明分支
-        record = self._read_metadata_map(project_dir).get(filename)
+        record = self._read_metadata_map(project_dir).get(path)
         metadata = record.get("metadata") if record else None
         metadata_kind = record.get("type") if record else None
 
         return AssetDetailView(
             asset=view,
-            media_url=self._build_media_url(user_id, project, filename),
-            media_mime=_EXT_TO_MIME.get(os.path.splitext(filename)[1].lower()),
+            media_url=self._build_media_url(user_id, project, path),
+            media_mime=_EXT_TO_MIME.get(os.path.splitext(path)[1].lower()),
             metadata=metadata,
             metadata_kind=metadata_kind,
         )
 
-    def _build_media_url(self, user_id: str, project: str, filename: str) -> str:
-        """組單一素材的 /static 原始媒體完整 URL;檔名經 quote 處理中文 / 空白等特殊字元。"""
-        return f"{self._backend_url}/static/{user_id}/{project}/{quote(filename)}"
-
-    def set_strategy(self, user_id: str, project: str, filename: str, strategy: str) -> AssetView:
+    def _build_media_url(self, user_id: str, project: str, path: str) -> str:
         """
-        設定單一素材的策略並依「是否偏離上次分析所用策略」更新 dirty,回傳更新後的檢視。
+        組單一素材的 /static 原始媒體完整 URL。
+
+        ``path`` 為含子目錄的 relpath,以 ``quote(safe='/')`` 保留分隔斜線(僅編碼中文 / 空白等),
+        組成 ``/static/{user}/{project}/{relpath}``,直接命中 StaticFiles 掛載的磁碟分層。
+        """
+        return f"{self._backend_url}/static/{user_id}/{project}/{quote(path, safe='/')}"
+
+    def set_strategy(self, user_id: str, project: str, path: str, strategy: str) -> AssetView:
+        """
+        設定單一素材(以 relpath ``path`` 識別)的策略並依「是否偏離上次分析所用策略」更新 dirty。
 
         以 analyzed_strategies 為基準:策略改回上次分析值→清除 dirty;偏離→標記待重跑。
         經 ``project_meta_store.update`` 在 per-path 鎖內讀-改-寫,確保批量併發改策略不互相覆蓋
-        (杜絕 lost update),亦保留 meta 其餘欄位。
+        (杜絕 lost update),亦保留 meta 其餘欄位。回傳更新後的檢視。
         """
         if strategy not in (AssetStrategy.SIMPLE.value, AssetStrategy.COMPLEX.value):
             raise ValueError(f"不支援的策略: {strategy}")
         project_dir = self._project_dir(user_id, project)
-        if not self._asset_exists(project_dir, filename):
-            raise FileNotFoundError(f"找不到素材: {filename}")
+        if not self._asset_exists(project_dir, path):
+            raise FileNotFoundError(f"找不到素材: {path}")
 
         def _mutate(meta: dict) -> None:
             """就地更新該檔策略,並依「是否偏離上次分析基準」加 / 清 dirty。"""
-            meta.setdefault(META_KEY_ASSET_STRATEGIES, {})[filename] = strategy
+            meta.setdefault(META_KEY_ASSET_STRATEGIES, {})[path] = strategy
             # 基準為上次分析所用策略(未分析過視為 SIMPLE):回到基準即毋須重跑,偏離才標記待重跑
             baseline = meta.get(META_KEY_ANALYZED_STRATEGIES, {}).get(
-                filename, AssetStrategy.SIMPLE.value
+                path, AssetStrategy.SIMPLE.value
             )
             dirty = set(meta.get(META_KEY_DIRTY_ASSETS, []))
             if strategy == baseline:
-                dirty.discard(filename)
+                dirty.discard(path)
             else:
-                dirty.add(filename)
+                dirty.add(path)
             meta[META_KEY_DIRTY_ASSETS] = sorted(dirty)
 
         project_meta_store.update(project_dir, _mutate)
 
         # 回傳該檔最新檢視(策略已更新、dirty 已依基準調整)
-        return next(v for v in self.list_assets(user_id, project) if v.filename == filename)
+        return next(v for v in self.list_assets(user_id, project) if v.path == path)
 
     def select_pending(self, user_id: str, project: str) -> list[str]:
-        """回傳「dirty(策略變更)∪ 未處理」的檔名清單,供「開始生成」只重跑需要的素材。"""
+        """回傳「dirty(策略變更)∪ 未處理」的素材 relpath 清單,供「開始生成」只重跑需要的素材。"""
         project_dir = self._project_dir(user_id, project)
         meta = self._read_meta(project_dir)
         dirty = set(meta.get(META_KEY_DIRTY_ASSETS, []))
         status_map = self._read_status_map(project_dir)
         pending: list[str] = []
-        for file_path in collect_asset_files(project_dir):
-            filename = os.path.basename(file_path)
-            if filename in dirty or filename not in status_map:
-                pending.append(filename)
+        for relpath in collect_asset_files(project_dir):
+            if relpath in dirty or relpath not in status_map:
+                pending.append(relpath)
         return pending
 
     def get_asset_strategies(self, user_id: str, project: str) -> dict[str, str]:
@@ -270,13 +282,14 @@ class AssetRepository:
         Phase 1 成功後清除 dirty 標記,並把這些素材的「已分析策略」基準推進到當前策略。
 
         基準(analyzed_strategies)供 set_strategy 判斷回退:把策略改回上次分析所用值即不再 dirty。
-        ``filenames`` 為 None 代表整個專案全部重分析(清空 dirty 並更新所有素材基準);否則只處理指定檔名。
-        經 ``project_meta_store.update`` 在鎖內讀-改-寫,避免與併發的改策略互相覆蓋。
+        ``filenames``(實為 relpath 清單)為 None 代表整個專案全部重分析(清空 dirty 並更新所有素材
+        基準);否則只處理指定 relpath。經 ``project_meta_store.update`` 在鎖內讀-改-寫,避免與併發的
+        改策略互相覆蓋。
         """
         project_dir = self._project_dir(user_id, project)
         # None 代表全部素材:磁碟掃描放在交易外(不需持鎖,亦避免拉長臨界區)
         if filenames is None:
-            analyzed_targets = [os.path.basename(p) for p in collect_asset_files(project_dir)]
+            analyzed_targets = collect_asset_files(project_dir)
         else:
             analyzed_targets = filenames
 
@@ -295,11 +308,9 @@ class AssetRepository:
         project_meta_store.update(project_dir, _mutate)
 
     @staticmethod
-    def _asset_exists(project_dir: str, filename: str) -> bool:
-        """確認某檔名確實是該專案的素材(經同一套探索規則,擋掉路徑穿越與非素材檔)。"""
-        return any(
-            os.path.basename(p) == filename for p in collect_asset_files(project_dir)
-        )
+    def _asset_exists(project_dir: str, path: str) -> bool:
+        """確認某 relpath 確實是該專案的素材(經同一套探索規則,擋掉路徑穿越與非素材檔)。"""
+        return path in set(collect_asset_files(project_dir))
 
 
 def _iso_from_mtime(mtime: float) -> str:

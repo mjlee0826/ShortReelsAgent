@@ -5,9 +5,10 @@ export default function ClipComponent({ clipData, assetsRootUrl }) {
   const { fps } = useVideoConfig();
   const frame = useCurrentFrame();
 
-  const fileName = clipData.clip_id.split('/').pop(); 
-  const fileUrl = `${assetsRootUrl}${fileName}`;
-  const isImage = /\.(jpg|jpeg|png|heic|heif)$/i.test(fileName);
+  // clip_id 為素材身分 relpath（如 standardized/clip_std.mp4）；assetsRootUrl + clip_id 直接命中
+  // /static 磁碟分層，不可再 split('/').pop()（那會丟掉 raw/standardized 子目錄而指向錯誤路徑）
+  const fileUrl = `${assetsRootUrl}${clipData.clip_id}`;
+  const isImage = /\.(jpg|jpeg|png|heic|heif)$/i.test(clipData.clip_id);
 
   // 【轉場修正】實作 Fade 淡入動畫 (0~15 幀時透明度從 0 漸變為 1)
   const opacity = clipData.transition_in === 'fade'
@@ -37,8 +38,8 @@ export default function ClipComponent({ clipData, assetsRootUrl }) {
   const renderPiP = () => {
     if (!clipData.pip_video || !clipData.pip_video.clip_id) return null;
     
-    const pipName = clipData.pip_video.clip_id.split('/').pop();
-    const pipUrl = `${assetsRootUrl}${pipName}`;
+    // 同主畫面：PiP 的 clip_id 亦為 relpath，直接接在 root 後命中磁碟分層
+    const pipUrl = `${assetsRootUrl}${clipData.pip_video.clip_id}`;
     const pipStart = Math.round((clipData.pip_video.source_start || 0) * fps);
     
     // PiP 樣式與位置計算

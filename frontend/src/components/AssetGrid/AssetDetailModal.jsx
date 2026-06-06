@@ -43,29 +43,30 @@ function StatusNotice({ asset }) {
 
 /**
  * @param {string} projectName 專案名（slug）
- * @param {string} filename 素材檔名
+ * @param {string} path 素材身分 relpath（如 raw/photo.jpg）—— 用於抓詳情
+ * @param {string} filename 素材顯示檔名（basename）—— 用於標題 / alt
  * @param {?string} thumbnailUrl 縮圖 URL（HEIC / 影片後備用）
  * @param {()=>void} onClose 關閉回呼
  */
-export default function AssetDetailModal({ projectName, filename, thumbnailUrl, onClose }) {
+export default function AssetDetailModal({ projectName, path, filename, thumbnailUrl, onClose }) {
   const [detail, setDetail] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
 
   // 開啟時自抓詳情;active 旗標避免請求未回前元件已卸載仍 setState。
-  // 彈窗每次開啟皆重新掛載(detailFilename null↔值),故初始 isLoading=true 已涵蓋載入態,
+  // 彈窗每次開啟皆重新掛載(path null↔值),故初始 isLoading=true 已涵蓋載入態,
   // 毋須在 effect 同步 setState(避免 react-hooks/set-state-in-effect 的串聯重繪);
   // 所有 setState 僅落在 then/catch/finally 非同步回呼,與本專案既有 fetch effect 慣例一致。
   useEffect(() => {
     let active = true;
-    apiService.fetchAssetDetail(projectName, filename)
+    apiService.fetchAssetDetail(projectName, path)
       .then((data) => { if (active) { setDetail(data); setErrorMsg(''); } })
       .catch((error) => {
         if (active) setErrorMsg(error.response?.data?.detail || error.message || String(error));
       })
       .finally(() => { if (active) setIsLoading(false); });
     return () => { active = false; };
-  }, [projectName, filename]);
+  }, [projectName, path]);
 
   const asset = detail?.asset;
   const metadata = detail?.metadata;

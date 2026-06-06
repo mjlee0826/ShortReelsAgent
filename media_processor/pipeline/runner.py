@@ -114,7 +114,7 @@ class PipelineRunner:
             僅含 ``status == "success"`` 的 metadata dict 列表,**依輸入順序排列**,
             與舊版序列迴圈輸出逐欄一致。
         """
-        contexts = self._build_contexts(asset_files, video_strategy, asset_strategies)
+        contexts = self._build_contexts(asset_files, base_dir, video_strategy, asset_strategies)
         if not contexts:
             return []
 
@@ -183,14 +183,18 @@ class PipelineRunner:
     def _build_contexts(
         self,
         asset_files: list[str],
+        base_dir: str,
         default_video_strategy: VideoStrategy,
         asset_strategies: dict[str, str] | None = None,
     ) -> list[AssetContext]:
         """
-        把檔案路徑清單轉成帶輸入索引的 AssetContext 列表,並套用逐檔策略覆寫。
+        把檔案絕對路徑清單轉成帶輸入索引的 AssetContext 列表,並套用逐檔策略覆寫。
 
-        逐檔策略以檔名為鍵:image 覆寫 ``image_strategy``、video 覆寫 ``video_strategy``;
-        未列出的檔案沿用全域預設(image 一律 SIMPLE、video 用 default_video_strategy)。
+        ``asset_id`` 取「相對 ``base_dir`` 的 relpath」(如 ``raw/photo.jpg``)作為素材身分:此身分
+        一路貫穿 status / metadata / 策略 meta 的鍵與 blueprint 的 ``clip_id``。``file_path`` 仍為絕對
+        路徑(供各 Stage 實際讀檔)。逐檔策略以同一 relpath 為鍵:image 覆寫 ``image_strategy``、
+        video 覆寫 ``video_strategy``;未列出的檔案沿用全域預設(image 一律 SIMPLE、video 用
+        default_video_strategy)。
         """
         overrides = asset_strategies or {}
         contexts: list[AssetContext] = []
@@ -201,7 +205,8 @@ class PipelineRunner:
                 # 理論上呼叫端已過濾;防呆跳過不支援的副檔名
                 print(f"[PipelineRunner] 跳過不支援的檔案: {os.path.basename(file_path)}")
                 continue
-            asset_id = os.path.basename(file_path)
+            # 素材身分 = 相對 project root 的 relpath(正斜線);與 collect_asset_files / 策略 meta 鍵一致
+            asset_id = os.path.relpath(file_path, base_dir).replace(os.sep, "/")
             # 逐檔覆寫是否選 COMPLEX(以列舉值字串比對,避免散落的 magic string)
             wants_complex = overrides.get(asset_id) == ImageStrategy.COMPLEX.value
             if media_kind == MediaKind.IMAGE:

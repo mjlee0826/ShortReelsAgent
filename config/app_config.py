@@ -10,6 +10,14 @@ import os
 # 使用者素材根目錄：上傳、標準化、Pipeline 讀取皆從此路徑出發
 ASSETS_DIR = os.environ.get("ASSETS_DIR", "/data1/cache/mjlee/assets")
 
+# --- 專案內素材分層子目錄（B 方案：素材身分 = 相對 project root 的 relpath）---
+# 每個專案資料夾底下分兩層：raw/ 放所有原始下載 + 上傳（含自訂音訊）、standardized/ 放
+# media_standardizer 產出的 _std 衍生檔；各階段 JSON（phase1~4 / project_meta）一律留在 project 根目錄。
+# 之所以放在 config（而非 asset_discovery）：ingestion_engine 受「不得 import backend」的反循環
+# 依賴約束，下載目標需用到 RAW_SUBDIR，唯有放在最底層的 config 才能讓 backend 與 ingestion 共用同一常數。
+RAW_SUBDIR = "raw"
+STANDARDIZED_SUBDIR = "standardized"
+
 # 全域音樂快取目錄：由 /cache 靜態路由對外服務
 TEMP_TEMPLATES_DIR = os.environ.get("TEMP_TEMPLATES_DIR", "/data1/cache/mjlee/temp_templates")
 

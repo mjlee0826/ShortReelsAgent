@@ -12,7 +12,7 @@ from backend.services.job_manager import job_manager
 from backend.auth.logto_jwt_verifier import verify_token
 from backend.api.progress import progress_hub, ws_progress_observer
 from media_processor.pipeline.progress import ProgressTracker
-from config.app_config import ASSETS_DIR
+from config.app_config import ASSETS_DIR, RAW_SUBDIR
 
 router = APIRouter()
 director_service = DirectorService()
@@ -143,7 +143,10 @@ async def upload_music(folder_name: str, file: UploadFile = File(...), user_id: 
     if not os.path.isdir(folder_path):
         raise HTTPException(status_code=404, detail=f"找不到素材資料夾: {folder_name}")
 
-    save_path = os.path.join(folder_path, file.filename)
+    # 音訊與其他原始素材同存 raw/（不經 standardize）；回傳 basename,generate 時於 raw/ 下解析
+    raw_dir = os.path.join(folder_path, RAW_SUBDIR)
+    os.makedirs(raw_dir, exist_ok=True)
+    save_path = os.path.join(raw_dir, file.filename)
     content = await file.read()
     with open(save_path, "wb") as f:
         f.write(content)

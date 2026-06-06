@@ -25,32 +25,44 @@ class MediaStandardizer:
         self.web_safe_video_ext = ".mp4"
         self.web_safe_image_ext = ".jpg"
 
-    def standardize_folder(self, folder_path: str):
+    def standardize_folder(self, input_dir: str, output_dir: str):
         """
-        遍歷資料夾，對不合規的檔案進行原地轉檔或生成預覽檔。
+        掃描 ``input_dir``(raw 原始檔),對不合規者轉檔 / 生成預覽,``_std`` 衍生檔輸出到 ``output_dir``。
+
+        B 方案的分層語意:原始檔留在 raw/(``input_dir``)、標準化衍生檔集中到 standardized/
+        (``output_dir``),兩層分離避免原始與衍生混雜造成計數錯亂。``input_dir`` 不存在則直接結束
+        (尚未下載任何素材的新專案)。
         """
-        print(f"🧹 [Standardizer] 開始掃描並標準化素材: {folder_path}")
-        
-        all_files = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f))]
+        print(f"🧹 [Standardizer] 開始掃描並標準化素材: {input_dir} -> {output_dir}")
+
+        if not os.path.isdir(input_dir):
+            print(f"✅ [Standardizer] 來源目錄不存在,無素材可標準化: {input_dir}")
+            return
+
+        # 衍生檔輸出目錄先建好(NFS 上 makedirs 對既有目錄為 no-op,安全)
+        os.makedirs(output_dir, exist_ok=True)
+
+        all_files = [f for f in os.listdir(input_dir) if os.path.isfile(os.path.join(input_dir, f))]
         standardized_count = 0
 
         for filename in all_files:
-            file_path = os.path.join(folder_path, filename)
+            file_path = os.path.join(input_dir, filename)
             ext = os.path.splitext(filename)[1].lower()
 
             # 策略：非 .mp4 容器一律轉 H.264 .mp4；.mp4 僅在長邊超過上限（4K）時才轉（見 _needs_video_standardize）
             if self._needs_video_standardize(ext, filename, file_path):
-                new_file_path = os.path.join(folder_path, os.path.splitext(filename)[0] + "_std.mp4")
+                new_file_path = os.path.join(output_dir, os.path.splitext(filename)[0] + "_std.mp4")
+                # 衍生檔已存在即跳過(idempotent):增量同步重跑時不重轉已標準化的素材
                 if not os.path.exists(new_file_path):
                     print(f"   🎥 正在標準化影片: {filename} -> H.264")
                     # 使用 FFmpegAdapter 轉檔 (c:v libx264 確保網頁相容性)
                     if self._convert_to_h264(file_path, new_file_path):
                         standardized_count += 1
-                        # 建議保留原檔或標註，此處我們讓後續流程改用新檔案
+                        # 原始檔保留在 raw/，後續流程改用 standardized/ 的新檔案
 
             # 策略：將 HEIC 轉為 JPG (瀏覽器才看得見)
             elif ext in _HEIC_IMAGE_EXT:
-                new_file_path = os.path.join(folder_path, os.path.splitext(filename)[0] + "_std.jpg")
+                new_file_path = os.path.join(output_dir, os.path.splitext(filename)[0] + "_std.jpg")
                 if not os.path.exists(new_file_path):
                     print(f"   📸 正在標準化圖片: {filename} -> JPG")
                     if self._convert_image_to_jpg(file_path, new_file_path):

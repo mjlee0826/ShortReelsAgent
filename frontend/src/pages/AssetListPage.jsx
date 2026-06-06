@@ -33,17 +33,20 @@ export default function AssetListPage() {
   const [selected, setSelected] = useState(new Set());
   // 選取模式：開啟後卡片才顯示勾選框、整卡可點選（與 selected 為獨立關注點）
   const [selectionMode, setSelectionMode] = useState(false);
-  // WebSocket 即時狀態覆蓋層：filename → { status, stage }
+  // WebSocket 即時狀態覆蓋層：path（relpath 身分）→ { status, stage }；與事件的 asset_id 對齊
   const [liveStatusMap, setLiveStatusMap] = useState({});
   const [jobRunning, setJobRunning] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   // 已完成（pipeline_finish）的素材集合,用來累計進度,避免重複事件灌爆計數
   const finishedRef = useRef(new Set());
-  // 詳情彈窗：null = 關閉；非 null = 開啟該檔詳情（非選取模式點卡片開啟）
-  const [detailFilename, setDetailFilename] = useState(null);
+  // 詳情彈窗：null = 關閉；非 null = 開啟該素材詳情（存 relpath 身分；非選取模式點卡片開啟）
+  const [detailPath, setDetailPath] = useState(null);
 
   const displayName =
     currentProject?.name === projectId ? currentProject.display_name : projectId;
+
+  // 詳情彈窗對應的素材（以 relpath 身分查找）；供彈窗取顯示檔名與縮圖後備
+  const detailAsset = detailPath ? assets.find((a) => a.path === detailPath) : null;
 
   // ── 載入素材 ───────────────────────────────────────────────────────────────
   // 可重用的 refetch：供 WebSocket job 結束後取最終持久化狀態（在事件回呼內呼叫，非 effect）。
@@ -110,16 +113,17 @@ export default function AssetListPage() {
   const connect = useProgressSocket(handleProgressEvent);
 
   // 啟動一個 Phase 1 分析 job：先把涉及素材標處理中,拿到 job_id 後訂閱 WS
-  const startJob = useCallback(async (jobPromise, involvedFilenames) => {
+  // involvedPaths 為素材 relpath 身分清單，與後續 WebSocket 事件的 asset_id 對齊
+  const startJob = useCallback(async (jobPromise, involvedPaths) => {
     setErrorMsg('');
     setJobRunning(true);
     // 開工即清空選取並退出選取模式（處理中不應再停留在選取狀態）
     setSelected(new Set());
     setSelectionMode(false);
     finishedRef.current = new Set();
-    setProgress({ done: 0, total: involvedFilenames.length });
+    setProgress({ done: 0, total: involvedPaths.length });
     const initialLive = {};
-    involvedFilenames.forEach((f) => { initialLive[f] = { status: 'processing', stage: null }; });
+    involvedPaths.forEach((p) => { initialLive[p] = { status: 'processing', stage: null }; });
     setLiveStatusMap(initialLive);
     try {
       const { job_id: jobId } = await jobPromise;
@@ -134,17 +138,18 @@ export default function AssetListPage() {
   }, [connect]);
 
   // ── 選取 ───────────────────────────────────────────────────────────────────
-  const toggleSelect = useCallback((filename) => {
+  // 選取集合一律存素材 relpath 身分（asset.path）
+  const toggleSelect = useCallback((path) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(filename)) next.delete(filename);
-      else next.add(filename);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
       return next;
     });
   }, []);
 
   const selectAll = useCallback(() => {
-    setSelected(new Set(assets.map((a) => a.filename)));
+    setSelected(new Set(assets.map((a) => a.path)));
   }, [assets]);
 
   const clearSelection = useCallback(() => setSelected(new Set()), []);
@@ -152,7 +157,7 @@ export default function AssetListPage() {
   // 進入 / 離開選取模式；離開時一併清空選取
   const enterSelection = useCallback(() => {
     setSelectionMode(true);
-    setDetailFilename(null); // 進選取模式即關閉詳情，避免兩模式狀態交疊
+    setDetailPath(null); // 進選取模式即關閉詳情，避免兩模式狀態交疊
   }, []);
   const exitSelection = useCallback(() => {
     setSelectionMode(false);
@@ -160,14 +165,15 @@ export default function AssetListPage() {
   }, [clearSelection]);
 
   // ── 詳情彈窗 ─────────────────────────────────────────────────────────────────
-  const openDetail = useCallback((filename) => setDetailFilename(filename), []);
-  const closeDetail = useCallback(() => setDetailFilename(null), []);
+  const openDetail = useCallback((path) => setDetailPath(path), []);
+  const closeDetail = useCallback(() => setDetailPath(null), []);
 
   // ── 策略切換 ───────────────────────────────────────────────────────────────
-  const handleToggleStrategy = useCallback(async (filename, strategy) => {
+  // 以 relpath 身分（path）為鍵呼叫 API 與比對更新
+  const handleToggleStrategy = useCallback(async (path, strategy) => {
     try {
-      const updated = await apiService.setAssetStrategy(projectId, filename, strategy);
-      setAssets((arr) => arr.map((a) => (a.filename === filename ? updated : a)));
+      const updated = await apiService.setAssetStrategy(projectId, path, strategy);
+      setAssets((arr) => arr.map((a) => (a.path === path ? updated : a)));
     } catch (error) {
       const msg = error.response?.data?.detail || error.message || String(error);
       setErrorMsg(`更新策略失敗：${msg}`);
@@ -179,10 +185,10 @@ export default function AssetListPage() {
     if (targets.length === 0) return;
     try {
       const results = await Promise.all(
-        targets.map((f) => apiService.setAssetStrategy(projectId, f, strategy))
+        targets.map((p) => apiService.setAssetStrategy(projectId, p, strategy))
       );
-      const byName = new Map(results.map((r) => [r.filename, r]));
-      setAssets((arr) => arr.map((a) => byName.get(a.filename) || a));
+      const byPath = new Map(results.map((r) => [r.path, r]));
+      setAssets((arr) => arr.map((a) => byPath.get(a.path) || a));
     } catch (error) {
       const msg = error.response?.data?.detail || error.message || String(error);
       setErrorMsg(`批量設定策略失敗：${msg}`);
@@ -197,7 +203,7 @@ export default function AssetListPage() {
   }, [projectId, selected, startJob]);
 
   const handleReanalyzeAll = useCallback(() => {
-    const ids = assets.map((a) => a.filename);
+    const ids = assets.map((a) => a.path);
     startJob(apiService.reanalyzeAssets(projectId, null), ids);
   }, [projectId, assets, startJob]);
 
@@ -205,7 +211,7 @@ export default function AssetListPage() {
     // 開始生成只重跑 dirty + 未處理素材；全部已是最新則提示不動作
     const pending = assets
       .filter((a) => a.dirty || a.status === STATUS_UNPROCESSED)
-      .map((a) => a.filename);
+      .map((a) => a.path);
     if (pending.length === 0) {
       setErrorMsg('沒有需要分析的素材（全部已是最新；可改用「重新分析」）。');
       return;
@@ -301,11 +307,12 @@ export default function AssetListPage() {
         )}
 
         {/* 素材詳情彈窗（非選取模式點卡片開啟）：呈現完整媒體 + Phase 1 資訊 */}
-        {detailFilename && (
+        {detailPath && (
           <AssetDetailModal
             projectName={projectId}
-            filename={detailFilename}
-            thumbnailUrl={assets.find((a) => a.filename === detailFilename)?.thumbnail_url}
+            path={detailPath}
+            filename={detailAsset?.filename || detailPath}
+            thumbnailUrl={detailAsset?.thumbnail_url}
             onClose={closeDetail}
           />
         )}

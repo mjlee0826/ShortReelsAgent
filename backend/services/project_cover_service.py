@@ -15,12 +15,12 @@ import json
 import os
 from typing import Optional
 
-from backend.services.asset_discovery import PHASE1_METADATA_FILENAME
+from backend.services.asset_discovery import PHASE1_METADATA_FILENAME, to_abs_path
 from backend.services.thumbnail_service import ThumbnailService
 from media_processor.pipeline.context import derive_media_kind
 
 # phase1_assets_metadata.json 每筆條目的欄位鍵(具名常數,避免散落 magic string)
-_ENTRY_KEY_FILE = "file"                      # 素材原始路徑(取 basename 即檔名)
+_ENTRY_KEY_FILE = "file"                      # 素材身分 relpath(如 raw/photo.jpg)
 _ENTRY_KEY_METADATA = "metadata"             # 完整感知 metadata
 _METADATA_KEY_AESTHETIC = "aesthetic_score"  # LAION 美學分(僅圖片 / 一般影片有)
 
@@ -37,22 +37,22 @@ class ProjectCoverService:
         回傳某專案封面(美學最高素材)的縮圖 URL;無可用素材或任何失敗都回 None。
 
         步驟:讀 success-only metadata → 選 aesthetic_score 最高(缺分者略過,全缺則取第一筆)
-        → 由 basename 還原本機素材路徑 → 委派 ThumbnailService 確保縮圖存在並組 URL。
+        → 由 relpath 身分還原本機素材路徑 → 委派 ThumbnailService 確保縮圖存在並組 URL。
         """
         try:
             entries = self._read_metadata(project_dir)
             best = self._pick_best_entry(entries)
             if best is None:
                 return None
-            filename = os.path.basename(best.get(_ENTRY_KEY_FILE, ""))
-            if not filename:
+            relpath = best.get(_ENTRY_KEY_FILE, "")
+            if not relpath:
                 return None
-            # metadata 內的 file 可能是他機(Leibniz)絕對路徑,一律以 basename 重組本機素材路徑
-            src_path = os.path.join(project_dir, filename)
+            # file 為 relpath 身分(已含 raw/standardized 分層),直接還原本機絕對路徑(可跨機移植)
+            src_path = to_abs_path(project_dir, relpath)
             if not os.path.isfile(src_path):
                 return None
-            media_kind = derive_media_kind(filename)
-            return self._thumbnails.ensure_url(user_id, project, filename, src_path, media_kind)
+            media_kind = derive_media_kind(relpath)
+            return self._thumbnails.ensure_url(user_id, project, relpath, src_path, media_kind)
         except Exception as exc:  # noqa: BLE001 - 封面非關鍵路徑,任何意外都退 None 改顯佔位
             print(f"[ProjectCoverService Warning] 解析封面失敗 ({project}): {exc}")
             return None

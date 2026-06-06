@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
-import { FaPlay, FaFilm, FaTrash, FaThLarge, FaGoogleDrive, FaHdd } from 'react-icons/fa';
-import { Card, Badge, Button, IconButton } from '../ui';
+import { FaPlay, FaFilm, FaTrash, FaThLarge, FaGoogleDrive, FaHdd, FaSync } from 'react-icons/fa';
+import { Card, Badge, Button, IconButton, Spinner } from '../ui';
 import { SOURCE_GDRIVE, COVER_ASPECT, deriveProjectStatus } from './projectStatus';
 
 // 刪除鈕圖示尺寸（具名常數，避免 magic number；較舊版放大以利點擊）
 const DELETE_ICON_SIZE = 16;
+// 同步鈕圖示尺寸（具名常數，避免 magic number）
+const SYNC_ICON_SIZE = 13;
 
 /**
  * ProjectCard：媒體優先的專案卡片（IG 動態風）。
@@ -16,10 +18,26 @@ const DELETE_ICON_SIZE = 16;
  *
  * 互動：點卡片 / 播放鈕進編輯器、「管理素材」進素材頁、hover 顯示刪除（二次確認）。
  */
-export default function ProjectCard({ project, onOpen, onManage, onDelete }) {
+export default function ProjectCard({ project, onOpen, onManage, onDelete, onSync }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // 同步為阻塞操作（下載 + Phase 1，可能久），以本地狀態鎖住按鈕避免重複點擊
+  const [syncing, setSyncing] = useState(false);
   const isDrive = project.source === SOURCE_GDRIVE;
   const status = deriveProjectStatus(project);
+
+  // 觸發手動同步：完成後 store 會 refetch 刷新 sync_status / 素材數；失敗訊息由 store 設到 errorMsg
+  const handleSync = async (e) => {
+    e.stopPropagation();
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      await onSync?.(project.name);
+    } catch {
+      // 錯誤已由 store 寫入 errorMsg，此處僅需還原按鈕狀態
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   // 修改日期（鎖單行恆渲染，確保各卡 meta 高度一致）
   const lastModified = new Date(project.last_modified).toLocaleDateString('zh-TW', {
@@ -123,8 +141,8 @@ export default function ProjectCard({ project, onOpen, onManage, onDelete }) {
           {project.has_blueprint && <Badge tone="success">已有藍圖</Badge>}
         </div>
 
-        {/* 操作列（mt-auto 釘底；唯一操作為「管理素材」，進編輯器改由點卡片 / 播放鈕觸發）*/}
-        <div className="mt-auto pt-1">
+        {/* 操作列（mt-auto 釘底）：管理素材 + Drive 專案的手動同步鈕；進編輯器改由點卡片 / 播放鈕觸發 */}
+        <div className="mt-auto pt-1 flex items-center gap-2">
           <Button
             variant="secondary"
             size="sm"
@@ -134,6 +152,18 @@ export default function ProjectCard({ project, onOpen, onManage, onDelete }) {
           >
             管理素材
           </Button>
+          {/* 同步鈕僅雲端來源專案顯示；同步中顯示 Spinner 並禁用，避免重複觸發 */}
+          {isDrive && (
+            <IconButton
+              tone="accent"
+              className="shrink-0"
+              disabled={syncing}
+              onClick={handleSync}
+              title={syncing ? '同步中…' : '同步 Google Drive 素材'}
+            >
+              {syncing ? <Spinner size="sm" /> : <FaSync size={SYNC_ICON_SIZE} />}
+            </IconButton>
+          )}
         </div>
       </div>
     </Card>

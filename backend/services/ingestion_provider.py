@@ -19,8 +19,13 @@ from ingestion_engine import (
 
 
 def _phase1_runner(user_id: str, project_name: str) -> None:
-    """攝取背景預跑的 Phase 1 觸發 callback：對指定本地 project 跑 Phase 1（預設 SIMPLE 策略）。"""
-    director_service.run_phase1(project_name, user_id=user_id)
+    """
+    攝取背景預跑的 Phase 1 觸發 callback：對指定本地 project 跑**增量** Phase 1。
+
+    用 run_phase1_incremental 只重跑「新增 / 策略變更」的素材,避免素材簽章一變就整包重跑
+    昂貴的感知分析(Qwen / Gemini);首次同步時 status 為空 → 等同全量(正確)。
+    """
+    director_service.run_phase1_incremental(project_name, user_id=user_id)
 
 
 # 模組層級單例：跨 API 請求與背景輪詢共享同一份狀態與設定

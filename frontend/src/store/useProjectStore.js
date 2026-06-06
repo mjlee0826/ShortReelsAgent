@@ -41,6 +41,20 @@ const useProjectStore = create((set, get) => ({
     }
   },
 
+  // 手動觸發一次雲端同步（下載新素材 + 增量 Phase 1），完成後重抓刷新 sync_status / 素材數。
+  // 刻意不切換全域 isLoading（避免整個網格翻 spinner）；按鈕的「同步中」狀態由 ProjectCard 本地管理。
+  syncProject: async (projectName) => {
+    set({ errorMsg: '' });
+    try {
+      await apiService.syncProject(projectName);
+      await get().fetchProjects();
+    } catch (error) {
+      const msg = error.response?.data?.detail || error.message || String(error);
+      set({ errorMsg: `同步失敗：${msg}` });
+      throw error; // 讓呼叫端（卡片）得知失敗以還原按鈕狀態
+    }
+  },
+
   // 刪除指定專案並重新載入清單
   deleteProject: async (projectName) => {
     set({ isLoading: true, errorMsg: '' });
@@ -66,6 +80,9 @@ const useProjectStore = create((set, get) => ({
     });
     set({ currentProject: project });
   },
+
+  // 清除當前選定專案（返回首頁時呼叫，讓頂部麵包屑不停留在舊專案 —— 需求 5）
+  clearCurrentProject: () => set({ currentProject: null }),
 
   clearError: () => set({ errorMsg: '' }),
 }));

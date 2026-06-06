@@ -17,13 +17,16 @@ export default function ProjectDashboard() {
   const navigate = useNavigate();
   const {
     projects, isLoading, errorMsg,
-    fetchProjects, createProjectFromDrive, deleteProject, selectProject, clearError,
+    fetchProjects, createProjectFromDrive, deleteProject, selectProject, syncProject, clearError,
   } = useProjectStore();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortKey, setSortKey] = useState(SORT_KEY.RECENT);
 
   useEffect(() => {
+    // 回到首頁即清除選定專案，讓 AppHeader 麵包屑不停留在剛離開的專案（需求 5）。
+    // 以 getState() 取 action（zustand action 為穩定參照），避免在 effect 內呼叫 selector hook。
+    useProjectStore.getState().clearCurrentProject();
     fetchProjects();
   }, [fetchProjects]);
 
@@ -116,6 +119,7 @@ export default function ProjectDashboard() {
             onOpen={handleOpenProject}
             onManage={handleManageProject}
             onDelete={deleteProject}
+            onSync={syncProject}
           />
         )}
       </main>

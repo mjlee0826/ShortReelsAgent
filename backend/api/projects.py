@@ -14,6 +14,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from backend.auth.logto_jwt_verifier import verify_token
+from backend.services.asset_discovery import collect_asset_files
 from backend.services.ingestion_provider import cloud_ingestion_service
 from backend.services.project_cover_service import ProjectCoverService
 from backend.services.project_meta_store import project_meta_store
@@ -48,15 +49,6 @@ _cover_thumbnail_service = ThumbnailService(
     max_px=COVER_THUMBNAIL_MAX_PX, subdir=COVER_THUMBNAIL_SUBDIR,
 )
 _cover_service = ProjectCoverService(thumbnail_service=_cover_thumbnail_service)
-
-# --- 允許的媒體副檔名（用於計算素材數量）---
-_MEDIA_EXTENSIONS = {'.mp4', '.mov', '.jpg', '.jpeg', '.png', '.heic', '.heif', '.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg'}
-
-
-class CreateProjectRequest(BaseModel):
-    """以顯示名稱建立空白本地專案的請求體。"""
-
-    display_name: str
 
 
 class CreateFromDriveRequest(BaseModel):
@@ -107,13 +99,12 @@ def _user_dir(user_id: str) -> str:
 
 
 def _count_assets(project_dir: str) -> int:
-    """計算專案資料夾內的媒體素材數量（排除 JSON 快取與 meta）。"""
-    count = 0
-    for fname in os.listdir(project_dir):
-        ext = os.path.splitext(fname)[1].lower()
-        if ext in _MEDIA_EXTENSIONS:
-            count += 1
-    return count
+    """
+    計算專案的真實素材數量(去重、不含 _std 重複)。
+
+    用 collect_asset_files 計數,與素材頁所見一致(解問題 4：總覽不再把 _std 衍生檔重複計入)。
+    """
+    return len(collect_asset_files(project_dir))
 
 
 def _now_iso() -> str:
@@ -170,33 +161,6 @@ def _list_projects_sync(user_id: str) -> list[dict]:
             continue
     print(f"[Projects] 列出使用者 '{user_id[:8]}...' 的 {len(projects)} 個專案")
     return projects
-
-
-@router.post("/projects", response_model=ProjectMeta, status_code=201)
-async def create_project(req: CreateProjectRequest, user_id: str = Depends(verify_token)):
-    """建立新專案資料夾，資料夾名稱由後端從 display_name slugify 產生。"""
-    if not req.display_name.strip():
-        raise HTTPException(status_code=400, detail="專案名稱不能為空")
-
-    user_root = _user_dir(user_id)
-    name = _allocate_unique_name(user_root, _slugify(req.display_name))
-
-    project_dir = os.path.join(user_root, name)
-    os.makedirs(project_dir, exist_ok=True)
-
-    now = _now_iso()
-    meta = {
-        "name": name,
-        "display_name": req.display_name.strip(),
-        "created_at": now,
-        "last_modified": now,
-        "asset_count": 0,
-        "has_blueprint": False,
-    }
-    project_meta_store.write(project_dir, meta)
-
-    print(f"[Projects] 建立新專案: '{name}' (使用者 '{user_id[:8]}...')")
-    return meta
 
 
 @router.post("/projects/from-drive", response_model=ProjectMeta, status_code=201)

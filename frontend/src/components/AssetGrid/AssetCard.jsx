@@ -19,15 +19,17 @@ const PLACEHOLDER_ICON_SIZE = 'text-3xl';
  * 選取模式（selectionMode）顯示左上勾選框、整卡點擊切換選取；非選取模式整卡點擊開啟詳情彈窗。
  * effectiveStatus 已由父層把 WebSocket 即時狀態覆蓋在持久化狀態之上；切換 / 選取於處理中禁用。
  *
- * @param {object} asset 素材資料
+ * 素材身分一律用 relpath（asset.path）作為識別傳給回呼；asset.filename（basename）僅供顯示。
+ *
+ * @param {object} asset 素材資料（含 path 身分與 filename 顯示名）
  * @param {boolean} selected 是否已選取
  * @param {string} effectiveStatus 生效狀態（即時覆蓋後）
  * @param {?string} liveStage 即時處理階段名
  * @param {boolean} disabled 是否禁用（工作進行中）
  * @param {boolean} selectionMode 是否處於選取模式
- * @param {(filename:string)=>void} onToggleSelect 切換選取
- * @param {(filename:string, strategy:string)=>void} onToggleStrategy 切換策略
- * @param {(filename:string)=>void} onOpenDetail 開啟詳情（非選取模式整卡點擊）
+ * @param {(path:string)=>void} onToggleSelect 切換選取
+ * @param {(path:string, strategy:string)=>void} onToggleStrategy 切換策略
+ * @param {(path:string)=>void} onOpenDetail 開啟詳情（非選取模式整卡點擊）
  */
 export default function AssetCard({
   asset,
@@ -52,8 +54,8 @@ export default function AssetCard({
   const cardSelectable = selectionMode && !disabled;
   // 非選取模式：整卡點擊開啟詳情（即使分析進行中亦可，詳情為唯讀）；選取模式維持切換選取
   const handleCardClick = selectionMode
-    ? (cardSelectable ? () => onToggleSelect(asset.filename) : undefined)
-    : () => onOpenDetail?.(asset.filename);
+    ? (cardSelectable ? () => onToggleSelect(asset.path) : undefined)
+    : () => onOpenDetail?.(asset.path);
   // 游標手型：選取模式需可選才顯示；非選取模式恆可點開詳情
   const showPointer = selectionMode ? cardSelectable : true;
 
@@ -86,7 +88,7 @@ export default function AssetCard({
         {selectionMode && (
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); onToggleSelect(asset.filename); }}
+            onClick={(e) => { e.stopPropagation(); onToggleSelect(asset.path); }}
             disabled={disabled}
             className={[
               'absolute top-2 left-2 z-10 w-6 h-6 rounded-md flex items-center justify-center border transition-colors disabled:opacity-40',
@@ -131,7 +133,7 @@ export default function AssetCard({
           <StrategyToggle
             value={asset.strategy}
             disabled={disabled}
-            onChange={(value) => onToggleStrategy(asset.filename, value)}
+            onChange={(value) => onToggleStrategy(asset.path, value)}
           />
         </div>
       </div>

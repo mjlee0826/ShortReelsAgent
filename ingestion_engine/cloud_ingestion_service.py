@@ -18,7 +18,7 @@ import tempfile
 import threading
 from typing import Callable, Optional
 
-from config.app_config import ASSETS_DIR
+from config.app_config import ASSETS_DIR, RAW_SUBDIR
 from ingestion_engine.cloud_storage_adapter import CloudStorageAdapter
 from ingestion_engine.exceptions import RemoteAccessError, RemoteAuthError
 from ingestion_engine.models import (
@@ -128,10 +128,12 @@ class CloudIngestionService:
         if unchanged:
             return self._mark_synced(project_dir, report)
 
-        # 有新增／替換素材：先下載（下載失敗不應留下 processing 假象）
+        # 有新增／替換素材：先下載到 raw/（原始檔分層；adapter 會自建目標目錄）
+        # 下載失敗不應留下 processing 假象；「已存在且同大小跳過」的增量判斷因此改看 raw/
         folder_id = meta[META_KEY_DRIVE_FOLDER_ID]
+        raw_dir = os.path.join(project_dir, RAW_SUBDIR)
         try:
-            self._adapter.download_folder(folder_id, project_dir)
+            self._adapter.download_folder(folder_id, raw_dir)
         except RemoteAuthError as exc:
             return self._pause_for_auth(project_dir, report, exc)
         except RemoteAccessError as exc:

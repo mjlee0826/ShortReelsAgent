@@ -140,17 +140,18 @@ class DirectorApiService {
     return response.data;
   }
 
-  async createProject(displayName) {
-    const response = await apiClient.post('/api/projects', { display_name: displayName });
-    return response.data;
-  }
-
   // 以 Google Drive 公開資料夾連結建立雲端來源專案，後端會於背景啟動首次同步（下載素材 + Phase 1）
   async createProjectFromDrive(displayName, sourceUrl) {
     const response = await apiClient.post('/api/projects/from-drive', {
       display_name: displayName,
       source_url: sourceUrl,
     });
+    return response.data;
+  }
+
+  // 手動觸發一次雲端同步（阻塞：下載新素材 + 增量 Phase 1），回傳 SyncReport
+  async syncProject(projectName) {
+    const response = await apiClient.post(`/api/projects/${projectName}/sync`);
     return response.data;
   }
 
@@ -167,18 +168,20 @@ class DirectorApiService {
   }
 
   // 取得單一素材的完整詳情（AssetView + 原始媒體 URL + Phase 1 完整感知 metadata），供詳情彈窗使用
-  async fetchAssetDetail(projectName, filename) {
+  // 素材身分為含 / 的 relpath，故以 query 參數 path 傳遞（避免 path param 的 %2F 坑）
+  async fetchAssetDetail(projectName, path) {
     const response = await apiClient.get(
-      `/api/projects/${projectName}/assets/${encodeURIComponent(filename)}`
+      `/api/projects/${projectName}/asset-detail`,
+      { params: { path } }
     );
     return response.data;
   }
 
-  // 更新單一素材的 Simple/Complex 策略並標記 dirty，回傳更新後的素材檢視
-  async setAssetStrategy(projectName, filename, strategy) {
+  // 更新單一素材（以 relpath path 識別）的 Simple/Complex 策略並標記 dirty，回傳更新後的素材檢視
+  async setAssetStrategy(projectName, path, strategy) {
     const response = await apiClient.patch(
-      `/api/projects/${projectName}/assets/${encodeURIComponent(filename)}/strategy`,
-      { strategy }
+      `/api/projects/${projectName}/asset-strategy`,
+      { path, strategy }
     );
     return response.data;
   }

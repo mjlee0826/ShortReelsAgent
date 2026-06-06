@@ -1,7 +1,7 @@
 import os
 import json
 from datetime import datetime, timezone
-from config.app_config import ASSETS_DIR, TEMP_TEMPLATES_DIR
+from config.app_config import ASSETS_DIR, RAW_SUBDIR, STANDARDIZED_SUBDIR, TEMP_TEMPLATES_DIR
 from media_processor.video_strategy import VideoStrategy
 from media_processor.pipeline import PipelineRunner, ProgressTracker
 from media_tools.media_standardizer import MediaStandardizer
@@ -11,12 +11,10 @@ from backend.services.asset_discovery import (
     PHASE1_METADATA_FILENAME,
     PHASE1_STATUS_FILENAME,
     collect_asset_files,
+    to_abs_path,
 )
 from backend.services.asset_repository import AssetRepository
 from backend.services.project_meta_store import project_meta_store
-
-# 計算素材數量時認定的媒體副檔名
-_MEDIA_EXTENSIONS = {'.mp4', '.mov', '.jpg', '.jpeg', '.png', '.heic', '.heif', '.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg'}
 
 
 class DirectorService:
@@ -41,10 +39,8 @@ class DirectorService:
             meta = project_meta_store.read(project_dir)
             if meta is None:
                 return
-            asset_count = sum(
-                1 for fname in os.listdir(project_dir)
-                if os.path.splitext(fname)[1].lower() in _MEDIA_EXTENSIONS
-            )
+            # 用 collect_asset_files 計數(已去重、不含 _std 重複),與素材頁數量一致(解問題 4)
+            asset_count = len(collect_asset_files(project_dir))
             meta["last_modified"] = datetime.now(timezone.utc).isoformat()
             meta["asset_count"] = asset_count
             meta["has_blueprint"] = os.path.exists(os.path.join(project_dir, "phase4_blueprint.json"))
@@ -81,15 +77,22 @@ class DirectorService:
         if not os.path.isdir(target_dir):
             raise ValueError(f"找不到素材資料夾: {target_dir}")
 
-        self.standardizer.standardize_folder(target_dir)
+        # 標準化:掃 raw/ 原始檔,_std 衍生檔輸出到 standardized/(分層,解計數錯亂)
+        self.standardizer.standardize_folder(
+            os.path.join(target_dir, RAW_SUBDIR),
+            os.path.join(target_dir, STANDARDIZED_SUBDIR),
+        )
 
-        # 收集待處理素材（沿用跳過 _std 重複 + 副檔名白名單邏輯）；子集重分析只留指定檔名
-        asset_files = collect_asset_files(target_dir)
+        # 收集待處理素材身分(relpath,如 raw/photo.jpg);子集重分析只留指定 relpath
+        asset_relpaths = collect_asset_files(target_dir)
         is_subset = asset_filenames is not None
         if is_subset:
             wanted = set(asset_filenames)
-            asset_files = [p for p in asset_files if os.path.basename(p) in wanted]
-        print(f"[Service] 正在處理 {len(asset_files)} 個素材...")
+            asset_relpaths = [rel for rel in asset_relpaths if rel in wanted]
+        print(f"[Service] 正在處理 {len(asset_relpaths)} 個素材...")
+
+        # Pipeline 需絕對路徑讀檔;身分(asset_id=relpath)由 runner 依 base_dir(target_dir)還原
+        asset_files = [to_abs_path(target_dir, rel) for rel in asset_relpaths]
 
         # 以 Pipeline 框架並行跑感知分析：asset 間並行，輸出依輸入順序、僅收 success；
         # 全域預設一律 SIMPLE，逐檔 COMPLEX（Gemini 深度索引）由 asset_strategies 覆寫；
@@ -111,19 +114,59 @@ class DirectorService:
         self._update_project_meta(target_dir, folder_name)
         return raw_assets_metadata
 
+    def run_phase1_incremental(self, folder_name: str, user_id: str = None,
+                               tracker: ProgressTracker = None) -> list[dict]:
+        """
+        雲端同步用的增量 Phase 1:只對「新增 / 策略變更」的素材重跑感知分析,避免整包重跑。
+
+        關鍵順序:**先標準化**再 select_pending —— 新下載的 .mov/.heic 須先轉成 ``_std`` 身分,
+        否則 select_pending 算出的是原始檔身分,與 run_phase1 標準化後的身分對不上而被過濾成空。
+        首次同步時 status 檔為空 → select_pending 回全部 → 等同全量跑(正確);之後只跑新檔。
+        無 user_id(CLI / 無認證)時退回整批分析(維持相容)。
+        """
+        target_dir = self._resolve_target_dir(folder_name, user_id)
+        if not os.path.isdir(target_dir):
+            raise ValueError(f"找不到素材資料夾: {target_dir}")
+
+        # 先標準化,讓 select_pending 看到的是標準化後的素材身分(raw/std 分層)
+        self.standardizer.standardize_folder(
+            os.path.join(target_dir, RAW_SUBDIR),
+            os.path.join(target_dir, STANDARDIZED_SUBDIR),
+        )
+
+        # 無 user_id 無法套用逐檔策略 / per-file 狀態,退回整批分析
+        if not user_id:
+            return self.run_phase1(folder_name, user_id=user_id, tracker=tracker)
+
+        # 重用既有差集機制:只挑「未處理 ∪ dirty(策略變更)」的素材身分
+        pending = self.asset_repository.select_pending(user_id, folder_name)
+        if not pending:
+            print("[Service] 無新增 / 變更素材,略過 Phase 1 增量重跑")
+            return []
+
+        strategies = self.asset_repository.get_asset_strategies(user_id, folder_name)
+        success = self.run_phase1(
+            folder_name, user_id=user_id, tracker=tracker,
+            asset_filenames=pending, asset_strategies=strategies, require_success=False,
+        )
+        # 補跑完成,推進這些素材的 dirty / 已分析基準
+        self.asset_repository.clear_dirty(user_id, folder_name, pending)
+        return success
+
     def _dump_phase1_metadata(self, target_dir: str, success_assets: list[dict],
                               reprocessed_ids: set, merge: bool) -> None:
         """
         落地 success-only 感知結果（Phase 4 用）。
 
         全量重跑直接覆寫；子集重分析則保留未重跑的舊條目、移除本次重跑者的舊條目、append 新成功者
-        （以 file 的 basename 為鍵；重跑後變 rejected/error 者自然從 success 清單消失）。
+        （以 file 的 relpath 身分為鍵；重跑後變 rejected/error 者自然從 success 清單消失）。
         """
         dump_path = os.path.join(target_dir, PHASE1_METADATA_FILENAME)
         if merge and os.path.exists(dump_path):
             with open(dump_path, 'r', encoding='utf-8') as f:
                 existing = json.load(f)
-            kept = [e for e in existing if os.path.basename(e.get("file", "")) not in reprocessed_ids]
+            # file 與 reprocessed_ids(asset_id)同為 relpath 身分,直接比對即可
+            kept = [e for e in existing if e.get("file", "") not in reprocessed_ids]
             merged = kept + success_assets
         else:
             merged = success_assets
@@ -246,8 +289,9 @@ class DirectorService:
         print("[Service] 正在呼叫導演大腦生成藍圖...")
 
         # 若用戶指定了自訂音樂檔案，轉換為完整絕對路徑，供 IntentState 直接存取
+        # 音訊上傳落在 raw/(與其他原始素材同層,不經 standardize),故在 raw/ 下解析
         user_music_file_path = (
-            os.path.join(target_dir, user_music_file) if user_music_file else None
+            os.path.join(target_dir, RAW_SUBDIR, user_music_file) if user_music_file else None
         )
 
         final_blueprint, new_audio_dna = self.director.generate_timeline(

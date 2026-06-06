@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 # 重用 director.py 的 director_service 單例(避免再建一份 PipelineRunner / 模型池)
@@ -28,8 +28,9 @@ asset_repository = AssetRepository(thumbnail_service=_thumbnail_service)
 
 
 class StrategyRequest(BaseModel):
-    """更新單一素材策略的請求體。"""
+    """更新單一素材策略的請求體;path 為素材身分 relpath(含 /,故走 body 而非 URL path param)。"""
 
+    path: str      # 素材身分 relpath(如 raw/photo.jpg)
     strategy: str  # "simple" | "complex"
 
 
@@ -55,37 +56,36 @@ async def list_assets(project_name: str, user_id: str = Depends(verify_token)):
         raise HTTPException(status_code=404, detail=str(exc))
 
 
-@router.get("/projects/{project_name}/assets/{filename}", response_model=AssetDetailView)
+@router.get("/projects/{project_name}/asset-detail", response_model=AssetDetailView)
 async def get_asset_detail(
     project_name: str,
-    filename: str,
+    path: str = Query(..., description="素材身分 relpath(如 raw/photo.jpg)"),
     user_id: str = Depends(verify_token),
 ):
     """
     取得單一素材的完整詳情(AssetView + 原始媒體 URL + Phase 1 完整感知 metadata)。
 
-    供前端詳情彈窗呈現未裁切全圖 / 完整影片與分區資訊;路徑穿越由 list_assets 的素材白名單
-    天然擋掉(查無此 filename → 404)。讀檔不卡 event loop,丟 thread 執行。
+    素材身分(relpath)含 ``/``,故以 query 參數 ``path`` 傳遞(避免 URL path param 的 ``%2F`` 坑)。
+    路徑穿越由 list_assets 的素材白名單天然擋掉(查無此 path → 404)。讀檔不卡 event loop,丟 thread 執行。
     """
     try:
         return await asyncio.to_thread(
-            asset_repository.get_asset_detail, user_id, project_name, filename
+            asset_repository.get_asset_detail, user_id, project_name, path
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
 
-@router.patch("/projects/{project_name}/assets/{filename}/strategy", response_model=AssetView)
+@router.patch("/projects/{project_name}/asset-strategy", response_model=AssetView)
 async def set_asset_strategy(
     project_name: str,
-    filename: str,
     req: StrategyRequest,
     user_id: str = Depends(verify_token),
 ):
-    """更新單一素材的 Simple/Complex 策略並標記 dirty,回傳更新後的素材檢視。"""
+    """更新單一素材(以 req.path 識別)的 Simple/Complex 策略並標記 dirty,回傳更新後的素材檢視。"""
     try:
         return await asyncio.to_thread(
-            asset_repository.set_strategy, user_id, project_name, filename, req.strategy
+            asset_repository.set_strategy, user_id, project_name, req.path, req.strategy
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
@@ -131,12 +131,12 @@ async def generate_assets(
 
     立即回 job_id;前端據此訂閱 WebSocket 進度。需要 prompt 的完整生成(Phase 2–4)仍由編輯器負責。
     """
-    # 先把本次選擇的逐檔策略落地(同時標記 dirty),讓 select_pending 撈得到
+    # 先把本次選擇的逐檔策略落地(同時標記 dirty),讓 select_pending 撈得到;鍵為素材 relpath 身分
     if req.asset_strategies:
-        for filename, strategy in req.asset_strategies.items():
+        for path, strategy in req.asset_strategies.items():
             try:
                 await asyncio.to_thread(
-                    asset_repository.set_strategy, user_id, project_name, filename, strategy
+                    asset_repository.set_strategy, user_id, project_name, path, strategy
                 )
             except (FileNotFoundError, ValueError) as exc:
                 raise HTTPException(status_code=400, detail=str(exc))

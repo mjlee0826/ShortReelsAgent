@@ -71,8 +71,10 @@ class AssetContext:
     """
 
     # ── 輸入(建構時給定)──────────────────────────────────────────────────
-    asset_id: str               # 識別字串,通常為檔名(供進度事件與日誌標示)
-    file_path: str              # 媒體檔案絕對路徑
+    # 素材身分:相對 project root 的 relpath(如 raw/photo.jpg);作為 status / metadata / 策略 meta
+    # 的鍵、blueprint clip_id 與進度事件標示。與 file_path(絕對路徑,供讀檔)分離。
+    asset_id: str
+    file_path: str              # 媒體檔案絕對路徑(供各 Stage 實際讀檔)
     media_kind: MediaKind       # 圖片 / 影片
     index: int                  # 輸入順序索引,保證輸出排序穩定
     video_strategy: VideoStrategy = VideoStrategy.SIMPLE

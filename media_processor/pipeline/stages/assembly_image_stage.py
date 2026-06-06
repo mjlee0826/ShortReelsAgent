@@ -63,10 +63,11 @@ class AssemblyImageStage(Stage):
             faces=frame.face_info,
         )
 
+        # file 存素材身分(relpath),非絕對路徑:落地的 metadata 才能跨機器移植,且下游 clip_id 直接可用
         context.result = ProcessorResult(
             status=STATUS_SUCCESS,
             type=_RESULT_TYPE_IMAGE,
-            file=context.file_path,
+            file=context.asset_id,
             metadata=metadata,
         ).to_dict()
         context.status = STATUS_SUCCESS
