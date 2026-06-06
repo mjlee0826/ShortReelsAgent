@@ -17,6 +17,8 @@ const PHASE1_STATUS = {
   PROCESSING: 'processing',
   DONE: 'done',
   FAILED: 'failed',
+  // 已下載、依設定刻意略過自動分析，待使用者到素材頁手動觸發（與 PENDING 同呈現「等待分析」）
+  SKIPPED: 'skipped',
 };
 
 /** 雲端同步狀態。 */
@@ -71,8 +73,9 @@ export function deriveProjectStatus(project) {
   if (project.phase1_status === PHASE1_STATUS.FAILED) return STATUS_META[PROJECT_STATUS.ANALYZE_FAILED];
   // 4. 分析中（脈動）
   if (project.phase1_status === PHASE1_STATUS.PROCESSING) return STATUS_META[PROJECT_STATUS.ANALYZING];
-  // 5. 等待分析（已建立、尚未開始）
-  if (project.phase1_status === PHASE1_STATUS.PENDING) return STATUS_META[PROJECT_STATUS.WAITING];
+  // 5. 等待分析（已建立尚未開始，或已下載但依設定刻意略過自動分析、待手動觸發）
+  if (project.phase1_status === PHASE1_STATUS.PENDING ||
+      project.phase1_status === PHASE1_STATUS.SKIPPED) return STATUS_META[PROJECT_STATUS.WAITING];
   // 6. 已有藍圖 → 可進編輯器編輯
   if (project.has_blueprint) return STATUS_META[PROJECT_STATUS.EDITABLE];
   // 7. 分析完成但尚無藍圖 → 待生成

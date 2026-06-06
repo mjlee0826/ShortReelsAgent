@@ -20,6 +20,7 @@ from backend.api.director import router as director_router
 from backend.api.projects import router as projects_router
 from backend.api.assets import router as assets_router
 from backend.api.progress import router as progress_router
+from backend.api.settings import router as settings_router
 from backend.services.ingestion_provider import ingestion_poller
 
 
@@ -61,6 +62,7 @@ app.mount("/cache", StaticFiles(directory=TEMP_TEMPLATES_DIR), name="cache")
 app.include_router(director_router, prefix="/api")
 app.include_router(projects_router, prefix="/api")
 app.include_router(assets_router, prefix="/api")
+app.include_router(settings_router, prefix="/api")
 # 進度推播為 WebSocket 端點,路徑固定為 /ws/progress/{job_id},不掛 /api 前綴
 app.include_router(progress_router)
 

@@ -7,6 +7,7 @@ import CallbackPage from './pages/CallbackPage';
 import ProjectDashboard from './pages/ProjectDashboard';
 import EditorPage from './pages/EditorPage';
 import AssetListPage from './pages/AssetListPage';
+import SettingsPage from './pages/SettingsPage';
 import { Spinner } from './components/ui';
 
 /**
@@ -58,6 +59,7 @@ export default function App() {
         <Route path="/"         element={<AuthGuard><ProjectDashboard /></AuthGuard>} />
         <Route path="/projects/:projectId/assets" element={<AuthGuard><AssetListPage /></AuthGuard>} />
         <Route path="/editor"   element={<AuthGuard><EditorPage /></AuthGuard>} />
+        <Route path="/settings" element={<AuthGuard><SettingsPage /></AuthGuard>} />
         {/* 未知路徑一律導回首頁 */}
         <Route path="*"         element={<Navigate to="/" replace />} />
       </Routes>

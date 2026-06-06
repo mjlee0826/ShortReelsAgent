@@ -23,6 +23,7 @@ from backend.services.asset_discovery import (
 )
 from backend.services.project_meta_store import project_meta_store
 from backend.services.thumbnail_service import ThumbnailService
+from backend.services.user_settings_store import user_settings_store
 from config.app_config import ASSETS_DIR, DEFAULT_BACKEND_URL
 from media_processor.pipeline.context import derive_media_kind
 
@@ -142,6 +143,18 @@ class AssetRepository:
             records = json.load(f)
         return {rec["file"]: rec for rec in records if rec.get("file")}
 
+    @staticmethod
+    def _resolve_default_strategy(user_id: str) -> str:
+        """
+        取得使用者全域預設策略,作為「未逐檔設定」素材的 fallback。
+
+        非法值(設定檔被外部竄改等)防呆退回 SIMPLE,確保回傳值永遠是 pipeline 能識別的策略。
+        """
+        default = user_settings_store.get(user_id).default_asset_strategy
+        if default not in (AssetStrategy.SIMPLE.value, AssetStrategy.COMPLEX.value):
+            return AssetStrategy.SIMPLE.value
+        return default
+
     # ── 對外操作 ─────────────────────────────────────────────────────────────
 
     def list_assets(self, user_id: str, project: str) -> list[AssetView]:
@@ -154,6 +167,8 @@ class AssetRepository:
         strategies = meta.get(META_KEY_ASSET_STRATEGIES, {})
         dirty_set = set(meta.get(META_KEY_DIRTY_ASSETS, []))
         status_map = self._read_status_map(project_dir)
+        # 未逐檔設定的素材顯示「全域預設策略」(逐檔明確設定仍優先);整批共用同一個值,只讀一次設定
+        default_strategy = self._resolve_default_strategy(user_id)
 
         views: list[AssetView] = []
         for relpath in collect_asset_files(project_dir):
@@ -172,7 +187,7 @@ class AssetRepository:
                 filename=filename,
                 media_kind=media_kind.value,
                 status=status_entry.get("status", ASSET_STATUS_UNPROCESSED),
-                strategy=strategies.get(relpath, AssetStrategy.SIMPLE.value),
+                strategy=strategies.get(relpath, default_strategy),
                 dirty=relpath in dirty_set,
                 technical_score=status_entry.get("technical_score"),
                 reason=status_entry.get("reason"),
@@ -239,13 +254,15 @@ class AssetRepository:
         project_dir = self._project_dir(user_id, project)
         if not self._asset_exists(project_dir, path):
             raise FileNotFoundError(f"找不到素材: {path}")
+        # 未分析過素材的基準=全域預設策略(pipeline 對未設定者實際也會套此預設);鎖外先讀,不在臨界區做 I/O
+        default_strategy = self._resolve_default_strategy(user_id)
 
         def _mutate(meta: dict) -> None:
             """就地更新該檔策略,並依「是否偏離上次分析基準」加 / 清 dirty。"""
             meta.setdefault(META_KEY_ASSET_STRATEGIES, {})[path] = strategy
-            # 基準為上次分析所用策略(未分析過視為 SIMPLE):回到基準即毋須重跑,偏離才標記待重跑
+            # 基準為上次分析所用策略(未分析過視為全域預設):回到基準即毋須重跑,偏離才標記待重跑
             baseline = meta.get(META_KEY_ANALYZED_STRATEGIES, {}).get(
-                path, AssetStrategy.SIMPLE.value
+                path, default_strategy
             )
             dirty = set(meta.get(META_KEY_DIRTY_ASSETS, []))
             if strategy == baseline:
@@ -272,9 +289,21 @@ class AssetRepository:
         return pending
 
     def get_asset_strategies(self, user_id: str, project: str) -> dict[str, str]:
-        """取得逐檔策略表(供 run_phase1 套用);無設定回空 dict。"""
+        """
+        取得「解析後」的逐檔策略表(供 run_phase1 套用):涵蓋專案內所有素材身分(relpath),
+        逐檔明確設定者用其值,未設定者填入使用者全域預設策略。
+
+        這是唯一把全域預設「送進 pipeline」的點 —— 各呼叫端(generate / reanalyze / 增量同步)
+        都把本回傳值當 ``asset_strategies`` 透傳給 PipelineRunner,故未逐檔設定的素材也會套到預設策略。
+        """
         project_dir = self._project_dir(user_id, project)
-        return self._read_meta(project_dir).get(META_KEY_ASSET_STRATEGIES, {})
+        explicit = self._read_meta(project_dir).get(META_KEY_ASSET_STRATEGIES, {})
+        default_strategy = self._resolve_default_strategy(user_id)
+        # 解析全部素材:明確設定優先,其餘填全域預設(pipeline 對未列出者才會落到自身的硬編預設)
+        return {
+            relpath: explicit.get(relpath, default_strategy)
+            for relpath in collect_asset_files(project_dir)
+        }
 
     def clear_dirty(self, user_id: str, project: str, filenames: Optional[list[str]] = None) -> None:
         """
@@ -291,6 +320,8 @@ class AssetRepository:
             analyzed_targets = collect_asset_files(project_dir)
         else:
             analyzed_targets = filenames
+        # 未逐檔設定者實際以全域預設分析,基準須與之一致;鎖外先讀,不在臨界區做 I/O
+        default_strategy = self._resolve_default_strategy(user_id)
 
         def _mutate(meta: dict) -> None:
             """就地推進已分析基準,並清掉本次完成者的 dirty(None 代表清空整份 dirty)。"""
@@ -298,9 +329,9 @@ class AssetRepository:
             analyzed = dict(meta.get(META_KEY_ANALYZED_STRATEGIES, {}))
             dirty = set(meta.get(META_KEY_DIRTY_ASSETS, []))
             remaining = set() if filenames is None else dirty - set(filenames)
-            # 推進基準至當前策略(未設定者視為 SIMPLE),供下次 set_strategy 的回退判斷
+            # 推進基準至當前策略(未設定者視為全域預設),供下次 set_strategy 的回退判斷
             for fname in analyzed_targets:
-                analyzed[fname] = strategies.get(fname, AssetStrategy.SIMPLE.value)
+                analyzed[fname] = strategies.get(fname, default_strategy)
             meta[META_KEY_ANALYZED_STRATEGIES] = analyzed
             meta[META_KEY_DIRTY_ASSETS] = sorted(remaining)
 

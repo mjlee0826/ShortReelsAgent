@@ -19,9 +19,11 @@ from backend.services.ingestion_provider import cloud_ingestion_service
 from backend.services.project_cover_service import ProjectCoverService
 from backend.services.project_meta_store import project_meta_store
 from backend.services.thumbnail_service import ThumbnailService
+from backend.services.user_settings_store import user_settings_store
 from config.app_config import ASSETS_DIR, COVER_THUMBNAIL_MAX_PX, COVER_THUMBNAIL_SUBDIR
 from config.project_artifacts import PHASE4_BLUEPRINT_FILENAME
 from ingestion_engine.models import (
+    META_KEY_AUTO_ANALYZE,
     META_KEY_DRIVE_FOLDER_ID,
     META_KEY_LAST_SIGNATURE,
     META_KEY_LAST_SYNC_ERROR,
@@ -184,6 +186,10 @@ async def create_project_from_drive(req: CreateFromDriveRequest, user_id: str = 
     project_dir = os.path.join(user_root, name)
     os.makedirs(project_dir, exist_ok=True)
 
+    # 快照「建立當下」的全域自動分析偏好到專案 meta：sync/poller 是 per-project 且無狀態，
+    # 旗標須落在專案 meta 才能讓兩者一致遵守；日後改全域設定不回頭影響已建立專案的首次分析行為。
+    auto_analyze = user_settings_store.get(user_id).auto_analyze_on_create
+
     now = _now_iso()
     meta = {
         "name": name,
@@ -202,6 +208,8 @@ async def create_project_from_drive(req: CreateFromDriveRequest, user_id: str = 
         META_KEY_LAST_SIGNATURE: "",
         META_KEY_LAST_SYNCED_AT: None,
         META_KEY_LAST_SYNC_ERROR: None,
+        # 建立後是否自動分析（取自全域使用者設定）；sync/poller 據此 gate Phase 1
+        META_KEY_AUTO_ANALYZE: auto_analyze,
     }
     project_meta_store.write(project_dir, meta)
     _schedule_first_sync(user_id, name)

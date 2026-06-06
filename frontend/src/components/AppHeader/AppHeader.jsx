@@ -1,9 +1,9 @@
 import React from 'react';
 import { useLogto } from '@logto/react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FaThLarge } from 'react-icons/fa';
+import { FaThLarge, FaCog } from 'react-icons/fa';
 import useProjectStore from '../../store/useProjectStore';
-import { Button } from '../ui';
+import { Button, IconButton } from '../ui';
 
 /**
  * AppHeader：全站頂部導覽列。
@@ -67,6 +67,10 @@ export default function AppHeader() {
             管理素材
           </Button>
         )}
+        {/* 全域設定入口：任何頁面皆可進入 /settings */}
+        <IconButton tone="accent" title="設定" onClick={() => navigate('/settings')}>
+          <FaCog size={15} />
+        </IconButton>
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-full bg-accent flex items-center justify-center text-white text-xs font-bold shrink-0 overflow-hidden">
             {userInfo?.picture ? (

@@ -23,6 +23,7 @@ from config.project_artifacts import PROJECT_META_FILENAME
 from ingestion_engine.cloud_storage_adapter import CloudStorageAdapter
 from ingestion_engine.exceptions import RemoteAccessError, RemoteAuthError
 from ingestion_engine.models import (
+    META_KEY_AUTO_ANALYZE,
     META_KEY_DRIVE_FOLDER_ID,
     META_KEY_LAST_SIGNATURE,
     META_KEY_LAST_SYNC_ERROR,
@@ -34,6 +35,7 @@ from ingestion_engine.models import (
     PHASE1_STATUS_DONE,
     PHASE1_STATUS_FAILED,
     PHASE1_STATUS_PROCESSING,
+    PHASE1_STATUS_SKIPPED,
     RemoteEntry,
     SOURCE_GDRIVE,
     SYNC_STATUS_ACTIVE,
@@ -120,10 +122,12 @@ class CloudIngestionService:
             return self._mark_synced(project_dir, report)  # 空資料夾：等有素材再處理
 
         signature = self._asset_signature(media)
-        unchanged = (
-            signature == meta.get(META_KEY_LAST_SIGNATURE)
-            and meta.get(META_KEY_PHASE1_STATUS) == PHASE1_STATUS_DONE
+        # DONE 與 SKIPPED 同視為「已收斂」：前者已分析、後者依設定刻意不自動分析；
+        # 二者搭配簽章未變即無需再動，避免關閉自動分析的專案被 poller 每輪重複下載 / 觸發。
+        phase1_settled = meta.get(META_KEY_PHASE1_STATUS) in (
+            PHASE1_STATUS_DONE, PHASE1_STATUS_SKIPPED,
         )
+        unchanged = signature == meta.get(META_KEY_LAST_SIGNATURE) and phase1_settled
         if unchanged:
             return self._mark_synced(project_dir, report)
 
@@ -138,6 +142,17 @@ class CloudIngestionService:
         except RemoteAccessError as exc:
             return self._fail_sync(project_dir, report, exc)
         report.downloaded = True
+
+        # 使用者設定「建立後不自動分析」：素材已下載，但刻意略過 Phase 1，待其到素材頁手動觸發。
+        # 標 SKIPPED + 更新簽章，讓本輪與後續 poller 都視為已收斂、不再重複觸發分析。
+        # 缺鍵預設 True，使本欄位導入前建立的舊專案維持原本自動分析行為（零破壞）。
+        if not meta.get(META_KEY_AUTO_ANALYZE, True):
+            self._patch_meta(project_dir, {
+                META_KEY_PHASE1_STATUS: PHASE1_STATUS_SKIPPED,
+                META_KEY_PHASE1_UPDATED_AT: _now_iso(),
+                META_KEY_LAST_SIGNATURE: signature,
+            })
+            return self._mark_synced(project_dir, report)
 
         # 觸發 Phase 1：失敗只標 failed、保留舊簽章供下輪重試，不視為同步失敗
         self._patch_meta(project_dir, {META_KEY_PHASE1_STATUS: PHASE1_STATUS_PROCESSING})

@@ -19,6 +19,11 @@ from backend.services.asset_discovery import (
 )
 from backend.services.asset_repository import AssetRepository
 from backend.services.project_meta_store import project_meta_store
+from ingestion_engine.models import (
+    META_KEY_PHASE1_STATUS,
+    PHASE1_STATUS_DONE,
+    PHASE1_STATUS_SKIPPED,
+)
 
 
 class DirectorService:
@@ -48,6 +53,10 @@ class DirectorService:
             meta["last_modified"] = datetime.now(timezone.utc).isoformat()
             meta["asset_count"] = asset_count
             meta["has_blueprint"] = os.path.exists(os.path.join(project_dir, PHASE4_BLUEPRINT_FILENAME))
+            # 先前依設定略過自動分析(skipped)的專案,經此次手動分析後推進為 done,
+            # 讓總覽卡片不再停留在「等待分析」(其餘狀態不動,避免干擾雲端同步流程管理的 phase1_status)
+            if meta.get(META_KEY_PHASE1_STATUS) == PHASE1_STATUS_SKIPPED:
+                meta[META_KEY_PHASE1_STATUS] = PHASE1_STATUS_DONE
             # 原子寫回,避免與 poller / REST 請求併發寫造成 Extra data 損毀
             project_meta_store.write(project_dir, meta)
         except Exception as e:
