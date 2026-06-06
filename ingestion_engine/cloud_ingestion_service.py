@@ -21,7 +21,11 @@ from typing import Callable, Optional
 from config.app_config import ASSETS_DIR, RAW_SUBDIR
 from config.project_artifacts import PROJECT_META_FILENAME
 from ingestion_engine.cloud_storage_adapter import CloudStorageAdapter
-from ingestion_engine.exceptions import RemoteAccessError, RemoteAuthError
+from ingestion_engine.exceptions import (
+    Phase1DeferredError,
+    RemoteAccessError,
+    RemoteAuthError,
+)
 from ingestion_engine.models import (
     META_KEY_AUTO_ANALYZE,
     META_KEY_DRIVE_FOLDER_ID,
@@ -173,6 +177,11 @@ class CloudIngestionService:
         self._patch_meta(project_dir, {META_KEY_PHASE1_STATUS: PHASE1_STATUS_PROCESSING})
         try:
             self._phase1_runner(user_id, project_name)
+        except Phase1DeferredError as exc:
+            # 前景已有 Phase 1 在跑(編輯頁 / 素材頁):本輪不分析、不前進簽章、不標 failed,
+            # 保留 PROCESSING 讓下輪 poller(簽章仍未收斂)重觸發,避免雙重佔用 GPU。
+            print(f"[CloudIngestion] {exc}")
+            return self._mark_synced(project_dir, report)
         except Exception as exc:  # noqa: BLE001 - Phase 1 任何失敗都只隔離此 project
             self._patch_meta(project_dir, {
                 META_KEY_PHASE1_STATUS: PHASE1_STATUS_FAILED,

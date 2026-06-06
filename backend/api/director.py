@@ -9,6 +9,7 @@ from typing import Optional, Dict
 from backend.services.director_service import DirectorService
 from backend.services.render_service import RenderService
 from backend.services.job_manager import job_manager
+from backend.services.phase1_lock import Phase1BusyError
 from backend.auth.logto_jwt_verifier import verify_token
 from backend.api.progress import progress_hub, ws_progress_observer
 from media_processor.pipeline.progress import ProgressTracker
@@ -55,6 +56,9 @@ async def generate_timeline(req: GenerateRequest, user_id: str = Depends(verify_
             user_music_file=req.user_music_file,
         )
         return result
+    except Phase1BusyError as e:
+        # 前景 Phase 1 仍在跑且等待逾時:回 409 讓前端提示稍候再試(非伺服器錯誤)
+        raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
         print("\n❌ [後端發生錯誤] 詳細報錯資訊如下：")
         traceback.print_exc()

@@ -18,6 +18,7 @@ from backend.api.director import director_service
 from backend.auth.logto_jwt_verifier import verify_token
 from backend.services.async_job_runner import async_job_runner
 from backend.services.asset_repository import AssetDetailView, AssetRepository, AssetView
+from backend.services.phase1_lock import PHASE1_BUSY_MESSAGE, phase1_lock
 from backend.services.thumbnail_service import ThumbnailService
 
 router = APIRouter()
@@ -106,17 +107,30 @@ async def reanalyze_assets(
     """
     asset_ids = req.asset_ids
 
+    # 與其他 Phase 1 路徑(雲端同步 / 編輯頁 / 另一次觸發)互斥:前景分析中即回 409,
+    # 前端提示稍候(非阻塞,不排隊堆積)。鎖於 work 收尾 finally 釋放。
+    if not phase1_lock.acquire(user_id, project_name, blocking=False):
+        raise HTTPException(status_code=409, detail=PHASE1_BUSY_MESSAGE)
+
     def work(tracker) -> dict:
         """背景執行緒內跑 Phase 1 重分析(沿用逐檔 Simple/Complex 策略),完成後清除這些素材的 dirty 標記。"""
-        strategies = asset_repository.get_asset_strategies(user_id, project_name)
-        success = director_service.run_phase1(
-            project_name, user_id=user_id, tracker=tracker,
-            asset_filenames=asset_ids, asset_strategies=strategies, require_success=False,
-        )
-        asset_repository.clear_dirty(user_id, project_name, asset_ids)
-        return {"success_count": len(success)}
+        try:
+            strategies = asset_repository.get_asset_strategies(user_id, project_name)
+            success = director_service.run_phase1(
+                project_name, user_id=user_id, tracker=tracker,
+                asset_filenames=asset_ids, asset_strategies=strategies, require_success=False,
+            )
+            asset_repository.clear_dirty(user_id, project_name, asset_ids)
+            return {"success_count": len(success)}
+        finally:
+            phase1_lock.release(user_id, project_name)
 
-    job_id = async_job_runner.launch(user_id, work)
+    try:
+        job_id = async_job_runner.launch(user_id, work)
+    except BaseException:
+        # launch 失敗(極少)時釋放已取得的鎖,避免洩漏使該專案永久卡 409
+        phase1_lock.release(user_id, project_name)
+        raise
     return {"job_id": job_id}
 
 
@@ -131,7 +145,8 @@ async def generate_assets(
 
     立即回 job_id;前端據此訂閱 WebSocket 進度。需要 prompt 的完整生成(Phase 2–4)仍由編輯器負責。
     """
-    # 先把本次選擇的逐檔策略落地(同時標記 dirty),讓 select_pending 撈得到;鍵為素材 relpath 身分
+    # 先把本次選擇的逐檔策略落地(同時標記 dirty),讓 select_pending 撈得到;鍵為素材 relpath 身分。
+    # 刻意在取鎖前落地:即使隨後 409,使用者的策略選擇也已持久化、dirty 仍在,下次觸發會補跑。
     if req.asset_strategies:
         for path, strategy in req.asset_strategies.items():
             try:
@@ -141,16 +156,28 @@ async def generate_assets(
             except (FileNotFoundError, ValueError) as exc:
                 raise HTTPException(status_code=400, detail=str(exc))
 
+    # 與其他 Phase 1 路徑互斥:前景分析中即回 409(dirty 已落地,下次觸發補跑)。鎖於 work 收尾釋放。
+    if not phase1_lock.acquire(user_id, project_name, blocking=False):
+        raise HTTPException(status_code=409, detail=PHASE1_BUSY_MESSAGE)
+
     def work(tracker) -> dict:
         """背景執行緒內:挑出待處理素材 → 帶逐檔策略跑 Phase 1 → 清除其 dirty。"""
-        pending = asset_repository.select_pending(user_id, project_name)
-        strategies = asset_repository.get_asset_strategies(user_id, project_name)
-        success = director_service.run_phase1(
-            project_name, user_id=user_id, tracker=tracker,
-            asset_filenames=pending, asset_strategies=strategies, require_success=False,
-        )
-        asset_repository.clear_dirty(user_id, project_name, pending)
-        return {"processed_count": len(pending), "success_count": len(success)}
+        try:
+            pending = asset_repository.select_pending(user_id, project_name)
+            strategies = asset_repository.get_asset_strategies(user_id, project_name)
+            success = director_service.run_phase1(
+                project_name, user_id=user_id, tracker=tracker,
+                asset_filenames=pending, asset_strategies=strategies, require_success=False,
+            )
+            asset_repository.clear_dirty(user_id, project_name, pending)
+            return {"processed_count": len(pending), "success_count": len(success)}
+        finally:
+            phase1_lock.release(user_id, project_name)
 
-    job_id = async_job_runner.launch(user_id, work)
+    try:
+        job_id = async_job_runner.launch(user_id, work)
+    except BaseException:
+        # launch 失敗(極少)時釋放已取得的鎖,避免洩漏使該專案永久卡 409
+        phase1_lock.release(user_id, project_name)
+        raise
     return {"job_id": job_id}

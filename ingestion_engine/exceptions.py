@@ -19,3 +19,12 @@ class RemoteAccessError(IngestionError):
 
 class RemoteAuthError(RemoteAccessError):
     """授權／權限失效：401／403、資料夾被轉為私人、API key 無權；呼叫端據此暫停該 project 同步。"""
+
+
+class Phase1DeferredError(IngestionError):
+    """
+    同步觸發的 Phase 1 因「前景已有 Phase 1 在跑同一專案」(編輯頁 / 素材頁持鎖)而略過本輪。
+
+    非錯誤、非授權問題:由注入的 phase1_runner 在搶不到執行鎖時拋出,`_reconcile` 據此「不前進
+    簽章、不標 failed」並保留待分析狀態,讓下輪 poller(簽章仍未收斂)重試,避免雙重佔用 GPU。
+    """

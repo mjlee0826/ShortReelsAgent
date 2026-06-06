@@ -62,6 +62,12 @@ API_POOL_MAX_WORKERS = 16
 # 單 Stage 群組走 inline 不受此值影響,保留給多 Stage 群組。
 STAGE_SUBMIT_TIMEOUT_SEC: float | None = None
 
+# ── 編輯頁 Phase 1 等待鎖逾時 ─────────────────────────────────────────────────
+# 編輯頁完整生成時,若有前景 Phase 1(雲端同步 / 素材頁)正在跑同一專案,會阻塞等待其完成
+# 再讀新鮮快取;此為等待上限(秒),逾時即回「分析進行中,請稍候再試」。設大以容納大專案在
+# 共用 GPU 上跑完整 Phase 1,逾時應極少發生;可由 env EDITOR_PHASE1_LOCK_TIMEOUT_SEC 覆寫。
+EDITOR_PHASE1_LOCK_TIMEOUT_SEC = _read_int_env("EDITOR_PHASE1_LOCK_TIMEOUT_SEC", 1200)
+
 # ── 模型載入策略 ──────────────────────────────────────────────────────────────
 # Eager Warm Up 開關。預設 True:啟動時依 GpuCapacityManager 的優先序 + check-before-load
 # 預載熱門模型(Qwen 一定常駐、VRAM 不足的自動降級 lazy),讓第一個 asset 不再卡 20–60s 等載入

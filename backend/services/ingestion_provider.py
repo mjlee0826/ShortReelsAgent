@@ -14,6 +14,7 @@ import os
 
 from backend.api.director import director_service
 from backend.services.async_job_runner import async_job_runner
+from backend.services.phase1_lock import phase1_lock
 from backend.services.project_meta_store import project_meta_store
 from config.app_config import ASSETS_DIR
 from ingestion_engine import (
@@ -21,6 +22,7 @@ from ingestion_engine import (
     IngestionPoller,
     PublicDriveApiAdapter,
 )
+from ingestion_engine.exceptions import Phase1DeferredError
 from ingestion_engine.models import META_KEY_ACTIVE_PHASE1_JOB_ID
 
 
@@ -37,7 +39,15 @@ def _phase1_runner(user_id: str, project_name: str) -> None:
     成功 / 失敗都清掉該欄位。job/tracker 的建立刻意放在 backend 側(此處)而非 ingestion_engine,維持
     ingestion_engine 不 import backend 的單向依賴。失敗時 raise,交回 cloud_ingestion_service 標 failed
     (錯誤隔離語意不變)。
+
+    與編輯頁 / 素材頁的 Phase 1 互斥:先以非阻塞 try 取得該專案執行鎖,搶不到(前景正在分析)即拋
+    Phase1DeferredError 略過本輪(不建 job、不阻塞 poller、不雙重佔用 GPU);由 _reconcile 捕捉後
+    保留待分析狀態,下輪重試。鎖於收尾 finally 釋放。
     """
+    # 前景已有 Phase 1 在跑同一專案 → 本輪略過(非阻塞,不排隊堆積)
+    if not phase1_lock.acquire(user_id, project_name, blocking=False):
+        raise Phase1DeferredError(f"前景 Phase 1 進行中,略過本輪同步分析: {project_name}")
+
     project_dir = os.path.join(ASSETS_DIR, user_id, project_name)
 
     def _publish_job_id(job_id: str) -> None:
@@ -62,6 +72,8 @@ def _phase1_runner(user_id: str, project_name: str) -> None:
             """就地移除進行中 job_id(缺鍵亦安全)。"""
             meta.pop(META_KEY_ACTIVE_PHASE1_JOB_ID, None)
         project_meta_store.update(project_dir, _clear)
+        # 釋放執行鎖,讓編輯頁 / 素材頁 / 下輪同步得以接手
+        phase1_lock.release(user_id, project_name)
 
 
 def _artifact_pruner(user_id: str, project_name: str) -> None:

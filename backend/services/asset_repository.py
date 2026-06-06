@@ -24,6 +24,7 @@ from backend.services.asset_discovery import (
     collect_asset_files,
     to_abs_path,
 )
+from backend.services.atomic_json import read_json_tolerant
 from backend.services.project_meta_store import project_meta_store
 from backend.services.thumbnail_service import ThumbnailService
 from backend.services.user_settings_store import user_settings_store
@@ -134,12 +135,9 @@ class AssetRepository:
 
     @staticmethod
     def _read_status_map(project_dir: str) -> dict:
-        """讀取 Phase 1 全狀態檔(鍵為檔名);不存在回空 dict(全部視為未處理)。"""
+        """讀取 Phase 1 全狀態檔(鍵為檔名);不存在 / 損毀回空 dict(全部視為未處理,不讓壞檔讓素材頁 500)。"""
         status_path = os.path.join(project_dir, PHASE1_STATUS_FILENAME)
-        if not os.path.exists(status_path):
-            return {}
-        with open(status_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+        return read_json_tolerant(status_path, {})
 
     @staticmethod
     def _read_metadata_map(project_dir: str) -> dict:
@@ -150,10 +148,8 @@ class AssetRepository:
         ``AssetView.path`` 對齊。不存在回空 dict(全部視為無 metadata)。
         """
         metadata_path = os.path.join(project_dir, PHASE1_METADATA_FILENAME)
-        if not os.path.exists(metadata_path):
-            return {}
-        with open(metadata_path, "r", encoding="utf-8") as f:
-            records = json.load(f)
+        # 容錯讀:不存在 / 損毀回空 list(全部視為無 metadata,不讓壞檔讓素材頁 500)
+        records = read_json_tolerant(metadata_path, [])
         return {rec["file"]: rec for rec in records if rec.get("file")}
 
     @staticmethod

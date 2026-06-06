@@ -18,7 +18,10 @@ from backend.services.asset_discovery import (
     to_abs_path,
 )
 from backend.services.asset_repository import AssetRepository
+from backend.services.atomic_json import atomic_write_json, read_json_tolerant
+from backend.services.phase1_lock import EDITOR_BUSY_MESSAGE, Phase1BusyError, phase1_lock
 from backend.services.project_meta_store import project_meta_store
+from config.pipeline_config import EDITOR_PHASE1_LOCK_TIMEOUT_SEC
 from ingestion_engine.models import (
     META_KEY_PHASE1_STATUS,
     PHASE1_STATUS_DONE,
@@ -175,17 +178,16 @@ class DirectorService:
         （以 file 的 relpath 身分為鍵；重跑後變 rejected/error 者自然從 success 清單消失）。
         """
         dump_path = os.path.join(target_dir, PHASE1_METADATA_FILENAME)
-        if merge and os.path.exists(dump_path):
-            with open(dump_path, 'r', encoding='utf-8') as f:
-                existing = json.load(f)
-            # file 與 reprocessed_ids(asset_id)同為 relpath 身分,直接比對即可
+        if merge:
+            # 容錯讀既有清單(損毀 / 半寫回 []);file 與 reprocessed_ids(asset_id)同為 relpath 身分
+            existing = read_json_tolerant(dump_path, [])
             kept = [e for e in existing if e.get("file", "") not in reprocessed_ids]
             merged = kept + success_assets
         else:
             merged = success_assets
-        with open(dump_path, 'w', encoding='utf-8') as f:
-            json.dump(merged, f, ensure_ascii=False, indent=2)
-            print(f"💾 [Dump] 素材特徵已儲存至 {dump_path}")
+        # 原子寫(唯一 temp + os.replace):併發讀者恆見完整檔;讀-改-寫已由 Phase 1 執行鎖序列化
+        atomic_write_json(dump_path, merged)
+        print(f"💾 [Dump] 素材特徵已儲存至 {dump_path}")
 
     def _dump_phase1_status(self, target_dir: str, status_entries: list[dict], merge: bool) -> None:
         """
@@ -194,14 +196,12 @@ class DirectorService:
         全量重跑從頭建表（順手汰除已刪素材的舊狀態）；子集重分析則合併進既有表只更新重跑者。
         """
         dump_path = os.path.join(target_dir, PHASE1_STATUS_FILENAME)
-        status_map: dict = {}
-        if merge and os.path.exists(dump_path):
-            with open(dump_path, 'r', encoding='utf-8') as f:
-                status_map = json.load(f)
+        # 子集重分析合併既有表(容錯讀,損毀 / 半寫回空表);全量重跑從頭建表
+        status_map: dict = read_json_tolerant(dump_path, {}) if merge else {}
         for entry in status_entries:
             status_map[entry["asset_id"]] = entry
-        with open(dump_path, 'w', encoding='utf-8') as f:
-            json.dump(status_map, f, ensure_ascii=False, indent=2)
+        # 原子寫:併發讀者(素材頁 list_assets)恆見完整檔,不再讀到半截 JSON 而 500
+        atomic_write_json(dump_path, status_map)
 
     def _ensure_phase1_assets(self, folder_name: str, user_id: str,
                               phase1_dump_path: str,
@@ -277,10 +277,19 @@ class DirectorService:
         
         # --- 否則，執行完整的新生成流程 ---
         else:
-            # Phase 1：直接沿用素材頁分析結果，只補跑尚未分析 / 策略已變更的素材（移除編輯器全域策略）
-            raw_assets_metadata = self._ensure_phase1_assets(
-                folder_name, user_id, phase1_dump_path, tracker
-            )
+            # Phase 1：直接沿用素材頁分析結果，只補跑尚未分析 / 策略已變更的素材（移除編輯器全域策略）。
+            # 與雲端同步 / 素材頁的 Phase 1 互斥:阻塞等前景分析做完(上限 EDITOR_PHASE1_LOCK_TIMEOUT_SEC)
+            # 再讀新鮮快取,避免雙重佔用 GPU 與讀到半寫快取;逾時則回 Phase1BusyError 讓使用者稍候再試。
+            if not phase1_lock.acquire(
+                user_id, folder_name, blocking=True, timeout=EDITOR_PHASE1_LOCK_TIMEOUT_SEC
+            ):
+                raise Phase1BusyError(EDITOR_BUSY_MESSAGE)
+            try:
+                raw_assets_metadata = self._ensure_phase1_assets(
+                    folder_name, user_id, phase1_dump_path, tracker
+                )
+            finally:
+                phase1_lock.release(user_id, folder_name)
             if not raw_assets_metadata:
                 raise ValueError("沒有可用的已分析素材，請先到素材頁完成分析。")
 

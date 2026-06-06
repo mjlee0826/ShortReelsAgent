@@ -126,7 +126,8 @@ export default function AssetListPage() {
       await connect(jobId);
     } catch (error) {
       const msg = error.response?.data?.detail || error.message || String(error);
-      setErrorMsg(`啟動分析失敗：${msg}`);
+      // 409 = 後端已有 Phase 1 在跑(雲端同步 / 另一次觸發):非失敗,直接顯示「素材分析中，請稍候」
+      setErrorMsg(error.response?.status === 409 ? msg : `啟動分析失敗：${msg}`);
       setJobRunning(false);
       setLiveStatusMap({});
       setProgress({ done: 0, total: 0 });
