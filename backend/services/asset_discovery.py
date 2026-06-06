@@ -15,22 +15,16 @@ from __future__ import annotations
 
 import os
 
-from config.app_config import RAW_SUBDIR, STANDARDIZED_SUBDIR
-from media_processor.pipeline.context import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+from config.app_config import RAW_SUBDIR, STANDARDIZED_MARKER, STANDARDIZED_SUBDIR
+from config.media_formats import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+from config.project_artifacts import PHASE1_METADATA_FILENAME, PHASE1_STATUS_FILENAME
 
 # Phase 1 感知分析支援的媒體副檔名(圖片 ∪ 影片;不含純音訊,音訊由 Phase 3 處理)
 SUPPORTED_MEDIA_EXTENSIONS: frozenset[str] = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
 
-# Phase 1 全狀態落地檔(含 success / rejected / error,鍵為檔名),供前端素材列表 join 狀態。
-# 與 success-only 的 phase1_assets_metadata.json(Phase 4 用)區分。
-PHASE1_STATUS_FILENAME = "phase1_asset_status.json"
-
-# Phase 1 success-only 完整感知結果落地檔(list,每筆含 file + metadata,metadata 內有 aesthetic_score)。
-# 供 Phase 4 取用,亦供專案總覽挑「美學最高素材」當封面;為避免 magic string 散落而集中於此。
-PHASE1_METADATA_FILENAME = "phase1_assets_metadata.json"
-
-# 標準化輸出檔名的標記片段(原始檔若已有此版本則被略過)
-_STANDARDIZED_MARKER = "_std"
+# PHASE1_STATUS_FILENAME / PHASE1_METADATA_FILENAME 改由 config.project_artifacts 提供(見頂部 import),
+# 於此 re-export 維持既有 `from asset_discovery import PHASE1_*` 的下游相容(asset_repository / cover / director)。
+# 標準化標記亦改用 config.app_config.STANDARDIZED_MARKER(原始檔已有此版本則被略過)。
 
 
 def to_abs_path(project_dir: str, relpath: str) -> str:
@@ -87,5 +81,5 @@ def _is_supported(filename: str) -> bool:
 
 def _has_standardized_version(raw_filename: str, std_files: list[str]) -> bool:
     """判斷某 raw 原始檔是否已有對應 ``_std`` 標準化版本(沿用舊的 ``{stem}_std`` 子字串比對)。"""
-    std_version = os.path.splitext(raw_filename)[0] + _STANDARDIZED_MARKER
+    std_version = os.path.splitext(raw_filename)[0] + STANDARDIZED_MARKER
     return any(std_version in f for f in std_files)

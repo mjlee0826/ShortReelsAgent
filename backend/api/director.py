@@ -13,6 +13,7 @@ from backend.auth.logto_jwt_verifier import verify_token
 from backend.api.progress import progress_hub, ws_progress_observer
 from media_processor.pipeline.progress import ProgressTracker
 from config.app_config import ASSETS_DIR, RAW_SUBDIR
+from config.media_formats import AUDIO_EXTENSIONS
 
 router = APIRouter()
 director_service = DirectorService()
@@ -21,8 +22,6 @@ render_service = RenderService()
 # 保存背景 job 的 asyncio.Task 參考,避免 task 在執行中被 GC 提前回收
 _background_tasks: set = set()
 
-# 允許上傳的音訊副檔名白名單
-_ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"}
 _ASSETS_BASE_PATH = ASSETS_DIR
 
 
@@ -132,10 +131,10 @@ async def upload_music(folder_name: str, file: UploadFile = File(...), user_id: 
     """
     # 驗證副檔名
     ext = os.path.splitext(file.filename)[1].lower()
-    if ext not in _ALLOWED_AUDIO_EXTENSIONS:
+    if ext not in AUDIO_EXTENSIONS:
         raise HTTPException(
             status_code=400,
-            detail=f"不支援的音訊格式 '{ext}'，請上傳: {', '.join(_ALLOWED_AUDIO_EXTENSIONS)}"
+            detail=f"不支援的音訊格式 '{ext}'，請上傳: {', '.join(AUDIO_EXTENSIONS)}"
         )
 
     # 確認素材資料夾存在（路徑含 user_id）

@@ -17,6 +17,9 @@ ASSETS_DIR = os.environ.get("ASSETS_DIR", "/data1/cache/mjlee/assets")
 # 依賴約束，下載目標需用到 RAW_SUBDIR，唯有放在最底層的 config 才能讓 backend 與 ingestion 共用同一常數。
 RAW_SUBDIR = "raw"
 STANDARDIZED_SUBDIR = "standardized"
+# 標準化衍生檔的檔名標記：media_standardizer 產出時加在原始檔 stem 後（如 clip → clip_std.mp4），
+# asset_discovery 以此辨識 / 去重原始檔的已標準化版本。生產者與消費者共用同一標記，避免散落。
+STANDARDIZED_MARKER = "_std"
 
 # 全域音樂快取目錄：由 /cache 靜態路由對外服務
 TEMP_TEMPLATES_DIR = os.environ.get("TEMP_TEMPLATES_DIR", "/data1/cache/mjlee/temp_templates")
@@ -50,3 +53,10 @@ THUMBNAIL_JPEG_QUALITY = int(os.environ.get("THUMBNAIL_JPEG_QUALITY", "80"))
 COVER_THUMBNAIL_SUBDIR = "thumbnails_cover"
 # 封面縮圖長邊像素上限：總覽卡片約 354px 寬，Retina 需 ~700px，故預設 640px（可調 768 更銳利）。
 COVER_THUMBNAIL_MAX_PX = int(os.environ.get("COVER_THUMBNAIL_MAX_PX", "640"))
+
+# --- 後端對外位址 ---
+
+# 後端自參照位址預設值：thumbnail_service / asset_repository / director_service 用它組裝
+# /static 原始媒體與 /cache 縮圖的完整 URL。實際取值一律 os.getenv("BACKEND_URL", DEFAULT_BACKEND_URL)，
+# 集中預設值避免同字面量散落多檔。
+DEFAULT_BACKEND_URL = "http://localhost:5174"

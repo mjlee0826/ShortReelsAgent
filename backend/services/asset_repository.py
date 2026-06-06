@@ -23,7 +23,7 @@ from backend.services.asset_discovery import (
 )
 from backend.services.project_meta_store import project_meta_store
 from backend.services.thumbnail_service import ThumbnailService
-from config.app_config import ASSETS_DIR
+from config.app_config import ASSETS_DIR, DEFAULT_BACKEND_URL
 from media_processor.pipeline.context import derive_media_kind
 
 # project_meta.json 內逐檔策略 / dirty 相關欄位鍵(具名常數,避免散落 magic string)
@@ -36,8 +36,7 @@ META_KEY_ANALYZED_STRATEGIES = "analyzed_strategies"
 # 素材尚未被 Phase 1 分析過(全狀態檔內查無此檔)時的 UI 狀態
 ASSET_STATUS_UNPROCESSED = "unprocessed"
 
-# 後端對外位址預設值(與 thumbnail_service 同一套讀法):用來組 /static 原始媒體的完整 URL
-_DEFAULT_BACKEND_URL = "http://localhost:5174"
+# 後端對外位址改用 config.app_config.DEFAULT_BACKEND_URL(見頂部 import),消除散落的同字面量
 
 # 副檔名 → MIME(供詳情前端決定 <img>/<video> 呈現與 HEIC 後備;集中於此避免 magic string)
 _EXT_TO_MIME = {
@@ -103,7 +102,7 @@ class AssetRepository:
         self._assets_dir = assets_dir
         self._thumbnails = thumbnail_service or ThumbnailService()
         # 與 ThumbnailService 同一套讀法:優先參數 → 環境變數 BACKEND_URL → 預設 localhost
-        self._backend_url = backend_url or os.getenv("BACKEND_URL", _DEFAULT_BACKEND_URL)
+        self._backend_url = backend_url or os.getenv("BACKEND_URL", DEFAULT_BACKEND_URL)
 
     # ── 路徑與 JSON 讀寫 ─────────────────────────────────────────────────────
 

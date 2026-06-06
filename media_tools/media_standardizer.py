@@ -4,6 +4,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
+from config.app_config import STANDARDIZED_MARKER
 from config.media_processor_config import STANDARDIZE_MAX_LONG_SIDE, STANDARDIZE_MAX_WORKERS
 from media_tools.ffmpeg_adapter import FFmpegAdapter
 
@@ -13,8 +14,8 @@ _TRANSCODE_ALWAYS_VIDEO_EXT = (".mov", ".avi", ".mkv", ".webm")
 _GATED_VIDEO_EXT = ".mp4"
 # HEIC/HEIF 圖片副檔名（瀏覽器不支援，需轉 JPG）
 _HEIC_IMAGE_EXT = (".heic", ".heif")
-# 標準化輸出檔名標記（已含此標記者跳過，避免 _std_std）
-_STD_MARKER = "_std."
+# 標準化輸出檔名的中綴標記：原始檔 stem 後接「STANDARDIZED_MARKER + .」（已含此標記者跳過，避免 _std_std）
+_STD_MARKER = f"{STANDARDIZED_MARKER}."
 # 轉檔中途檔副檔名：刻意用「非媒體白名單」副檔名（見 asset_discovery.SUPPORTED_MEDIA_EXTENSIONS），
 # 讓 collect_asset_files 在轉檔進行中不會把這個半成品檔列入素材清單，前端也就 probe 不到它
 _TEMP_OUTPUT_SUFFIX = ".mp4.part"
@@ -85,7 +86,7 @@ class MediaStandardizer:
 
         # 策略：非 .mp4 容器一律轉 H.264 .mp4；.mp4 僅在長邊超過上限（4K）時才轉（見 _needs_video_standardize）
         if self._needs_video_standardize(ext, filename, file_path):
-            new_file_path = os.path.join(output_dir, os.path.splitext(filename)[0] + "_std.mp4")
+            new_file_path = os.path.join(output_dir, os.path.splitext(filename)[0] + STANDARDIZED_MARKER + self.web_safe_video_ext)
             # 衍生檔已存在即跳過(idempotent):增量同步重跑時不重轉已標準化的素材
             if not os.path.exists(new_file_path):
                 print(f"   🎥 正在標準化影片: {filename} -> H.264")
@@ -95,7 +96,7 @@ class MediaStandardizer:
 
         # 策略：將 HEIC 轉為 JPG (瀏覽器才看得見)
         elif ext in _HEIC_IMAGE_EXT:
-            new_file_path = os.path.join(output_dir, os.path.splitext(filename)[0] + "_std.jpg")
+            new_file_path = os.path.join(output_dir, os.path.splitext(filename)[0] + STANDARDIZED_MARKER + self.web_safe_image_ext)
             if not os.path.exists(new_file_path):
                 print(f"   📸 正在標準化圖片: {filename} -> JPG")
                 return self._convert_image_to_jpg(file_path, new_file_path)

@@ -19,6 +19,7 @@ import threading
 from typing import Callable, Optional
 
 from config.app_config import ASSETS_DIR, RAW_SUBDIR
+from config.project_artifacts import PROJECT_META_FILENAME
 from ingestion_engine.cloud_storage_adapter import CloudStorageAdapter
 from ingestion_engine.exceptions import RemoteAccessError, RemoteAuthError
 from ingestion_engine.models import (
@@ -44,8 +45,6 @@ from ingestion_engine.models import (
 
 # Phase 1 觸發 callback 型別：吃 (user_id, project_name)，對該本地 project 跑 Phase 1；失敗時 raise。
 Phase1Runner = Callable[[str, str], None]
-
-_META_FILENAME = "project_meta.json"
 
 
 class CloudIngestionService:
@@ -198,7 +197,7 @@ class CloudIngestionService:
 
     def _read_meta(self, project_dir: str) -> Optional[dict]:
         """讀取 project_meta.json；不存在或損毀回 None。"""
-        meta_path = os.path.join(project_dir, _META_FILENAME)
+        meta_path = os.path.join(project_dir, PROJECT_META_FILENAME)
         if not os.path.exists(meta_path):
             return None
         try:
@@ -213,9 +212,9 @@ class CloudIngestionService:
         if meta is None:
             return
         meta.update(fields)
-        meta_path = os.path.join(project_dir, _META_FILENAME)
+        meta_path = os.path.join(project_dir, PROJECT_META_FILENAME)
         # 唯一 temp 檔:poller 與後端同進程寫同一檔,固定共用 .tmp 會被另一寫者截斷而換入損毀內容
-        fd, tmp_path = tempfile.mkstemp(dir=project_dir, prefix=f"{_META_FILENAME}.", suffix=".tmp")
+        fd, tmp_path = tempfile.mkstemp(dir=project_dir, prefix=f"{PROJECT_META_FILENAME}.", suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(meta, f, ensure_ascii=False, indent=2)

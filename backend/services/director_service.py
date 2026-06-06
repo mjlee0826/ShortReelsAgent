@@ -1,7 +1,12 @@
 import os
 import json
 from datetime import datetime, timezone
-from config.app_config import ASSETS_DIR, RAW_SUBDIR, STANDARDIZED_SUBDIR, TEMP_TEMPLATES_DIR
+from config.app_config import ASSETS_DIR, DEFAULT_BACKEND_URL, RAW_SUBDIR, STANDARDIZED_SUBDIR, TEMP_TEMPLATES_DIR
+from config.project_artifacts import (
+    PHASE2_TEMPLATE_DNA_FILENAME,
+    PHASE3_AUDIO_DNA_FILENAME,
+    PHASE4_BLUEPRINT_FILENAME,
+)
 from media_processor.pipeline import PipelineRunner, ProgressTracker
 from media_tools.media_standardizer import MediaStandardizer
 from template_engine.template_analyzer_facade import TemplateAnalyzerFacade
@@ -29,7 +34,7 @@ class DirectorService:
         self.director = DirectorFacade()
         # 素材策略 / dirty / 已分析基準的儲存庫;編輯器生成時據此沿用素材頁的逐檔策略與分析結果
         self.asset_repository = AssetRepository()
-        self.backend_url = os.getenv("BACKEND_URL", "http://localhost:5174")
+        self.backend_url = os.getenv("BACKEND_URL", DEFAULT_BACKEND_URL)
 
     def _update_project_meta(self, project_dir: str, folder_name: str):
         """生成完成後更新 project_meta.json 的最後修改時間、素材數量與藍圖狀態(容錯讀取 + 原子寫入)。"""
@@ -42,7 +47,7 @@ class DirectorService:
             asset_count = len(collect_asset_files(project_dir))
             meta["last_modified"] = datetime.now(timezone.utc).isoformat()
             meta["asset_count"] = asset_count
-            meta["has_blueprint"] = os.path.exists(os.path.join(project_dir, "phase4_blueprint.json"))
+            meta["has_blueprint"] = os.path.exists(os.path.join(project_dir, PHASE4_BLUEPRINT_FILENAME))
             # 原子寫回,避免與 poller / REST 請求併發寫造成 Extra data 損毀
             project_meta_store.write(project_dir, meta)
         except Exception as e:
@@ -234,9 +239,9 @@ class DirectorService:
         
         # --- 定義各階段的 JSON 儲存路徑 ---
         phase1_dump_path = os.path.join(target_dir, PHASE1_METADATA_FILENAME)
-        phase2_dump_path = os.path.join(target_dir, "phase2_template_dna.json")
-        phase3_dump_path = os.path.join(target_dir, "phase3_audio_dna.json") # 【新增】Phase 3 存檔路徑
-        blueprint_dump_path = os.path.join(target_dir, "phase4_blueprint.json")
+        phase2_dump_path = os.path.join(target_dir, PHASE2_TEMPLATE_DNA_FILENAME)
+        phase3_dump_path = os.path.join(target_dir, PHASE3_AUDIO_DNA_FILENAME)
+        blueprint_dump_path = os.path.join(target_dir, PHASE4_BLUEPRINT_FILENAME)
 
         raw_assets_metadata = []
         template_dna = None

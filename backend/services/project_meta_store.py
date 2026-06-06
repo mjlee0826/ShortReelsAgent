@@ -32,10 +32,9 @@ import tempfile
 import threading
 from typing import Callable, Optional
 
-# 專案中繼資料檔名(單一事實來源)
-PROJECT_META_FILENAME = "project_meta.json"
+from config.project_artifacts import PROJECT_META_FILENAME
 
-# 原子寫入的暫存檔副檔名
+# 原子寫入的暫存檔副檔名(PROJECT_META_FILENAME 已於頂部自 config.project_artifacts import)
 _TMP_SUFFIX = ".tmp"
 
 

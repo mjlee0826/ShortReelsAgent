@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional
 
+from config.media_formats import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from media_processor.image_strategy import ImageStrategy
 from media_processor.video_strategy import VideoStrategy
 
@@ -25,10 +26,8 @@ if TYPE_CHECKING:
 
 
 # ── 媒體類型 ──────────────────────────────────────────────────────────────────
-# 圖片 / 影片副檔名白名單(與 MediaProcessorFactory 路由一致),作為 Pipeline 層
-# 判斷 media_kind 的單一來源,避免在 Builder 內散落 magic string。
-IMAGE_EXTENSIONS: frozenset[str] = frozenset({".jpg", ".jpeg", ".png", ".heic", ".heif"})
-VIDEO_EXTENSIONS: frozenset[str] = frozenset({".mp4", ".mov"})
+# 圖片 / 影片副檔名白名單改由 config.media_formats 單一來源提供(見頂部 import),於此 re-export
+# 供 derive_media_kind 與既有 `from context import IMAGE/VIDEO_EXTENSIONS` 的下游沿用。
 
 
 class MediaKind(str, Enum):

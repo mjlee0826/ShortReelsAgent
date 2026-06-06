@@ -19,6 +19,7 @@ from typing import Optional
 
 from config.app_config import ASSETS_DIR
 from config.ingestion_config import INGESTION_POLL_INTERVAL_SEC, POLLER_TICK_SEC
+from config.project_artifacts import PROJECT_META_FILENAME
 from ingestion_engine.cloud_ingestion_service import CloudIngestionService
 from ingestion_engine.models import (
     META_KEY_LAST_SYNCED_AT,
@@ -27,8 +28,6 @@ from ingestion_engine.models import (
     SOURCE_GDRIVE,
     SYNC_STATUS_PAUSED_AUTH,
 )
-
-_META_FILENAME = "project_meta.json"
 
 
 @dataclass(frozen=True)
@@ -165,7 +164,7 @@ class IngestionPoller:
     @staticmethod
     def _read_meta(project_dir: str) -> Optional[dict]:
         """讀取 project_meta.json；不存在或損毀回 None。"""
-        meta_path = os.path.join(project_dir, _META_FILENAME)
+        meta_path = os.path.join(project_dir, PROJECT_META_FILENAME)
         if not os.path.exists(meta_path):
             return None
         try:

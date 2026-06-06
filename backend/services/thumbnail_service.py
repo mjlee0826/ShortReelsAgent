@@ -17,6 +17,7 @@ import cv2
 from PIL import Image
 
 from config.app_config import (
+    DEFAULT_BACKEND_URL,
     TEMP_TEMPLATES_DIR,
     THUMBNAIL_EXT,
     THUMBNAIL_JPEG_QUALITY,
@@ -26,9 +27,6 @@ from config.app_config import (
 from config.media_processor_config import MIDDLE_FRAME_POSITION
 from media_processor.pipeline.context import MediaKind
 from media_processor.pipeline.stages.video_frame_utils import grab_frame_at_time
-
-# 後端對外位址預設值(與 director_service 一致):用來組 /cache 縮圖的完整 URL
-_DEFAULT_BACKEND_URL = "http://localhost:5174"
 
 
 class ThumbnailService:
@@ -49,7 +47,7 @@ class ThumbnailService:
         """
         self._cache_root = cache_root
         self._thumb_root = os.path.join(cache_root, subdir)
-        self._backend_url = backend_url or os.getenv("BACKEND_URL", _DEFAULT_BACKEND_URL)
+        self._backend_url = backend_url or os.getenv("BACKEND_URL", DEFAULT_BACKEND_URL)
         self._max_px = max_px
 
     def ensure_url(

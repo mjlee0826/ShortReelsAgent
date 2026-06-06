@@ -20,6 +20,7 @@ from backend.services.project_cover_service import ProjectCoverService
 from backend.services.project_meta_store import project_meta_store
 from backend.services.thumbnail_service import ThumbnailService
 from config.app_config import ASSETS_DIR, COVER_THUMBNAIL_MAX_PX, COVER_THUMBNAIL_SUBDIR
+from config.project_artifacts import PHASE4_BLUEPRINT_FILENAME
 from ingestion_engine.models import (
     META_KEY_DRIVE_FOLDER_ID,
     META_KEY_LAST_SIGNATURE,
@@ -150,7 +151,7 @@ def _list_projects_sync(user_id: str) -> list[dict]:
                     "created_at": _now_iso(),
                     "last_modified": _now_iso(),
                     "asset_count": _count_assets(project_dir),
-                    "has_blueprint": os.path.exists(os.path.join(project_dir, "phase4_blueprint.json")),
+                    "has_blueprint": os.path.exists(os.path.join(project_dir, PHASE4_BLUEPRINT_FILENAME)),
                 }
                 project_meta_store.write(project_dir, meta)
             # 補上封面：美學最高素材的縮圖 URL（無已分析素材 / 失敗則為 None，由前端顯中性佔位）
