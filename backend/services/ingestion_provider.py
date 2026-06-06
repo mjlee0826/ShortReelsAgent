@@ -67,13 +67,17 @@ def _phase1_runner(user_id: str, project_name: str) -> None:
     try:
         async_job_runner.run_tracked_sync(user_id, _work, on_job_created=_publish_job_id)
     finally:
-        # 無論成功 / 失敗都清掉 active job_id;phase1_status(done/failed)由 cloud_ingestion_service 落地
+        # 無論成功 / 失敗都清掉 active job_id;phase1_status(done/failed)由 cloud_ingestion_service 落地。
+        # release 放最內層 finally:即使清 job_id 的原子寫失敗(OSError)也務必釋放鎖,
+        # 否則該專案會永久卡住無法再分析(鎖洩漏)。
         def _clear(meta: dict) -> None:
             """就地移除進行中 job_id(缺鍵亦安全)。"""
             meta.pop(META_KEY_ACTIVE_PHASE1_JOB_ID, None)
-        project_meta_store.update(project_dir, _clear)
-        # 釋放執行鎖,讓編輯頁 / 素材頁 / 下輪同步得以接手
-        phase1_lock.release(user_id, project_name)
+        try:
+            project_meta_store.update(project_dir, _clear)
+        finally:
+            # 釋放執行鎖,讓編輯頁 / 素材頁 / 下輪同步得以接手
+            phase1_lock.release(user_id, project_name)
 
 
 def _artifact_pruner(user_id: str, project_name: str) -> None:
