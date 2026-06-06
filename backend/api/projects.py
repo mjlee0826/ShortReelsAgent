@@ -22,7 +22,9 @@ from backend.services.thumbnail_service import ThumbnailService
 from backend.services.user_settings_store import user_settings_store
 from config.app_config import ASSETS_DIR, COVER_THUMBNAIL_MAX_PX, COVER_THUMBNAIL_SUBDIR
 from config.project_artifacts import PHASE4_BLUEPRINT_FILENAME
+from backend.services.job_manager import job_manager
 from ingestion_engine.models import (
+    META_KEY_ACTIVE_PHASE1_JOB_ID,
     META_KEY_AUTO_ANALYZE,
     META_KEY_DRIVE_FOLDER_ID,
     META_KEY_LAST_SIGNATURE,
@@ -62,6 +64,13 @@ class CreateFromDriveRequest(BaseModel):
     source_url: str
 
 
+class Phase1ProgressView(BaseModel):
+    """素材頁掛載時查詢：該專案 Phase 1 是否進行中與其 job_id（供訂閱 WS 即時進度）。"""
+
+    phase1_status: Optional[str] = None  # pending / processing / done / failed / skipped
+    active_job_id: Optional[str] = None  # 進行中 Phase 1 的 job_id；無進行中 job（或孤兒）為 None
+
+
 class ProjectMeta(BaseModel):
     """專案中繼資料；雲端來源欄位僅雲端 project 有值，手動建立的本地 project 為 None。"""
 
@@ -78,6 +87,8 @@ class ProjectMeta(BaseModel):
     sync_status: Optional[str] = None
     last_synced_at: Optional[str] = None
     last_sync_error: Optional[str] = None
+    # 進行中 Phase 1 背景 job 的 id（背景同步分析時有值，供素材頁訂閱 WS 看即時進度；無則 None）
+    active_phase1_job_id: Optional[str] = None
     # 專案總覽封面：美學最高素材的縮圖 URL（無已分析素材時為 None，前端改顯中性佔位）
     cover_thumbnail_url: Optional[str] = None
 
@@ -228,6 +239,32 @@ async def sync_project(project_name: str, user_id: str = Depends(verify_token)):
         return await asyncio.to_thread(cloud_ingestion_service.sync_project, user_id, project_name)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"找不到專案: {project_name}")
+
+
+@router.get("/projects/{project_name}/phase1-progress", response_model=Phase1ProgressView)
+async def get_phase1_progress(project_name: str, user_id: str = Depends(verify_token)):
+    """
+    回傳專案目前的 Phase 1 狀態與進行中 job_id；素材頁掛載時據此決定是否訂閱 WS 即時進度。
+
+    背景同步(首次同步 / poller 增量)觸發的 Phase 1 會把 job_id 落地 meta 的 active_phase1_job_id;
+    本端點讀出供前端訂閱 /ws/progress/{job_id}。後端重啟後 in-memory 的 job 已消失但 meta 仍殘留
+    job_id(孤兒):校驗 job_manager 查無即回 None,讓前端不誤連而永久卡在處理中(下輪 poller 會因
+    processing 非「已收斂」而重抓重跑、重建新 job_id)。讀檔不卡 event loop,丟 thread 執行。
+    """
+    project_dir = os.path.join(_user_dir(user_id), project_name)
+    if not os.path.isdir(project_dir):
+        raise HTTPException(status_code=404, detail=f"找不到專案: {project_name}")
+    meta = await asyncio.to_thread(project_meta_store.read, project_dir)
+    if meta is None:
+        return Phase1ProgressView()
+    job_id = meta.get(META_KEY_ACTIVE_PHASE1_JOB_ID)
+    # 孤兒校驗:meta 殘留 job_id 但對應 job 已不存在(後端重啟)→ 回 None 避免前端誤連卡死
+    if job_id is not None and job_manager.get(job_id) is None:
+        job_id = None
+    return Phase1ProgressView(
+        phase1_status=meta.get(META_KEY_PHASE1_STATUS),
+        active_job_id=job_id,
+    )
 
 
 def _schedule_first_sync(user_id: str, project_name: str) -> None:

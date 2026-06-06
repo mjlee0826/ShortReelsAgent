@@ -124,6 +124,20 @@ class ProgressHub:
         # 延遲清 buffer:WS 重連或晚連仍能在保留期內 replay
         loop.call_later(PROGRESS_JOB_RETENTION_SEC, self._drop_buffer, job_id)
 
+    def finish_threadsafe(self, job_id: str) -> None:
+        """
+        從 worker thread 安全收尾一個 job:把 finish 排回 event loop 執行緒執行。
+
+        finish 內部用 loop.call_later(非 thread-safe),只能在 event loop 執行緒呼叫;雲端同步的
+        Phase 1 收尾發生在 worker thread,故一律經本方法以 call_soon_threadsafe 排回 loop。
+        無 loop(理論上啟動端已 ensure_loop)時保守直接清 buffer。
+        """
+        loop = self._loop
+        if loop is None:
+            self._drop_buffer(job_id)
+            return
+        loop.call_soon_threadsafe(self.finish, job_id)
+
     def _drop_buffer(self, job_id: str) -> None:
         """清除某 job 的 replay buffer(保留期到期後由 loop 計時器觸發)。"""
         with self._lock:

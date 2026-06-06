@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import traceback
 import uuid
-from typing import Callable
+from typing import Callable, Optional
 
 from backend.api.progress import progress_hub, ws_progress_observer
 from backend.services.job_manager import job_manager
@@ -19,6 +19,8 @@ from media_processor.pipeline.progress import ProgressTracker
 
 # work_fn:在 worker thread 內執行實際工作(收到帶 job_id 的 tracker),回傳要落地的結果 dict
 WorkFn = Callable[[ProgressTracker], dict]
+# on_job_created:job_id 一產生(work 尚未開跑)即回呼,供呼叫端把 job_id 曝露給前端(如落地 meta)
+JobCreatedHook = Callable[[str], None]
 
 
 class AsyncJobRunner:
@@ -46,6 +48,46 @@ class AsyncJobRunner:
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         return job_id
+
+    def run_tracked_sync(
+        self, user_id: str, work_fn: WorkFn,
+        on_job_created: Optional[JobCreatedHook] = None,
+    ) -> dict:
+        """
+        在「目前的 worker thread」內同步跑一個 tracked job(建 job_id、tracker、發 WS 事件),阻塞至完成。
+
+        供雲端同步等「已在 worker thread、且呼叫端需等結果」的場景使用,與背景 ``launch`` 共用同一套
+        job 生命週期(Template Method):建 job → 建帶 job_id 的 tracker(訂閱 WS Observer)→ 跑 work →
+        成功 / 失敗寫回 JobManager 並發 JOB_FINISHED / JOB_ERROR 終端事件 → 收尾 WS 連線。差別僅在此版本
+        同步阻塞、不自建 asyncio.Task,故收尾改用 ``finish_threadsafe``(從 worker thread 排回 loop)。
+
+        ``on_job_created`` 在 job_id 產生、work 開跑「之前」回呼,讓呼叫端先把 job_id 曝露給前端訂閱。
+        失敗時 raise(交回呼叫端決定後續,例如雲端同步據此標 failed)。回傳含 job_id 與 work 結果的 dict。
+
+        前置條件:app 啟動時已 ``progress_hub.ensure_loop()``(見 backend/main.py lifespan),
+        否則 worker thread 發的事件無 loop 可排,只進 replay buffer(待 WS attach 時補播)。
+        """
+        job_id = uuid.uuid4().hex
+        job_manager.create(job_id, user_id)
+        # tracker 帶此 job_id,訂閱 WebSocket Observer;事件依 job_id 分流到對應連線
+        tracker = ProgressTracker(job_id=job_id)
+        tracker.subscribe(ws_progress_observer)
+        if on_job_created is not None:
+            on_job_created(job_id)  # 先曝露 job_id(如落地 meta),讓前端能在 work 跑的同時訂閱
+        try:
+            result = work_fn(tracker)
+            job_manager.mark_done(job_id, result)
+            tracker.emit_job_finished(payload={"result": result})
+            return {"job_id": job_id, "result": result}
+        except Exception as exc:  # noqa: BLE001 - 轉成 job 錯誤並發終端事件後,仍 raise 交回呼叫端
+            print("\n❌ [背景 job 發生錯誤] 詳細報錯資訊如下：")
+            traceback.print_exc()
+            job_manager.mark_error(job_id, str(exc))
+            tracker.emit_job_error(error=str(exc))
+            raise
+        finally:
+            # 在 worker thread 收尾:推哨兵讓 WS 迴圈優雅收尾,並排程清除 replay buffer(經 loop 排回)
+            progress_hub.finish_threadsafe(job_id)
 
     async def _run(self, job_id: str, tracker: ProgressTracker, work_fn: WorkFn) -> None:
         """背景跑 work_fn:結束時把結果 / 錯誤寫回 JobManager、發終端事件,並收尾 WS 連線。"""

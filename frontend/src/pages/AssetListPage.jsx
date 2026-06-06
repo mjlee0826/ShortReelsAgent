@@ -14,6 +14,9 @@ import { IconButton, Spinner, EmptyState } from '../components/ui';
 
 // 視為「需要重跑 Phase 1」的素材狀態（開始生成時挑這些 + dirty）
 const STATUS_UNPROCESSED = 'unprocessed';
+// 專案 Phase 1 背景預跑狀態值（對齊後端 ingestion_engine/models.py 的 PHASE1_STATUS_PROCESSING）：
+// 素材頁掛載時據此判斷是否有背景同步分析進行中，進而訂閱其 WS 即時進度
+const PHASE1_STATUS_PROCESSING = 'processing';
 
 /**
  * AssetListPage：專案素材管理頁（Layer 5）。
@@ -64,22 +67,6 @@ export default function AssetListPage() {
     }
   }, [projectId]);
 
-  // 掛載 / 換專案時抓素材：setState 全落在 promise 回呼（非同步）以符合 effect 規範；
-  // active 旗標避免請求未回前元件已卸載而對舊狀態 setState。
-  useEffect(() => {
-    let active = true;
-    apiService.fetchAssets(projectId)
-      .then((data) => { if (active) setAssets(data); })
-      .catch((error) => {
-        if (active) {
-          const msg = error.response?.data?.detail || error.message || String(error);
-          setErrorMsg(`載入素材失敗：${msg}`);
-        }
-      })
-      .finally(() => { if (active) setIsLoading(false); });
-    return () => { active = false; };
-  }, [projectId]);
-
   // ── WebSocket 進度事件 ──────────────────────────────────────────────────────
   const handleProgressEvent = useCallback((event) => {
     const { event_type: type, asset_id: assetId, stage_name: stage } = event;
@@ -110,7 +97,16 @@ export default function AssetListPage() {
     }));
   }, [loadAssets]);
 
-  const connect = useProgressSocket(handleProgressEvent);
+  // WS 在「未收到終端事件」下異常斷線（如後端重啟）：清即時層並回抓最終持久化狀態，避免卡在處理中
+  const handleSocketClosed = useCallback(() => {
+    setJobRunning(false);
+    setLiveStatusMap({});
+    finishedRef.current = new Set();
+    setProgress({ done: 0, total: 0 });
+    loadAssets();
+  }, [loadAssets]);
+
+  const connect = useProgressSocket(handleProgressEvent, handleSocketClosed);
 
   // 啟動一個 Phase 1 分析 job：先把涉及素材標處理中,拿到 job_id 後訂閱 WS
   // involvedPaths 為素材 relpath 身分清單，與後續 WebSocket 事件的 asset_id 對齊
@@ -136,6 +132,58 @@ export default function AssetListPage() {
       setProgress({ done: 0, total: 0 });
     }
   }, [connect]);
+
+  // 偵測到背景同步已在跑的 Phase 1 job：直接訂閱其 WS，不重新觸發分析（job 已在後端跑）。
+  // pendingPaths 為目前未處理 / dirty 素材的 relpath，用來初始化進度條 total 與每張卡片處理中動畫;
+  // 連線後 replay buffer 會補播已發生的事件，使進度即時追上。
+  const attachToRunningJob = useCallback(async (jobId, pendingPaths) => {
+    setErrorMsg('');
+    setJobRunning(true);
+    finishedRef.current = new Set();
+    setProgress({ done: 0, total: pendingPaths.length });
+    const initialLive = {};
+    pendingPaths.forEach((p) => { initialLive[p] = { status: 'processing', stage: null }; });
+    setLiveStatusMap(initialLive);
+    try {
+      await connect(jobId);
+    } catch (error) {
+      setJobRunning(false);
+      setLiveStatusMap({});
+      setProgress({ done: 0, total: 0 });
+    }
+  }, [connect]);
+
+  // 掛載 / 換專案時抓素材：setState 全落在 promise 回呼（非同步）以符合 effect 規範；
+  // active 旗標避免請求未回前元件已卸載而對舊狀態 setState。素材載入後再查 Phase 1 進度：
+  // 若背景同步正在分析（processing + active_job_id），訂閱其 WS 補上即時進度。
+  useEffect(() => {
+    let active = true;
+    apiService.fetchAssets(projectId)
+      .then((data) => {
+        if (!active) return undefined;
+        setAssets(data);
+        // 進度查詢失敗不致命（素材已載入）：catch 吞掉，僅不顯示背景進度
+        return apiService.fetchPhase1Progress(projectId)
+          .then((p) => {
+            if (!active) return;
+            if (p.phase1_status === PHASE1_STATUS_PROCESSING && p.active_job_id) {
+              const pendingPaths = data
+                .filter((a) => a.dirty || a.status === STATUS_UNPROCESSED)
+                .map((a) => a.path);
+              attachToRunningJob(p.active_job_id, pendingPaths);
+            }
+          })
+          .catch(() => {});
+      })
+      .catch((error) => {
+        if (active) {
+          const msg = error.response?.data?.detail || error.message || String(error);
+          setErrorMsg(`載入素材失敗：${msg}`);
+        }
+      })
+      .finally(() => { if (active) setIsLoading(false); });
+    return () => { active = false; };
+  }, [projectId, attachToRunningJob]);
 
   // ── 選取 ───────────────────────────────────────────────────────────────────
   // 選取集合一律存素材 relpath 身分（asset.path）

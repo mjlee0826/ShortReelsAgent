@@ -155,6 +155,13 @@ class DirectorApiService {
     return response.data;
   }
 
+  // 查詢專案 Phase 1 進度狀態與進行中 job_id（素材頁掛載時據此訂閱 WS 看背景同步的即時進度）
+  // 回傳 { phase1_status, active_job_id }；無進行中 job（或後端重啟孤兒）時 active_job_id 為 null
+  async fetchPhase1Progress(projectName) {
+    const response = await apiClient.get(`/api/projects/${projectName}/phase1-progress`);
+    return response.data;
+  }
+
   async deleteProject(projectName) {
     await apiClient.delete(`/api/projects/${projectName}`);
   }

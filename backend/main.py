@@ -19,14 +19,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.api.director import router as director_router
 from backend.api.projects import router as projects_router
 from backend.api.assets import router as assets_router
-from backend.api.progress import router as progress_router
+from backend.api.progress import router as progress_router, progress_hub
 from backend.api.settings import router as settings_router
 from backend.services.ingestion_provider import ingestion_poller
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """應用生命週期：啟動時拉起雲端攝取背景 poller，關閉時優雅停止（可由 env 關閉）。"""
+    """應用生命週期：捕捉 event loop 供背景 worker thread 排程進度事件，啟動雲端攝取背景 poller，關閉時優雅停止。"""
+    # 在 event loop 執行緒先捕捉 loop:讓「雲端同步在 worker thread 跑的 tracked Phase 1」所發的 WS
+    # 進度事件,能即時經 call_soon_threadsafe 排回本 loop(否則首同步早於任何 WS / 手動 job 觸發時,
+    # _loop 尚未捕捉,事件只進 replay buffer 失去即時性)。冪等,與後續 attach / launch 同一 loop。
+    progress_hub.ensure_loop()
     if ENABLE_INGESTION_POLLER:
         await ingestion_poller.start()
     try:
