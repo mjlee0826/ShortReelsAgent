@@ -30,6 +30,7 @@ from ingestion_engine.models import (
     META_KEY_LAST_SYNCED_AT,
     META_KEY_PHASE1_STATUS,
     META_KEY_PHASE1_UPDATED_AT,
+    META_KEY_REMOTE_MANIFEST,
     META_KEY_SOURCE,
     META_KEY_SYNC_STATUS,
     PHASE1_STATUS_DONE,
@@ -47,6 +48,9 @@ from ingestion_engine.models import (
 
 # Phase 1 觸發 callback 型別：吃 (user_id, project_name)，對該本地 project 跑 Phase 1；失敗時 raise。
 Phase1Runner = Callable[[str, str], None]
+# 衍生產物清理 callback 型別：吃 (user_id, project_name)，把該 project 內「對不上磁碟的衍生產物」
+# （孤兒 standardized 檔、phase1 metadata/status、逐檔策略）清掉。實作在 backend 並以注入避免循環 import。
+ArtifactPruner = Callable[[str, str], None]
 
 
 class CloudIngestionService:
@@ -56,11 +60,13 @@ class CloudIngestionService:
         self,
         adapter: CloudStorageAdapter,
         phase1_runner: Phase1Runner,
+        artifact_pruner: ArtifactPruner,
         base_dir: str = ASSETS_DIR,
     ):
-        """注入雲端 adapter 與 Phase 1 觸發 callback；base_dir 為素材根目錄。"""
+        """注入雲端 adapter、Phase 1 觸發 callback 與衍生產物清理 callback；base_dir 為素材根目錄。"""
         self._adapter = adapter
         self._phase1_runner = phase1_runner
+        self._prune_artifacts = artifact_pruner
         self._base_dir = base_dir
         # 每個 project 一把鎖，序列化 poller 與手動 sync 對同一 project 的並發同步
         self._locks: dict[str, threading.Lock] = {}
@@ -121,7 +127,9 @@ class CloudIngestionService:
         if not media:
             return self._mark_synced(project_dir, report)  # 空資料夾：等有素材再處理
 
-        signature = self._asset_signature(media)
+        # 每檔遠端指紋（size + mod_time）：size 抓得到一般替換，mod_time 補抓「同名同大小換內容」
+        remote_fp = self._remote_fingerprints(media)
+        signature = self._signature_of(remote_fp)
         # DONE 與 SKIPPED 同視為「已收斂」：前者已分析、後者依設定刻意不自動分析；
         # 二者搭配簽章未變即無需再動，避免關閉自動分析的專案被 poller 每輪重複下載 / 觸發。
         phase1_settled = meta.get(META_KEY_PHASE1_STATUS) in (
@@ -130,6 +138,10 @@ class CloudIngestionService:
         unchanged = signature == meta.get(META_KEY_LAST_SIGNATURE) and phase1_settled
         if unchanged:
             return self._mark_synced(project_dir, report)
+
+        # 對齊遠端：把「被移除 / 被同名替換」的本地素材連同其衍生產物先汰除，
+        # 確保 changed 之後會重抓重轉重析、removed 徹底消失（download 只增不刪，故須在此主動刪）。
+        self._evict_stale_assets(user_id, project_name, project_dir, meta, remote_fp, report)
 
         # 有新增／替換素材：先下載到 raw/（原始檔分層；adapter 會自建目標目錄）
         # 下載失敗不應留下 processing 假象；「已存在且同大小跳過」的增量判斷因此改看 raw/
@@ -142,6 +154,9 @@ class CloudIngestionService:
         except RemoteAccessError as exc:
             return self._fail_sync(project_dir, report, exc)
         report.downloaded = True
+        # 下載完成 → 磁碟已對齊遠端，先落地新指紋（與 signature 解耦：指紋記「磁碟已同步到哪」、
+        # signature 記「已分析到哪」）。如此 Phase 1 失敗下輪重試時不會把剛抓好的檔當 changed 再刪一次。
+        self._patch_meta(project_dir, {META_KEY_REMOTE_MANIFEST: remote_fp})
 
         # 使用者設定「建立後不自動分析」：素材已下載，但刻意略過 Phase 1，待其到素材頁手動觸發。
         # 標 SKIPPED + 更新簽章，讓本輪與後續 poller 都視為已收斂、不再重複觸發分析。
@@ -173,6 +188,40 @@ class CloudIngestionService:
             META_KEY_LAST_SIGNATURE: signature,
         })
         return self._mark_synced(project_dir, report)
+
+    def _evict_stale_assets(
+        self,
+        user_id: str,
+        project_name: str,
+        project_dir: str,
+        meta: dict,
+        remote_fp: dict[str, str],
+        report: SyncReport,
+    ) -> None:
+        """
+        汰除「相對上次同步被移除 / 被同名替換」的素材：先刪本地 raw 原始檔，再清其衍生產物。
+
+        以上次同步落地的指紋（META_KEY_REMOTE_MANIFEST）對比本次遠端指紋：
+        - removed：上次有、這次沒 → 整個素材已從雲端刪除，本地應一併移除。
+        - changed：兩邊都有但指紋不同（含同名同大小換內容）→ 內容已變，刪掉舊 raw 讓 download 重抓新檔。
+        raw 由本層直接刪（本層擁有 raw 層）；standardized / phase1 metadata/status / 逐檔策略等衍生產物
+        交給注入的 clean callback 對齊磁碟真相清除。清除失敗只記錄、不中斷主同步（最多殘留孤兒，
+        不應反過來卡住下載 / 分析）。
+        """
+        previous_fp = meta.get(META_KEY_REMOTE_MANIFEST) or {}
+        removed = set(previous_fp) - set(remote_fp)
+        changed = {name for name in remote_fp if name in previous_fp and previous_fp[name] != remote_fp[name]}
+        stale = removed | changed
+        if not stale:
+            return
+
+        self._delete_raw_files(os.path.join(project_dir, RAW_SUBDIR), stale)
+        # raw 刪完後，被替換素材的 standardized 衍生檔已成孤兒：此時 prune 才能正確把它一併清掉
+        try:
+            self._prune_artifacts(user_id, project_name)
+        except Exception as exc:  # noqa: BLE001 - 清除衍生產物失敗不應中斷同步主流程
+            print(f"⚠️ [CloudIngestion] 清除衍生產物失敗（{project_name}）: {exc}")
+            report.errors.append(f"清除衍生產物失敗: {exc}")
 
     # ── 同步收尾 ──────────────────────────────────────────────────────────────
 
@@ -256,7 +305,19 @@ class CloudIngestionService:
         return lock
 
     @staticmethod
-    def _asset_signature(media_files: list[RemoteEntry]) -> str:
-        """以（檔名+大小）集合算簽章；變動代表有新增／替換素材，需重跑 Phase 1。"""
-        items = sorted(f"{f.name}:{f.size}" for f in media_files)
+    def _remote_fingerprints(media_files: list[RemoteEntry]) -> dict[str, str]:
+        """回傳 {檔名: "size:mod_time"} 的每檔遠端指紋；size 抓一般替換、mod_time 抓同名同大小換內容。"""
+        return {f.name: f"{f.size}:{f.mod_time}" for f in media_files}
+
+    @staticmethod
+    def _signature_of(remote_fp: dict[str, str]) -> str:
+        """以每檔指紋集合算整體簽章；變動代表有新增／移除／替換素材，需重新同步。"""
+        items = sorted(f"{name}:{fingerprint}" for name, fingerprint in remote_fp.items())
         return hashlib.sha1("|".join(items).encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _delete_raw_files(raw_dir: str, names: set[str]) -> None:
+        """刪除 raw/ 下指定檔名的素材（容忍不存在 / 刪除失敗，清理用不應掩蓋主流程）。"""
+        for name in names:
+            with contextlib.suppress(OSError):
+                os.remove(os.path.join(raw_dir, name))

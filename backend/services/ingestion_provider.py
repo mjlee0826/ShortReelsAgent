@@ -28,7 +28,17 @@ def _phase1_runner(user_id: str, project_name: str) -> None:
     director_service.run_phase1_incremental(project_name, user_id=user_id)
 
 
+def _artifact_pruner(user_id: str, project_name: str) -> None:
+    """
+    攝取背景同步的衍生產物清理 callback：雲端刪檔 / 同名替換後,把對不上磁碟的衍生產物清掉。
+
+    重用 director_service 既有的 asset_repository 單例(不另建,避免重複載入縮圖服務等),
+    把 standardized 孤兒檔、phase1 metadata/status、逐檔策略收斂到與磁碟一致。
+    """
+    director_service.asset_repository.prune_orphaned_artifacts(user_id, project_name)
+
+
 # 模組層級單例：跨 API 請求與背景輪詢共享同一份狀態與設定
 drive_adapter = PublicDriveApiAdapter()
-cloud_ingestion_service = CloudIngestionService(drive_adapter, _phase1_runner)
+cloud_ingestion_service = CloudIngestionService(drive_adapter, _phase1_runner, _artifact_pruner)
 ingestion_poller = IngestionPoller(cloud_ingestion_service)

@@ -36,7 +36,9 @@ META_KEY_DRIVE_FOLDER_ID = "drive_folder_id"        # Drive 資料夾 ID（locat
 META_KEY_SOURCE_URL = "source_url"                  # 使用者原始貼上的 Drive 資料夾 URL（存證）
 META_KEY_PHASE1_STATUS = "phase1_status"            # Phase 1 背景預跑狀態
 META_KEY_PHASE1_UPDATED_AT = "phase1_updated_at"    # Phase 1 狀態最後更新時間
-META_KEY_LAST_SIGNATURE = "last_asset_signature"    # 上次同步的素材簽章（檔名+大小 hash）
+META_KEY_LAST_SIGNATURE = "last_asset_signature"    # 上次同步的素材簽章（檔名+大小+修改時間 hash）
+# 上次同步成功時的每檔遠端指紋 {檔名: "size:mod_time"}；供 _reconcile 比對出「被移除 / 被同名替換」的素材
+META_KEY_REMOTE_MANIFEST = "remote_manifest"
 META_KEY_LAST_SYNCED_AT = "last_synced_at"          # 上次同步完成時間
 META_KEY_SYNC_STATUS = "sync_status"                # 雲端同步狀態
 META_KEY_LAST_SYNC_ERROR = "last_sync_error"        # 上次同步錯誤訊息（成功時清空）

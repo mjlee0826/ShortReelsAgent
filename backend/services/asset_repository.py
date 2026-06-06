@@ -7,8 +7,10 @@ dirty 標記(折進 project_meta.json)」「縮圖」這幾個來源 join 成單
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import tempfile
 from enum import Enum
 from typing import Optional
 from urllib.parse import quote
@@ -24,7 +26,13 @@ from backend.services.asset_discovery import (
 from backend.services.project_meta_store import project_meta_store
 from backend.services.thumbnail_service import ThumbnailService
 from backend.services.user_settings_store import user_settings_store
-from config.app_config import ASSETS_DIR, DEFAULT_BACKEND_URL
+from config.app_config import (
+    ASSETS_DIR,
+    DEFAULT_BACKEND_URL,
+    RAW_SUBDIR,
+    STANDARDIZED_MARKER,
+    STANDARDIZED_SUBDIR,
+)
 from media_processor.pipeline.context import derive_media_kind
 
 # project_meta.json 內逐檔策略 / dirty 相關欄位鍵(具名常數,避免散落 magic string)
@@ -336,6 +344,116 @@ class AssetRepository:
             meta[META_KEY_DIRTY_ASSETS] = sorted(remaining)
 
         project_meta_store.update(project_dir, _mutate)
+
+    def prune_orphaned_artifacts(self, user_id: str, project: str) -> None:
+        """
+        把專案內「對不上磁碟真相」的衍生產物清掉(雲端同步刪檔 / 同名替換後的善後)。
+
+        雲端同步刪掉某 raw 原始檔後,其 standardized 衍生檔、phase1 metadata/status 條目、逐檔策略
+        都會變成孤兒(指向已不存在的素材)。本方法以「磁碟上還有哪些素材」為唯一真相,逐項對齊:
+          1. 刪掉 standardized/ 內找不到對應 raw 原始檔的 _std 衍生檔(來源 raw 已被移除)。
+          2. 剔除 phase1 status / metadata 內素材身分已不存在的條目。
+          3. 剔除 project_meta 逐檔策略 / dirty / analyzed 內已不存在的 relpath。
+        參數無關且可重複執行(idempotent):每次都把狀態收斂到與磁碟一致,亦能修復歷史殘留。
+        全程 best-effort:單項 I/O 失敗只略過該項,不 raise(善後不應反過來卡死同步主流程)。
+        """
+        try:
+            project_dir = self._project_dir(user_id, project)
+        except FileNotFoundError:
+            return
+
+        # 先刪孤兒 standardized 檔,讓後續以 collect_asset_files 取得的「存活素材」名單已反映刪除結果
+        self._prune_orphan_standardized(project_dir)
+        # 磁碟上仍存在的素材身分(relpath)即剔除衍生條目的白名單(與 status/metadata 的鍵同為此身分)
+        alive = set(collect_asset_files(project_dir))
+        self._prune_json_dict(os.path.join(project_dir, PHASE1_STATUS_FILENAME), alive)
+        self._prune_json_list(os.path.join(project_dir, PHASE1_METADATA_FILENAME), alive)
+        self._prune_meta_asset_keys(project_dir, alive)
+
+    @staticmethod
+    def _prune_orphan_standardized(project_dir: str) -> None:
+        """刪掉 standardized/ 內對不到任何 raw 原始檔的 _std 衍生檔(其來源 raw 已被移除)。"""
+        std_dir = os.path.join(project_dir, STANDARDIZED_SUBDIR)
+        if not os.path.isdir(std_dir):
+            return
+        # raw 原始檔 stem 集合;_std 檔以 "{raw_stem}{STANDARDIZED_MARKER}" 命名,比對 stem 即可判斷孤兒
+        raw_stems = {
+            os.path.splitext(f)[0]
+            for f in AssetRepository._listdir_files(os.path.join(project_dir, RAW_SUBDIR))
+        }
+        for std_name in AssetRepository._listdir_files(std_dir):
+            std_stem = os.path.splitext(std_name)[0]
+            if not std_stem.endswith(STANDARDIZED_MARKER):
+                continue  # 非 _std 命名,保守不動(理論上 standardized/ 不該有這類檔)
+            source_stem = std_stem[: -len(STANDARDIZED_MARKER)]
+            if source_stem not in raw_stems:
+                with contextlib.suppress(OSError):
+                    os.remove(os.path.join(std_dir, std_name))
+
+    def _prune_json_dict(self, path: str, alive: set[str]) -> None:
+        """剔除「鍵為素材 relpath」的 JSON dict(phase1 status)內不在 alive 的鍵,有變動才原子寫回。"""
+        data = self._load_json(path)
+        if not isinstance(data, dict):
+            return
+        kept = {k: v for k, v in data.items() if k in alive}
+        if len(kept) != len(data):
+            self._atomic_write_json(path, kept)
+
+    def _prune_json_list(self, path: str, alive: set[str]) -> None:
+        """剔除「每筆含 file relpath」的 JSON list(phase1 metadata)內 file 不在 alive 的條目。"""
+        data = self._load_json(path)
+        if not isinstance(data, list):
+            return
+        kept = [rec for rec in data if rec.get("file") in alive]
+        if len(kept) != len(data):
+            self._atomic_write_json(path, kept)
+
+    @staticmethod
+    def _prune_meta_asset_keys(project_dir: str, alive: set[str]) -> None:
+        """剔除 project_meta 逐檔策略 / dirty / analyzed 內已不存在的 relpath(經鎖內讀-改-寫)。"""
+        def _mutate(meta: dict) -> None:
+            for key in (META_KEY_ASSET_STRATEGIES, META_KEY_ANALYZED_STRATEGIES):
+                mapping = meta.get(key)
+                if isinstance(mapping, dict):
+                    meta[key] = {k: v for k, v in mapping.items() if k in alive}
+            dirty = meta.get(META_KEY_DIRTY_ASSETS)
+            if isinstance(dirty, list):
+                meta[META_KEY_DIRTY_ASSETS] = [r for r in dirty if r in alive]
+
+        project_meta_store.update(project_dir, _mutate)
+
+    @staticmethod
+    def _listdir_files(directory: str) -> list[str]:
+        """列出某目錄下的檔名(僅檔案);目錄不存在或無法讀取回空 list。"""
+        try:
+            return [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
+        except OSError:
+            return []
+
+    @staticmethod
+    def _load_json(path: str):
+        """讀取 JSON;檔不存在 / 損毀 / 無法讀取一律回 None(善後讀取需容錯)。"""
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return None
+
+    @staticmethod
+    def _atomic_write_json(path: str, data) -> None:
+        """以唯一 temp + os.replace 原子寫回 JSON(NFS 上禁 open('w') 直寫,併發會讀到半截檔)。"""
+        directory = os.path.dirname(path)
+        fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=os.path.basename(path) + ".", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, path)
+        except OSError:
+            # 寫回失敗不應中斷善後其他項;清掉殘留 temp 再返回
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_path)
 
     @staticmethod
     def _asset_exists(project_dir: str, path: str) -> bool:
