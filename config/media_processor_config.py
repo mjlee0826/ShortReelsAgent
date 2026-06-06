@@ -27,6 +27,19 @@ STANDARDIZE_MAX_LONG_SIDE = 1920
 # ffmpeg 對靜音影片輸出幾乎空的 wav，小於此 bytes 視為無效音訊
 MINIMUM_AUDIO_FILE_BYTES = 1000
 
+# ── 素材標準化並行度 (MediaStandardizer.standardize_folder) ─────────────────────
+# 標準化的重活都在 ffmpeg / PIL 子行程（subprocess 阻塞時釋放 GIL，故用 thread 即可真正並行，
+# 不需 multiprocess 的 pickle / spawn 開銷）。並行度刻意設「上限」避免共用機（Leibniz）CPU/RAM
+# 超賣：libx264 單檔本就吃滿多核，過高的並行只會互搶核心 + 墊高記憶體峰值。預設保守給 4，
+# 可由 env STANDARDIZE_MAX_WORKERS 覆寫；壞字串視為未設定，回退預設值以保證啟動穩定。
+_STANDARDIZE_MAX_WORKERS_DEFAULT = 4
+try:
+    STANDARDIZE_MAX_WORKERS = max(
+        1, int(os.environ.get("STANDARDIZE_MAX_WORKERS", _STANDARDIZE_MAX_WORKERS_DEFAULT))
+    )
+except ValueError:
+    STANDARDIZE_MAX_WORKERS = _STANDARDIZE_MAX_WORKERS_DEFAULT
+
 # ── 時間碼燒錄 (FFmpegAdapter.burn_timecode) ─────────────────────────────────
 # drawtext filter 的字體大小表達式（相對影片高度）
 TIMECODE_FONT_SIZE_EXPR = "h/15"

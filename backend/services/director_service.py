@@ -2,7 +2,6 @@ import os
 import json
 from datetime import datetime, timezone
 from config.app_config import ASSETS_DIR, RAW_SUBDIR, STANDARDIZED_SUBDIR, TEMP_TEMPLATES_DIR
-from media_processor.video_strategy import VideoStrategy
 from media_processor.pipeline import PipelineRunner, ProgressTracker
 from media_tools.media_standardizer import MediaStandardizer
 from template_engine.template_analyzer_facade import TemplateAnalyzerFacade
@@ -99,7 +98,7 @@ class DirectorService:
         # status_sink 另收每個 asset（含 rejected / error）的精簡狀態供 UI 落地
         status_sink: list[dict] = []
         raw_assets_metadata = self.pipeline_runner.run(
-            asset_files, target_dir, VideoStrategy.SIMPLE, tracker=tracker,
+            asset_files, target_dir, tracker=tracker,
             asset_strategies=asset_strategies, status_sink=status_sink,
         )
         if require_success and not raw_assets_metadata:

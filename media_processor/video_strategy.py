@@ -12,3 +12,9 @@ class VideoStrategy(Enum):
     """
     SIMPLE = "simple"
     COMPLEX = "complex"
+
+
+# 全域影片預設策略：未被 asset_strategies 逐檔覆寫的影片一律走 SIMPLE（本地 Qwen）。
+# 逐檔 COMPLEX（Gemini 深度索引）才是實際的策略切換入口（見 PipelineRunner._build_contexts），
+# 故全域預設收斂為此具名常數、不再對外開放為 run() 參數，避免「呼叫端永遠只能傳 SIMPLE」的死彈性。
+DEFAULT_VIDEO_STRATEGY = VideoStrategy.SIMPLE

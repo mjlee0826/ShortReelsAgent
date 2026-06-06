@@ -33,7 +33,7 @@ from media_processor.pipeline.progress.watchdog import StallWatchdog
 from media_processor.image_strategy import ImageStrategy
 from media_processor.pipeline.scheduler.hybrid_scheduler import HybridScheduler
 from media_processor.pipeline.startup_report import StartupReporter
-from media_processor.video_strategy import VideoStrategy
+from media_processor.video_strategy import DEFAULT_VIDEO_STRATEGY, VideoStrategy
 
 
 class PipelineRunner:
@@ -91,7 +91,6 @@ class PipelineRunner:
         self,
         asset_files: list[str],
         base_dir: str,
-        video_strategy: VideoStrategy,
         tracker: ProgressTracker | None = None,
         asset_strategies: dict[str, str] | None = None,
         status_sink: list[dict] | None = None,
@@ -102,11 +101,10 @@ class PipelineRunner:
         Args:
             asset_files: 已過濾、依輸入順序排列的媒體檔案絕對路徑清單。
             base_dir:    素材資料夾(目前僅供日誌,實際路徑已在 asset_files)。
-            video_strategy: 全域影片策略(SIMPLE / COMPLEX);未被 asset_strategies 逐檔覆寫時沿用。
             tracker: 由呼叫端注入的進度 Tracker(帶外部 job_id 與已訂閱的 WebSocket observer);
                      傳 ``None`` 時自建一個帶隨機 job_id 的 Tracker(CLI / 無前端場景)。
-            asset_strategies: 逐檔策略覆寫表 ``{檔名: "simple"|"complex"}``;
-                              依 media_kind 套到對應的 image / video 策略,未列出者用全域預設。
+            asset_strategies: 逐檔策略覆寫表 ``{檔名: "simple"|"complex"}``;依 media_kind 套到對應的
+                              image / video 策略,未列出者沿用全域預設 ``DEFAULT_VIDEO_STRATEGY``。
             status_sink: 非 None 時,run 結束後把**每個** asset(含 rejected / error)的精簡狀態
                          依輸入順序 append 進此清單,供 UI 層落地全狀態(回傳值仍只收 success)。
 
@@ -114,7 +112,7 @@ class PipelineRunner:
             僅含 ``status == "success"`` 的 metadata dict 列表,**依輸入順序排列**,
             與舊版序列迴圈輸出逐欄一致。
         """
-        contexts = self._build_contexts(asset_files, base_dir, video_strategy, asset_strategies)
+        contexts = self._build_contexts(asset_files, base_dir, asset_strategies)
         if not contexts:
             return []
 
@@ -184,7 +182,6 @@ class PipelineRunner:
         self,
         asset_files: list[str],
         base_dir: str,
-        default_video_strategy: VideoStrategy,
         asset_strategies: dict[str, str] | None = None,
     ) -> list[AssetContext]:
         """
@@ -194,7 +191,7 @@ class PipelineRunner:
         一路貫穿 status / metadata / 策略 meta 的鍵與 blueprint 的 ``clip_id``。``file_path`` 仍為絕對
         路徑(供各 Stage 實際讀檔)。逐檔策略以同一 relpath 為鍵:image 覆寫 ``image_strategy``、
         video 覆寫 ``video_strategy``;未列出的檔案沿用全域預設(image 一律 SIMPLE、video 用
-        default_video_strategy)。
+        ``DEFAULT_VIDEO_STRATEGY``)。
         """
         overrides = asset_strategies or {}
         contexts: list[AssetContext] = []
@@ -211,10 +208,10 @@ class PipelineRunner:
             wants_complex = overrides.get(asset_id) == ImageStrategy.COMPLEX.value
             if media_kind == MediaKind.IMAGE:
                 image_strategy = ImageStrategy.COMPLEX if wants_complex else ImageStrategy.SIMPLE
-                video_strategy = default_video_strategy  # 圖片不會用到,僅佔位
+                video_strategy = DEFAULT_VIDEO_STRATEGY  # 圖片不會用到,僅佔位
             else:
                 image_strategy = ImageStrategy.SIMPLE  # 影片不會用到,僅佔位
-                video_strategy = VideoStrategy.COMPLEX if wants_complex else default_video_strategy
+                video_strategy = VideoStrategy.COMPLEX if wants_complex else DEFAULT_VIDEO_STRATEGY
             contexts.append(
                 AssetContext(
                     asset_id=asset_id,
