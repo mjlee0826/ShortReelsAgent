@@ -9,7 +9,7 @@ from media_processor.models import (
 )
 from media_processor.pipeline.context import AssetContext, STATUS_SUCCESS
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
-from media_processor.pipeline.stages.video_work import VideoWork, get_video_work
+from media_processor.pipeline.work.video_work import VideoWork, get_video_work
 from media_processor.video_strategy import VideoStrategy
 
 _STAGE_NAME = "assembly_video"

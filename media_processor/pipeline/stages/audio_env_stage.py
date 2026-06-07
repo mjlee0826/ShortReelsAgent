@@ -8,7 +8,7 @@ from config.pipeline_config import AUDIO_ENV_BATCH_ENABLED
 from media_processor.pipeline.batch_collector import BatchCollectorRegistry, BatchSpec
 from media_processor.pipeline.context import AssetContext
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
-from media_processor.pipeline.stages.video_work import audio_file_ready, get_video_work
+from media_processor.pipeline.work.video_work import audio_file_ready, get_video_work
 
 if TYPE_CHECKING:
     from model.audio_env_model_manager import AudioEnvModelManager

@@ -4,12 +4,12 @@ from __future__ import annotations
 from config.media_processor_config import MIDDLE_FRAME_POSITION
 from media_processor.pipeline.context import AssetContext
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
-from media_processor.pipeline.stages.frame_analysis import FrameAnalysis
+from media_processor.pipeline.work.frame_analysis import FrameAnalysis
 from media_processor.pipeline.stages.video_frame_utils import (
     extract_video_metadata,
     grab_frame_at_time,
 )
-from media_processor.pipeline.stages.video_work import VIDEO_WORK_KEY, VideoWork
+from media_processor.pipeline.work.video_work import VIDEO_WORK_KEY, VideoWork
 from media_tools.ffmpeg_adapter import FFmpegAdapter
 
 _STAGE_NAME = "decode_video"

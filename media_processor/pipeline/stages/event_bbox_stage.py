@@ -5,7 +5,7 @@ from media_processor.pipeline.context import AssetContext
 from media_processor.pipeline.executor.model_pool_registry import borrow_mediapipe, run_saliency
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
 from media_processor.pipeline.stages.video_frame_utils import compute_saliency_bbox_at_time
-from media_processor.pipeline.stages.video_work import get_video_work
+from media_processor.pipeline.work.video_work import get_video_work
 
 _STAGE_NAME = "event_bbox"
 # 多模態事件清單在 Gemini 結果中的鍵(對齊 ComplexVideoMetadata.multimodal_event_index)

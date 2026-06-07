@@ -4,7 +4,7 @@ from __future__ import annotations
 from media_processor.media_strategy import MediaStrategy
 from media_processor.pipeline.context import AssetContext
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
-from media_processor.pipeline.stages.image_work import get_image_work
+from media_processor.pipeline.work.image_work import get_image_work
 
 _STAGE_NAME = "exif"
 

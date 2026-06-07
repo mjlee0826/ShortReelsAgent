@@ -8,7 +8,7 @@ from config.pipeline_config import WHISPER_BATCH_ENABLED
 from media_processor.pipeline.batch_collector import BatchCollectorRegistry, BatchSpec
 from media_processor.pipeline.context import AssetContext
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
-from media_processor.pipeline.stages.video_work import get_video_work
+from media_processor.pipeline.work.video_work import get_video_work
 
 if TYPE_CHECKING:
     from model.whisper_model_manager import WhisperModelManager

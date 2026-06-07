@@ -4,7 +4,7 @@ from __future__ import annotations
 from media_processor.pipeline.context import AssetContext
 from media_processor.pipeline.executor.model_pool_registry import borrow_mediapipe
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
-from media_processor.pipeline.stages.frame_analysis import get_frame_analysis
+from media_processor.pipeline.work.frame_analysis import get_frame_analysis
 
 _STAGE_NAME = "face_detect"
 

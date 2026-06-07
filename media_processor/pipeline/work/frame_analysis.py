@@ -51,7 +51,7 @@ def get_frame_analysis(context: AssetContext) -> FrameAnalysis:
     ``video_work``(兩者 import 本模組的 FrameAnalysis)形成 import 循環,此處採延遲 import。
     """
     if context.media_kind == MediaKind.IMAGE:
-        from media_processor.pipeline.stages.image_work import get_image_work
+        from media_processor.pipeline.work.image_work import get_image_work
         return get_image_work(context).frame
-    from media_processor.pipeline.stages.video_work import get_video_work
+    from media_processor.pipeline.work.video_work import get_video_work
     return get_video_work(context).frame

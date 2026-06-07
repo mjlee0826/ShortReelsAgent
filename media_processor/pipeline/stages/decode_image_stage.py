@@ -6,8 +6,8 @@ from PIL import Image
 
 from media_processor.pipeline.context import AssetContext
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
-from media_processor.pipeline.stages.frame_analysis import FrameAnalysis
-from media_processor.pipeline.stages.image_work import IMAGE_WORK_KEY, ImageWork
+from media_processor.pipeline.work.frame_analysis import FrameAnalysis
+from media_processor.pipeline.work.image_work import IMAGE_WORK_KEY, ImageWork
 from media_processor.pipeline.stages.video_frame_utils import cap_pil_resolution
 
 # HEIC/HEIF 支援:與既有 processor 一致,在模組載入時註冊(idempotent)

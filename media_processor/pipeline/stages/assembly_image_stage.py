@@ -5,7 +5,7 @@ from media_processor.media_strategy import MediaStrategy
 from media_processor.models import ImageMetadata, ProcessorResult
 from media_processor.pipeline.context import AssetContext, STATUS_SUCCESS
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
-from media_processor.pipeline.stages.image_work import get_image_work
+from media_processor.pipeline.work.image_work import get_image_work
 
 _STAGE_NAME = "assembly_image"
 # 品質分數輸出位數(逐字對齊原 process() 的 round(score, 2))

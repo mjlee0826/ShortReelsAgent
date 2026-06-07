@@ -5,7 +5,7 @@ import tempfile
 
 from media_processor.pipeline.context import AssetContext
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
-from media_processor.pipeline.stages.video_work import get_video_work
+from media_processor.pipeline.work.video_work import get_video_work
 from media_tools.ffmpeg_adapter import FFmpegAdapter
 
 _STAGE_NAME = "audio_extraction"

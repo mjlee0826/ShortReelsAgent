@@ -8,7 +8,7 @@ from config.pipeline_config import MUSIQ_BATCH_ENABLED
 from media_processor.pipeline.batch_collector import BatchCollectorRegistry, BatchSpec
 from media_processor.pipeline.context import AssetContext
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
-from media_processor.pipeline.stages.frame_analysis import get_frame_analysis
+from media_processor.pipeline.work.frame_analysis import get_frame_analysis
 
 if TYPE_CHECKING:
     # 僅型別提示用;執行期改在 _engine() / batch fn 內 lazy import,維持 EAGER_MODELS=false 語意

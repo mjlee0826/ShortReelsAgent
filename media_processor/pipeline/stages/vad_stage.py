@@ -4,7 +4,7 @@ from __future__ import annotations
 from media_processor.pipeline.context import AssetContext
 from media_processor.pipeline.executor.model_pool_registry import run_vad
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
-from media_processor.pipeline.stages.video_work import audio_file_ready, get_video_work
+from media_processor.pipeline.work.video_work import audio_file_ready, get_video_work
 
 _STAGE_NAME = "vad"
 

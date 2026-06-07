@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from media_processor.pipeline.context import AssetContext
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
-from media_processor.pipeline.stages.video_work import get_video_work
+from media_processor.pipeline.work.video_work import get_video_work
 from template_engine.scene_cut_extractor import SceneCutExtractor
 
 _STAGE_NAME = "scene_cut"

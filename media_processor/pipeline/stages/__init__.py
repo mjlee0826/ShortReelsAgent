@@ -11,10 +11,10 @@ from media_processor.pipeline.stages.cv_features_stage import CVFeaturesStage
 from media_processor.pipeline.stages.decode_image_stage import DecodeImageStage
 from media_processor.pipeline.stages.exif_stage import ExifStage
 from media_processor.pipeline.stages.face_detect_stage import FaceDetectStage
-from media_processor.pipeline.stages.image_work import IMAGE_WORK_KEY, ImageWork
-from media_processor.pipeline.stages.legacy_base import LegacyProcessStage
-from media_processor.pipeline.stages.legacy_image_stage import LegacyImagePipelineStage
-from media_processor.pipeline.stages.legacy_video_stage import LegacyVideoPipelineStage
+from media_processor.pipeline.work.image_work import IMAGE_WORK_KEY, ImageWork
+from media_processor.pipeline.stages.legacy.legacy_base import LegacyProcessStage
+from media_processor.pipeline.stages.legacy.legacy_image_stage import LegacyImagePipelineStage
+from media_processor.pipeline.stages.legacy.legacy_video_stage import LegacyVideoPipelineStage
 from media_processor.pipeline.stages.reject_filter_stage import RejectFilterStage
 from media_processor.pipeline.stages.saliency_stage import SaliencyStage
 from media_processor.pipeline.stages.semantic_image_stage import SemanticImageStage

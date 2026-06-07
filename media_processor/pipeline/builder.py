@@ -29,7 +29,7 @@ from media_processor.pipeline.stages.tech_score_stage import TechScoreStage
 from media_processor.pipeline.stages.assembly_image_stage import AssemblyImageStage
 from media_processor.pipeline.stages.decode_image_stage import DecodeImageStage
 from media_processor.pipeline.stages.exif_stage import ExifStage
-from media_processor.pipeline.stages.legacy_image_stage import LegacyImagePipelineStage
+from media_processor.pipeline.stages.legacy.legacy_image_stage import LegacyImagePipelineStage
 from media_processor.pipeline.stages.saliency_stage import SaliencyStage
 from media_processor.pipeline.stages.semantic_image_stage import SemanticImageStage
 
@@ -39,7 +39,7 @@ from media_processor.pipeline.stages.audio_env_stage import AudioEnvStage
 from media_processor.pipeline.stages.audio_extraction_stage import AudioExtractionStage
 from media_processor.pipeline.stages.decode_video_stage import DecodeVideoStage
 from media_processor.pipeline.stages.event_bbox_stage import EventBboxStage
-from media_processor.pipeline.stages.legacy_video_stage import LegacyVideoPipelineStage
+from media_processor.pipeline.stages.legacy.legacy_video_stage import LegacyVideoPipelineStage
 from media_processor.pipeline.stages.motion_intensity_stage import MotionIntensityStage
 from media_processor.pipeline.stages.saliency_union_stage import SaliencyUnionStage
 from media_processor.pipeline.stages.scene_cut_stage import SceneCutStage

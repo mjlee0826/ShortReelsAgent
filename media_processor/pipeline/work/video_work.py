@@ -19,7 +19,7 @@ from typing import Any, Optional
 from config.media_processor_config import MINIMUM_AUDIO_FILE_BYTES
 from media_processor.models import SubjectBbox
 from media_processor.pipeline.context import AssetContext
-from media_processor.pipeline.stages.frame_analysis import FrameAnalysis
+from media_processor.pipeline.work.frame_analysis import FrameAnalysis
 
 # AssetContext.scratch 中存放 VideoWork 的唯一鍵;集中為常數避免 magic string 散落各 Stage
 VIDEO_WORK_KEY = "video"

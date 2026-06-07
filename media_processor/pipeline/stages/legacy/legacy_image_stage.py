@@ -1,7 +1,7 @@
 """LegacyImagePipelineStage:圖片的 process() 整段包裝 Stage。"""
 from __future__ import annotations
 
-from media_processor.pipeline.stages.legacy_base import LegacyProcessStage
+from media_processor.pipeline.stages.legacy.legacy_base import LegacyProcessStage
 
 # Stage 名稱常數,供進度事件與日誌標示,避免散落 magic string
 _STAGE_NAME = "legacy_image"

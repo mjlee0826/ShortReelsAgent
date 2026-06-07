@@ -5,7 +5,7 @@ from config.media_processor_config import TECHNICAL_SCORE_FILTER_THRESHOLD
 from media_processor.models import ProcessorResult
 from media_processor.pipeline.context import AssetContext, STATUS_REJECTED
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
-from media_processor.pipeline.stages.frame_analysis import get_frame_analysis
+from media_processor.pipeline.work.frame_analysis import get_frame_analysis
 
 _STAGE_NAME = "reject_filter"
 

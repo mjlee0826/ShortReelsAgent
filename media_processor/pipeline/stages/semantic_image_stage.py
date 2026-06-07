@@ -7,7 +7,7 @@ from config.pipeline_config import GPU_POOL_ENABLED
 from media_processor.image_strategy import ImageStrategy
 from media_processor.pipeline.context import AssetContext
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
-from media_processor.pipeline.stages.image_work import get_image_work
+from media_processor.pipeline.work.image_work import get_image_work
 from prompt_manager.task_mode import TaskMode
 
 if TYPE_CHECKING:
