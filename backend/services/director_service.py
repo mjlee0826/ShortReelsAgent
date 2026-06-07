@@ -71,6 +71,25 @@ class DirectorService:
             return os.path.join(self.base_assets_path, user_id, folder_name)
         return os.path.join(self.base_assets_path, folder_name)
 
+    def _require_target_dir(self, folder_name: str, user_id: str = None) -> str:
+        """解析素材資料夾路徑並確認存在；不存在拋 ValueError（四個 Phase 1 / 標準化進入點共用）。"""
+        target_dir = self._resolve_target_dir(folder_name, user_id)
+        if not os.path.isdir(target_dir):
+            raise ValueError(f"找不到素材資料夾: {target_dir}")
+        return target_dir
+
+    def _standardize(self, target_dir: str) -> None:
+        """
+        標準化某專案素材：掃 raw/ 原始檔，``_std`` 衍生檔輸出到 standardized/（分層，解計數錯亂）。
+
+        idempotent（standardize_folder 對已存在的 ``_std`` 跳過），故各 Phase 1 進入點都先呼叫一次
+        確保素材身分穩定；重複呼叫只是再掃一次目錄、不重轉。集中於此避免三個進入點各寫一份路徑組裝。
+        """
+        self.standardizer.standardize_folder(
+            os.path.join(target_dir, RAW_SUBDIR),
+            os.path.join(target_dir, STANDARDIZED_SUBDIR),
+        )
+
     def run_phase1(self, folder_name: str, user_id: str = None,
                    tracker: ProgressTracker = None,
                    asset_filenames: list[str] = None,
@@ -89,15 +108,10 @@ class DirectorService:
 
         回傳 success-only 的 raw_assets_metadata 列表。
         """
-        target_dir = self._resolve_target_dir(folder_name, user_id)
-        if not os.path.isdir(target_dir):
-            raise ValueError(f"找不到素材資料夾: {target_dir}")
+        target_dir = self._require_target_dir(folder_name, user_id)
 
-        # 標準化:掃 raw/ 原始檔,_std 衍生檔輸出到 standardized/(分層,解計數錯亂)
-        self.standardizer.standardize_folder(
-            os.path.join(target_dir, RAW_SUBDIR),
-            os.path.join(target_dir, STANDARDIZED_SUBDIR),
-        )
+        # 標準化:讓素材身分穩定(raw → standardized 分層)再收集
+        self._standardize(target_dir)
 
         # 收集待處理素材身分(relpath,如 raw/photo.jpg);子集重分析只留指定 relpath
         asset_relpaths = collect_asset_files(target_dir)
@@ -140,15 +154,10 @@ class DirectorService:
         首次同步時 status 檔為空 → select_pending 回全部 → 等同全量跑(正確);之後只跑新檔。
         無 user_id(CLI / 無認證)時退回整批分析(維持相容)。
         """
-        target_dir = self._resolve_target_dir(folder_name, user_id)
-        if not os.path.isdir(target_dir):
-            raise ValueError(f"找不到素材資料夾: {target_dir}")
-
-        # 先標準化,讓 select_pending 看到的是標準化後的素材身分(raw/std 分層)
-        self.standardizer.standardize_folder(
-            os.path.join(target_dir, RAW_SUBDIR),
-            os.path.join(target_dir, STANDARDIZED_SUBDIR),
-        )
+        # 先標準化(注意順序):新下載的 .mov/.heic 須先轉成 _std 身分,select_pending 才不會算出
+        # 原始檔身分而與 run_phase1 標準化後對不上被過濾成空(見本方法 docstring 的關鍵順序說明)
+        target_dir = self._require_target_dir(folder_name, user_id)
+        self._standardize(target_dir)
 
         # 無 user_id 無法套用逐檔策略 / per-file 狀態,退回整批分析
         if not user_id:
@@ -168,6 +177,25 @@ class DirectorService:
         # 補跑完成,推進這些素材的 dirty / 已分析基準
         self.asset_repository.clear_dirty(user_id, folder_name, pending, used_strategies=strategies)
         return success
+
+    def standardize_project(self, folder_name: str, user_id: str = None) -> None:
+        """
+        只對某專案做素材標準化(raw → standardized),不跑感知分析。
+
+        供雲端同步在「使用者關閉自動分析」時也先把 .mov/.heic 等轉成 ``_std`` 身分:讓素材身分在
+        使用者進素材頁前就穩定(避免日後「開始生成」因身分漂移而漏跑 Phase 1),也讓前端能預覽
+        已處理素材。刻意**不動 phase1_status**(那由雲端同步狀態機管理,此處僅標準化),只順手刷新
+        總覽用的 asset_count(標準化後 raw 轉檔源被 ``_std`` 取代、去重後數量可能變動)。
+        """
+        target_dir = self._require_target_dir(folder_name, user_id)
+        self._standardize(target_dir)
+
+        # 原子刷新總覽計數(欄位名與 _update_project_meta 一致);只動計數,不碰 phase1_status 等欄位
+        def _refresh_count(meta: dict) -> None:
+            """就地刷新去重後素材數與最後變動時間(不碰其餘欄位)。"""
+            meta["asset_count"] = len(collect_asset_files(target_dir))
+            meta["last_modified"] = datetime.now(timezone.utc).isoformat()
+        project_meta_store.update(target_dir, _refresh_count)
 
     def _dump_phase1_metadata(self, target_dir: str, success_assets: list[dict],
                               reprocessed_ids: set, merge: bool) -> None:
@@ -242,9 +270,7 @@ class DirectorService:
                     tracker: ProgressTracker = None):
         """執行完整生成工作流；tracker 非 None 時把 Phase 1 進度事件廣播給其訂閱者（WebSocket）。"""
         # 若有 user_id，素材路徑改為 assets/{user_id}/{folder_name}/，實現使用者資料隔離
-        target_dir = self._resolve_target_dir(folder_name, user_id)
-        if not os.path.isdir(target_dir):
-            raise ValueError(f"找不到素材資料夾: {target_dir}")
+        target_dir = self._require_target_dir(folder_name, user_id)
         
         # --- 定義各階段的 JSON 儲存路徑 ---
         phase1_dump_path = os.path.join(target_dir, PHASE1_METADATA_FILENAME)

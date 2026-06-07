@@ -16,7 +16,7 @@ import json
 import os
 import tempfile
 import threading
-from typing import Callable, Optional
+from typing import Callable, ContextManager, Optional
 
 from config.app_config import ASSETS_DIR, RAW_SUBDIR
 from config.project_artifacts import PROJECT_META_FILENAME
@@ -39,6 +39,7 @@ from ingestion_engine.models import (
     META_KEY_SYNC_STATUS,
     PHASE1_STATUS_DONE,
     PHASE1_STATUS_FAILED,
+    PHASE1_STATUS_INGESTING,
     PHASE1_STATUS_PROCESSING,
     PHASE1_STATUS_SKIPPED,
     RemoteEntry,
@@ -55,6 +56,13 @@ Phase1Runner = Callable[[str, str], None]
 # 衍生產物清理 callback 型別：吃 (user_id, project_name)，把該 project 內「對不上磁碟的衍生產物」
 # （孤兒 standardized 檔、phase1 metadata/status、逐檔策略）清掉。實作在 backend 並以注入避免循環 import。
 ArtifactPruner = Callable[[str, str], None]
+# ingest 執行護衛 callback 型別：吃 (user_id, project_name) 回 context manager。進入時取得該 project
+# 的 Phase 1 執行鎖（標 ingesting），讓「下載 + 標準化 + 自動分析」整段與素材頁/編輯頁的手動分析
+# 互斥；搶不到鎖（前景正在分析）則 raise Phase1DeferredError。離開時釋放鎖。實作在 backend 並注入。
+IngestGuard = Callable[[str, str], ContextManager]
+# 標準化 callback 型別：吃 (user_id, project_name)，只對該 project 做 raw→standardized 標準化
+# （不跑感知分析）。供「關閉自動分析」時也先穩定素材身分。實作在 backend 並以注入避免循環 import。
+StandardizeRunner = Callable[[str, str], None]
 
 
 class CloudIngestionService:
@@ -65,12 +73,17 @@ class CloudIngestionService:
         adapter: CloudStorageAdapter,
         phase1_runner: Phase1Runner,
         artifact_pruner: ArtifactPruner,
+        ingest_guard: IngestGuard,
+        standardize_runner: StandardizeRunner,
         base_dir: str = ASSETS_DIR,
     ):
-        """注入雲端 adapter、Phase 1 觸發 callback 與衍生產物清理 callback；base_dir 為素材根目錄。"""
+        """注入雲端 adapter、Phase 1 觸發 / 衍生產物清理 / ingest 護衛 / 標準化 callback；base_dir 為素材根目錄。"""
         self._adapter = adapter
         self._phase1_runner = phase1_runner
         self._prune_artifacts = artifact_pruner
+        # ingest 護衛(取/放 Phase 1 執行鎖,標 ingesting)與只做標準化的 callback;見上方型別註解
+        self._ingest_guard = ingest_guard
+        self._standardize = standardize_runner
         self._base_dir = base_dir
         # 每個 project 一把鎖，序列化 poller 與手動 sync 對同一 project 的並發同步
         self._locks: dict[str, threading.Lock] = {}
@@ -143,12 +156,47 @@ class CloudIngestionService:
         if unchanged:
             return self._mark_synced(project_dir, report)
 
+        # 有變動的處理(汰除舊檔 → 下載 → 標準化 / 分析)整段需與素材頁/編輯頁的手動 Phase 1 互斥:
+        # 進入 ingest 護衛取得該 project 的 Phase 1 執行鎖(標 ingesting),讓使用者無法在素材尚未下載/
+        # 標準化完成時就自己跑 Phase 1。搶不到鎖(前景正在分析)即 raise Phase1DeferredError → 本輪
+        # 略過、保留狀態待下輪重試;離開時釋放鎖。取鎖順序恆為「同步鎖 → Phase 1 鎖」,無死鎖。
+        try:
+            with self._ingest_guard(user_id, project_name):
+                return self._ingest_changed(
+                    user_id, project_name, project_dir, meta, remote_fp, signature, report
+                )
+        except Phase1DeferredError as exc:
+            # 前景已有 Phase 1 在跑:本輪不下載/不分析、不前進簽章,保留狀態讓下輪 poller 重試
+            print(f"[CloudIngestion] {exc}")
+            return self._mark_synced(project_dir, report)
+
+    def _ingest_changed(
+        self,
+        user_id: str,
+        project_name: str,
+        project_dir: str,
+        meta: dict,
+        remote_fp: dict[str, str],
+        signature: str,
+        report: SyncReport,
+    ) -> SyncReport:
+        """
+        在已持有 Phase 1 執行鎖(ingesting)下處理「偵測到素材變動」:
+        汰除舊檔 → 下載 → 一律標準化 →（依設定）跑 Phase 1 或僅標準化後標 SKIPPED。
+
+        進入即把 phase1_status 標 INGESTING(下載 / 標準化階段;auto-on/off 皆然):驅動素材頁與專案
+        卡片顯示「處理素材中」,且中途崩潰時下輪 poller 會因非「已收斂」而重抓重做(idempotent),狀態
+        自癒。auto-on 真正進入感知分析前再翻成 PROCESSING(分析中),讓兩階段在 UI 上可區分。
+        """
+        # 進入處理即標 INGESTING:下載 / 標準化共用此狀態,前端據此顯示「處理素材中」轉圈
+        self._patch_meta(project_dir, {META_KEY_PHASE1_STATUS: PHASE1_STATUS_INGESTING})
+
         # 對齊遠端：把「被移除 / 被同名替換」的本地素材連同其衍生產物先汰除，
         # 確保 changed 之後會重抓重轉重析、removed 徹底消失（download 只增不刪，故須在此主動刪）。
         self._evict_stale_assets(user_id, project_name, project_dir, meta, remote_fp, report)
 
         # 有新增／替換素材：先下載到 raw/（原始檔分層；adapter 會自建目標目錄）
-        # 下載失敗不應留下 processing 假象；「已存在且同大小跳過」的增量判斷因此改看 raw/
+        # 「已存在且同大小跳過」的增量判斷看 raw/
         folder_id = meta[META_KEY_DRIVE_FOLDER_ID]
         raw_dir = os.path.join(project_dir, RAW_SUBDIR)
         try:
@@ -162,10 +210,11 @@ class CloudIngestionService:
         # signature 記「已分析到哪」）。如此 Phase 1 失敗下輪重試時不會把剛抓好的檔當 changed 再刪一次。
         self._patch_meta(project_dir, {META_KEY_REMOTE_MANIFEST: remote_fp})
 
-        # 使用者設定「建立後不自動分析」：素材已下載，但刻意略過 Phase 1，待其到素材頁手動觸發。
-        # 標 SKIPPED + 更新簽章，讓本輪與後續 poller 都視為已收斂、不再重複觸發分析。
-        # 缺鍵預設 True，使本欄位導入前建立的舊專案維持原本自動分析行為（零破壞）。
+        # 使用者設定「建立後不自動分析」：仍先標準化(讓 .mov/.heic 轉成 _std、素材身分穩定、前端可預覽),
+        # 只刻意略過感知分析,待其到素材頁手動觸發。標 SKIPPED + 更新簽章,讓本輪與後續 poller 都視為
+        # 已收斂、不再重複觸發。缺鍵預設 True,使本欄位導入前建立的舊專案維持原本自動分析行為（零破壞）。
         if not meta.get(META_KEY_AUTO_ANALYZE, True):
+            self._standardize(user_id, project_name)
             self._patch_meta(project_dir, {
                 META_KEY_PHASE1_STATUS: PHASE1_STATUS_SKIPPED,
                 META_KEY_PHASE1_UPDATED_AT: _now_iso(),
@@ -173,15 +222,12 @@ class CloudIngestionService:
             })
             return self._mark_synced(project_dir, report)
 
-        # 觸發 Phase 1：失敗只標 failed、保留舊簽章供下輪重試，不視為同步失敗
+        # 自動分析：跑 Phase 1（其內 run_phase1_incremental 已含標準化）；失敗只標 failed、保留舊簽章
+        # 供下輪重試,不視為同步失敗。鎖已由 ingest 護衛持有,_phase1_runner 不再自行取鎖（避免重入）。
+        # 真正進入感知分析前翻成 PROCESSING(分析中):與 INGESTING(處理素材中)在 UI 上區分兩階段。
         self._patch_meta(project_dir, {META_KEY_PHASE1_STATUS: PHASE1_STATUS_PROCESSING})
         try:
             self._phase1_runner(user_id, project_name)
-        except Phase1DeferredError as exc:
-            # 前景已有 Phase 1 在跑(編輯頁 / 素材頁):本輪不分析、不前進簽章、不標 failed,
-            # 保留 PROCESSING 讓下輪 poller(簽章仍未收斂)重觸發,避免雙重佔用 GPU。
-            print(f"[CloudIngestion] {exc}")
-            return self._mark_synced(project_dir, report)
         except Exception as exc:  # noqa: BLE001 - Phase 1 任何失敗都只隔離此 project
             self._patch_meta(project_dir, {
                 META_KEY_PHASE1_STATUS: PHASE1_STATUS_FAILED,

@@ -23,7 +23,10 @@ SYNC_STATUS_ERROR = "error"                     # 其他同步錯誤（暫時性
 
 # ── project 的 Phase 1 背景預跑狀態（寫入 project_meta.json，供 REST 觀測）──────────
 PHASE1_STATUS_PENDING = "pending"        # 已建 project，尚未開始分析
-PHASE1_STATUS_PROCESSING = "processing"  # Phase 1 進行中
+# 正在下載 / 標準化素材，尚未進入感知分析；與 PROCESSING 同為「未收斂」的過渡狀態，但供前端區分
+# 「處理素材中」與「分析中」（關閉自動分析時整段下載+標準化都停在此狀態，不會進 PROCESSING）。
+PHASE1_STATUS_INGESTING = "ingesting"
+PHASE1_STATUS_PROCESSING = "processing"  # Phase 1 感知分析進行中
 PHASE1_STATUS_DONE = "done"              # Phase 1 完成
 PHASE1_STATUS_FAILED = "failed"          # Phase 1 失敗
 # 已下載素材，但依使用者設定「建立後不自動分析」而刻意略過 Phase 1，待使用者到素材頁手動觸發。

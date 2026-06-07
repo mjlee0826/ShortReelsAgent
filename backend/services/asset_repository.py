@@ -35,6 +35,7 @@ from config.app_config import (
     STANDARDIZED_MARKER,
     STANDARDIZED_SUBDIR,
 )
+from config.media_formats import NEEDS_STANDARDIZE_EXTENSIONS
 from media_processor.pipeline.context import derive_media_kind
 
 # project_meta.json 內逐檔策略 / dirty 相關欄位鍵(具名常數,避免散落 magic string)
@@ -181,6 +182,11 @@ class AssetRepository:
 
         views: list[AssetView] = []
         for relpath in collect_asset_files(project_dir):
+            # 隱藏「待標準化的原始檔」(raw/ 下的 .mov/.heic 等、尚無 _std 版):讓使用者只看到處理後素材。
+            # collect_asset_files 已丟掉「已有 _std 版」的 raw,故此處留下的這類 raw 必定尚未標準化
+            # (雲端同步會先 standardize,標準化後它就以 standardized 身分出現;這段只擋處理中的短暫視窗)。
+            if _is_pending_standardize(relpath):
+                continue
             file_path = to_abs_path(project_dir, relpath)
             filename = os.path.basename(relpath)
             try:
@@ -489,3 +495,13 @@ class AssetRepository:
 def _iso_from_mtime(mtime: float) -> str:
     """把檔案 mtime(unix 秒)轉成 UTC ISO8601 字串(與專案其餘時間格式一致)。"""
     return datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
+
+
+def _is_pending_standardize(relpath: str) -> bool:
+    """
+    判斷某素材是否為「尚未標準化的原始檔」(``raw/`` 下且副檔名屬待轉檔格式,如 .mov/.heic);
+    供 list_assets 顯示層隱藏。副檔名集合取自 config.media_formats 的單一來源(與 standardizer 同步)。
+    """
+    if not relpath.startswith(f"{RAW_SUBDIR}/"):
+        return False
+    return os.path.splitext(relpath)[1].lower() in NEEDS_STANDARDIZE_EXTENSIONS

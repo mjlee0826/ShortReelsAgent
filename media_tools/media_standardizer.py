@@ -5,22 +5,28 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
 from config.app_config import STANDARDIZED_MARKER
+from config.media_formats import HEIC_IMAGE_EXTENSIONS, TRANSCODE_VIDEO_EXTENSIONS
 from config.media_processor_config import STANDARDIZE_MAX_LONG_SIDE, STANDARDIZE_MAX_WORKERS
 from media_tools.ffmpeg_adapter import FFmpegAdapter
 
-# 一律轉檔的視訊容器副檔名（非 .mp4：含 iPhone .mov HEVC 與其他非網頁友善容器）
-_TRANSCODE_ALWAYS_VIDEO_EXT = (".mov", ".avi", ".mkv", ".webm")
+# 一律轉檔的視訊容器副檔名（非 .mp4：含 iPhone .mov HEVC 與其他非網頁友善容器）／HEIC 圖片副檔名
+# 改由 config.media_formats 提供單一來源（asset_repository 顯示層隱藏未標準化原始檔時共用同一份）
+_TRANSCODE_ALWAYS_VIDEO_EXT = TRANSCODE_VIDEO_EXTENSIONS
 # 需閘控的視訊副檔名（.mp4 已是網頁友善，僅在超過解析度上限時才轉，避免重編碼已合規檔案）
 _GATED_VIDEO_EXT = ".mp4"
 # HEIC/HEIF 圖片副檔名（瀏覽器不支援，需轉 JPG）
-_HEIC_IMAGE_EXT = (".heic", ".heif")
+_HEIC_IMAGE_EXT = HEIC_IMAGE_EXTENSIONS
 # 標準化輸出檔名的中綴標記：原始檔 stem 後接「STANDARDIZED_MARKER + .」（已含此標記者跳過，避免 _std_std）
 _STD_MARKER = f"{STANDARDIZED_MARKER}."
 # 轉檔中途檔副檔名：刻意用「非媒體白名單」副檔名（見 asset_discovery.SUPPORTED_MEDIA_EXTENSIONS），
 # 讓 collect_asset_files 在轉檔進行中不會把這個半成品檔列入素材清單，前端也就 probe 不到它
 _TEMP_OUTPUT_SUFFIX = ".mp4.part"
+# HEIC→JPG 原子寫的中途檔副檔名（同理為非媒體白名單，存檔完成才 os.replace 成最終 _std.jpg）
+_TEMP_IMAGE_SUFFIX = ".jpg.part"
 # 中途檔強制以 mp4 muxer 輸出：因副檔名已非 .mp4，ffmpeg 無法從副檔名推斷容器，需顯式指定
 _MP4_MUXER = "mp4"
+# JPEG 輸出品質（HEIC→JPG；具名常數，避免 magic number）
+_JPEG_QUALITY = 95
 
 
 class MediaStandardizer:
@@ -193,14 +199,34 @@ class MediaStandardizer:
             pass
 
     def _convert_image_to_jpg(self, input_path: str, output_path: str) -> bool:
-        """處理 HEIC 轉 JPG"""
+        """
+        HEIC/HEIF 轉 JPG（原子寫）。
+
+        先寫到同目錄「非媒體副檔名」中途檔，存檔完整成功後才以 ``os.replace`` 改名成最終
+        ``_std.jpg``：與 ``_convert_to_h264`` 同手法，確保 reader（縮圖 / ``collect_asset_files`` /
+        瀏覽器）只看到「尚未出現」或「完整檔」，不會讀到 PIL 半寫的 JPG —— 多次 standardize
+        併發於同一檔時亦不互相覆蓋出壞圖。中途檔放同目錄確保 rename 在同檔案系統內為原子操作。
+        """
+        output_dir = os.path.dirname(output_path)
+        # 中途檔：非媒體白名單副檔名，轉檔進行中不被列入素材清單、reader 也 probe 不到半成品
+        fd, temp_path = tempfile.mkstemp(
+            prefix=".tmp_convert_", suffix=_TEMP_IMAGE_SUFFIX, dir=output_dir
+        )
+        os.close(fd)  # PIL 會自行開檔寫入，此處只需檔名
         try:
             from PIL import Image
             import pillow_heif
             heif_file = pillow_heif.read_heif(input_path)
-            image = Image.frombytes(heif_file.mode, heif_file.size, heif_file.data, "raw", heif_file.mode, heif_file.stride)
-            image.save(output_path, "JPEG", quality=95)
+            image = Image.frombytes(
+                heif_file.mode, heif_file.size, heif_file.data,
+                "raw", heif_file.mode, heif_file.stride,
+            )
+            image.save(temp_path, "JPEG", quality=_JPEG_QUALITY)
+            # 完整存檔成功才原子改名成最終身分：reader 不會看到半成品
+            os.replace(temp_path, output_path)
             return True
         except Exception as e:
+            # 失敗時清掉中途檔，避免殘留垃圾；最終 _std.jpg 從未出現，idempotent 重跑時會自動重轉
+            self._remove_quietly(temp_path)
             print(f"   ❌ 圖片轉檔失敗: {e}")
             return False

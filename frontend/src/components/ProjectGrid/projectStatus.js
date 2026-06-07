@@ -14,6 +14,8 @@ export const SOURCE_GDRIVE = 'gdrive';
 /** Phase 1 背景預跑狀態。 */
 const PHASE1_STATUS = {
   PENDING: 'pending',
+  // 正在下載 / 標準化素材（尚未進入感知分析）；呈現「處理素材中」
+  INGESTING: 'ingesting',
   PROCESSING: 'processing',
   DONE: 'done',
   FAILED: 'failed',
@@ -35,6 +37,7 @@ export const PROJECT_STATUS = {
   AUTH_EXPIRED: 'auth_expired',
   SYNC_FAILED: 'sync_failed',
   ANALYZE_FAILED: 'analyze_failed',
+  INGESTING: 'ingesting',
   ANALYZING: 'analyzing',
   WAITING: 'waiting',
   EDITABLE: 'editable',
@@ -50,6 +53,7 @@ export const STATUS_META = {
   [PROJECT_STATUS.AUTH_EXPIRED]: { key: PROJECT_STATUS.AUTH_EXPIRED, tone: 'danger', label: '授權失效', pulse: false },
   [PROJECT_STATUS.SYNC_FAILED]: { key: PROJECT_STATUS.SYNC_FAILED, tone: 'danger', label: '同步失敗', pulse: false },
   [PROJECT_STATUS.ANALYZE_FAILED]: { key: PROJECT_STATUS.ANALYZE_FAILED, tone: 'danger', label: '分析失敗', pulse: false },
+  [PROJECT_STATUS.INGESTING]: { key: PROJECT_STATUS.INGESTING, tone: 'info', label: '處理素材中', pulse: true },
   [PROJECT_STATUS.ANALYZING]: { key: PROJECT_STATUS.ANALYZING, tone: 'info', label: '分析中', pulse: true },
   [PROJECT_STATUS.WAITING]: { key: PROJECT_STATUS.WAITING, tone: 'info', label: '等待分析', pulse: false },
   [PROJECT_STATUS.EDITABLE]: { key: PROJECT_STATUS.EDITABLE, tone: 'success', label: '可編輯', pulse: false },
@@ -71,16 +75,18 @@ export function deriveProjectStatus(project) {
   if (project.last_sync_error || project.sync_status === SYNC_STATUS.ERROR) return STATUS_META[PROJECT_STATUS.SYNC_FAILED];
   // 3. Phase 1 分析失敗
   if (project.phase1_status === PHASE1_STATUS.FAILED) return STATUS_META[PROJECT_STATUS.ANALYZE_FAILED];
-  // 4. 分析中（脈動）
+  // 4. 下載 / 標準化素材中（尚未進入感知分析；脈動）
+  if (project.phase1_status === PHASE1_STATUS.INGESTING) return STATUS_META[PROJECT_STATUS.INGESTING];
+  // 5. 分析中（脈動）
   if (project.phase1_status === PHASE1_STATUS.PROCESSING) return STATUS_META[PROJECT_STATUS.ANALYZING];
-  // 5. 等待分析（已建立尚未開始，或已下載但依設定刻意略過自動分析、待手動觸發）
+  // 6. 等待分析（已建立尚未開始，或已下載但依設定刻意略過自動分析、待手動觸發）
   if (project.phase1_status === PHASE1_STATUS.PENDING ||
       project.phase1_status === PHASE1_STATUS.SKIPPED) return STATUS_META[PROJECT_STATUS.WAITING];
-  // 6. 已有藍圖 → 可進編輯器編輯
+  // 7. 已有藍圖 → 可進編輯器編輯
   if (project.has_blueprint) return STATUS_META[PROJECT_STATUS.EDITABLE];
-  // 7. 分析完成但尚無藍圖 → 待生成
+  // 8. 分析完成但尚無藍圖 → 待生成
   if (project.phase1_status === PHASE1_STATUS.DONE) return STATUS_META[PROJECT_STATUS.READY];
-  // 8. 其他（本地草稿）
+  // 9. 其他（本地草稿）
   return STATUS_META[PROJECT_STATUS.DRAFT];
 }
 

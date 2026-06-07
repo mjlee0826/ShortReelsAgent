@@ -15,6 +15,19 @@ import { IconButton, Spinner, EmptyState } from '../components/ui';
 // 視為「需要重跑 Phase 1」的素材狀態（開始生成時挑這些 + dirty）
 const STATUS_UNPROCESSED = 'unprocessed';
 
+// 專案 Phase 1 背景狀態值（對齊後端 ingestion_engine/models.py）：素材頁據此判斷「準備中」
+// （初次建立資料夾正在下載 / 標準化素材，尚未收斂）以顯示轉圈、隱藏未處理的原始卡片
+const PHASE1_STATUS_PENDING = 'pending';
+const PHASE1_STATUS_INGESTING = 'ingesting';
+const PHASE1_STATUS_PROCESSING = 'processing';
+// 「準備中」（尚未收斂）的狀態集合：等待開始（pending）、下載 / 標準化中（ingesting），
+// 以及分析剛起步但 WS job 尚未掛上的短暫 processing 視窗（掛上後 jobRunning 即接管，不再算準備中）
+const PREPARING_STATUSES = new Set([
+  PHASE1_STATUS_PENDING, PHASE1_STATUS_INGESTING, PHASE1_STATUS_PROCESSING,
+]);
+// 準備中時的輪詢間隔（毫秒）：背景在下載 / 標準化，週期查詢狀態，收斂即停
+const PREPARING_POLL_INTERVAL_MS = 3000;
+
 /**
  * AssetListPage：專案素材管理頁（Layer 5）。
  *
@@ -39,8 +52,16 @@ export default function AssetListPage() {
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   // 已完成（pipeline_finish）的素材集合,用來累計進度,避免重複事件灌爆計數
   const finishedRef = useRef(new Set());
+  // 專案 Phase 1 背景狀態（pending/processing/done/skipped/failed/null）：判斷是否「準備中」用
+  const [phase1Status, setPhase1Status] = useState(null);
+  // 以 ref 持有最新 assets，供輪詢回呼計算 pendingPaths 而不必把 assets 放進 effect 依賴（避免重建計時器）
+  const assetsRef = useRef(assets);
+  useEffect(() => { assetsRef.current = assets; }, [assets]);
   // 詳情彈窗：null = 關閉；非 null = 開啟該素材詳情（存 relpath 身分；非選取模式點卡片開啟）
   const [detailPath, setDetailPath] = useState(null);
+
+  // 準備中：背景仍在下載 / 標準化（phase1_status 未收斂）且尚未連上 WS 分析 job → 顯示轉圈、不渲染格線
+  const preparing = !jobRunning && PREPARING_STATUSES.has(phase1Status);
 
   const displayName =
     currentProject?.name === projectId ? currentProject.display_name : projectId;
@@ -144,7 +165,7 @@ export default function AssetListPage() {
     setLiveStatusMap(initialLive);
     try {
       await connect(jobId);
-    } catch (error) {
+    } catch {
       setJobRunning(false);
       setLiveStatusMap({});
       setProgress({ done: 0, total: 0 });
@@ -165,6 +186,8 @@ export default function AssetListPage() {
         return apiService.fetchPhase1Progress(projectId)
           .then((p) => {
             if (!active) return;
+            // 記錄背景狀態：未收斂（pending/processing）且無 job 時，由下方輪詢 effect 接手顯示「準備中」
+            setPhase1Status(p.phase1_status);
             if (p.active_job_id) {
               const pendingPaths = data
                 .filter((a) => a.dirty || a.status === STATUS_UNPROCESSED)
@@ -183,6 +206,33 @@ export default function AssetListPage() {
       .finally(() => { if (active) setIsLoading(false); });
     return () => { active = false; };
   }, [projectId, attachToRunningJob]);
+
+  // 準備中（背景下載 / 標準化進行中、尚未連上 WS job）時週期輪詢 Phase 1 狀態，直到收斂：
+  // - 出現 active_job_id（背景開始感知分析）→ 改訂閱 WS 進度條；
+  // - 收斂為 skipped/done/failed → 重新載入素材（此時 .mov/.heic 已轉成可預覽的 _std）並結束準備中。
+  // assets 經 assetsRef 取用，不放入依賴，避免素材更新時重建計時器。
+  useEffect(() => {
+    if (!preparing) return undefined;
+    let active = true;
+    const timer = setInterval(async () => {
+      try {
+        const p = await apiService.fetchPhase1Progress(projectId);
+        if (!active) return;
+        setPhase1Status(p.phase1_status);
+        if (p.active_job_id) {
+          const pendingPaths = assetsRef.current
+            .filter((a) => a.dirty || a.status === STATUS_UNPROCESSED)
+            .map((a) => a.path);
+          attachToRunningJob(p.active_job_id, pendingPaths);
+        } else if (!PREPARING_STATUSES.has(p.phase1_status)) {
+          loadAssets();
+        }
+      } catch {
+        // 輪詢失敗不致命：下一輪再試
+      }
+    }, PREPARING_POLL_INTERVAL_MS);
+    return () => { active = false; clearInterval(timer); };
+  }, [preparing, projectId, attachToRunningJob, loadAssets]);
 
   // ── 選取 ───────────────────────────────────────────────────────────────────
   // 選取集合一律存素材 relpath 身分（asset.path）
@@ -299,58 +349,69 @@ export default function AssetListPage() {
           </div>
         )}
 
-        {/* 進度條（工作進行中才顯示）*/}
-        <ProgressOverlay visible={jobRunning} done={progress.done} total={progress.total} />
-
-        {/* 工具列：選取模式顯示情境列，否則顯示預設列（同位置、等高，切換不跳動）*/}
-        {selectionMode ? (
-          <SelectionToolbar
-            total={assets.length}
-            selectedCount={selected.size}
-            jobRunning={jobRunning}
-            onExitSelection={exitSelection}
-            onSelectAll={selectAll}
-            onClearSelection={clearSelection}
-            onBulkStrategy={handleBulkStrategy}
-            onReanalyzeSelected={handleReanalyzeSelected}
-          />
-        ) : (
-          <BulkActionBar
-            total={assets.length}
-            jobRunning={jobRunning}
-            onEnterSelection={enterSelection}
-            onReanalyzeAll={handleReanalyzeAll}
-            onGoEditor={goEditor}
-            onGenerate={handleGenerate}
-          />
-        )}
-
-        {/* 載入中 */}
-        {isLoading && assets.length === 0 && (
-          <div className="flex flex-col items-center gap-3 py-20 text-ink-faint">
+        {preparing ? (
+          /* 準備中：背景仍在下載 / 標準化素材，顯示轉圈、不渲染工具列與格線（避免閃出未處理的原始卡片）*/
+          <div className="flex flex-col items-center gap-3 py-24 text-ink-faint">
             <Spinner />
-            <p className="text-sm">載入素材中...</p>
+            <p className="text-sm">正在下載並處理素材，請稍候…</p>
+            <p className="text-xs text-ink-faint/70">背景正在從 Google Drive 下載並標準化素材，完成後會自動顯示。</p>
           </div>
-        )}
-
-        {/* 空狀態 */}
-        {!isLoading && assets.length === 0 ? (
-          <EmptyState
-            icon={<FaImages />}
-            title="這個專案還沒有素材"
-            description="從 Google Drive 同步的素材下載完成後即可在此審閱。"
-          />
         ) : (
-          <AssetGrid
-            assets={assets}
-            selected={selected}
-            liveStatusMap={liveStatusMap}
-            jobRunning={jobRunning}
-            selectionMode={selectionMode}
-            onToggleSelect={toggleSelect}
-            onToggleStrategy={handleToggleStrategy}
-            onOpenDetail={openDetail}
-          />
+          <>
+            {/* 進度條（工作進行中才顯示）*/}
+            <ProgressOverlay visible={jobRunning} done={progress.done} total={progress.total} />
+
+            {/* 工具列：選取模式顯示情境列，否則顯示預設列（同位置、等高，切換不跳動）*/}
+            {selectionMode ? (
+              <SelectionToolbar
+                total={assets.length}
+                selectedCount={selected.size}
+                jobRunning={jobRunning}
+                onExitSelection={exitSelection}
+                onSelectAll={selectAll}
+                onClearSelection={clearSelection}
+                onBulkStrategy={handleBulkStrategy}
+                onReanalyzeSelected={handleReanalyzeSelected}
+              />
+            ) : (
+              <BulkActionBar
+                total={assets.length}
+                jobRunning={jobRunning}
+                onEnterSelection={enterSelection}
+                onReanalyzeAll={handleReanalyzeAll}
+                onGoEditor={goEditor}
+                onGenerate={handleGenerate}
+              />
+            )}
+
+            {/* 載入中 */}
+            {isLoading && assets.length === 0 && (
+              <div className="flex flex-col items-center gap-3 py-20 text-ink-faint">
+                <Spinner />
+                <p className="text-sm">載入素材中...</p>
+              </div>
+            )}
+
+            {/* 空狀態 */}
+            {!isLoading && assets.length === 0 ? (
+              <EmptyState
+                icon={<FaImages />}
+                title="這個專案還沒有素材"
+                description="從 Google Drive 同步的素材下載完成後即可在此審閱。"
+              />
+            ) : (
+              <AssetGrid
+                assets={assets}
+                selected={selected}
+                liveStatusMap={liveStatusMap}
+                jobRunning={jobRunning}
+                selectionMode={selectionMode}
+                onToggleSelect={toggleSelect}
+                onToggleStrategy={handleToggleStrategy}
+                onOpenDetail={openDetail}
+              />
+            )}
+          </>
         )}
 
         {/* 素材詳情彈窗（非選取模式點卡片開啟）：呈現完整媒體 + Phase 1 資訊 */}
