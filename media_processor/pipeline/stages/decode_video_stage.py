@@ -5,7 +5,7 @@ from config.media_processor_config import MIDDLE_FRAME_POSITION
 from media_processor.pipeline.context import AssetContext
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
 from media_processor.pipeline.work.frame_analysis import FrameAnalysis
-from media_processor.pipeline.stages.video_frame_utils import (
+from media_processor.pipeline.utils.video_frame_utils import (
     extract_video_metadata,
     grab_frame_at_time,
 )

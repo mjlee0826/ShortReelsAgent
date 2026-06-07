@@ -12,7 +12,7 @@ TECHNICAL_SCORE_FILTER_THRESHOLD = 40.0
 # 推論前 PIL 圖片的最大短邊長度（過大會吃 VRAM 且分數震盪）
 MUSIQ_MAX_INPUT_SIZE = 512
 
-# ── 推論幀解析度上限 (video_frame_utils.cap_pil_resolution) ─────────────────────
+# ── 推論幀解析度上限 (pipeline/utils/video_frame_utils.cap_pil_resolution) ───────
 # 所有模型推論幀在送入模型前，短邊超過此值即等比縮放（純記憶體 PIL 物件，不回寫檔案）。
 # 主要修復 4K 幀的 GIL-freeze：MediaPipe tflite / Saliency ONNX 在 ~8M px 幀推論時不釋放 GIL，
 # 會凍住 Python watchdog 心跳與 faulthandler re-arm。720 保留足夠細節讓人臉/主體偵測準確。

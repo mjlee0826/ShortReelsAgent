@@ -6,7 +6,7 @@ from media_processor.media_strategy import MediaStrategy
 from media_processor.pipeline.context import AssetContext
 from media_processor.pipeline.executor.model_pool_registry import borrow_mediapipe, run_saliency
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
-from media_processor.pipeline.stages.video_frame_utils import compute_saliency_bbox_at_time
+from media_processor.pipeline.utils.video_frame_utils import compute_saliency_bbox_at_time
 from media_processor.pipeline.work.video_work import get_video_work
 
 _STAGE_NAME = "saliency_union"

@@ -32,7 +32,7 @@ from media_processor.pipeline.progress import (
 from media_processor.pipeline.progress.watchdog import StallWatchdog
 from media_processor.image_strategy import ImageStrategy
 from media_processor.pipeline.scheduler.hybrid_scheduler import HybridScheduler
-from media_processor.pipeline.startup_report import StartupReporter
+from media_processor.pipeline.utils.startup_report import StartupReporter
 from media_processor.video_strategy import DEFAULT_VIDEO_STRATEGY, VideoStrategy
 
 

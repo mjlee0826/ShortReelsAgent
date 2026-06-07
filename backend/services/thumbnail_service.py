@@ -26,7 +26,7 @@ from config.app_config import (
 )
 from config.media_processor_config import MIDDLE_FRAME_POSITION
 from media_processor.pipeline.context import MediaKind
-from media_processor.pipeline.stages.video_frame_utils import grab_frame_at_time
+from media_processor.pipeline.utils.video_frame_utils import grab_frame_at_time
 
 
 class ThumbnailService:
