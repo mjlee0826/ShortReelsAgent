@@ -18,16 +18,16 @@ from urllib.parse import quote
 
 from pydantic import BaseModel
 
-from backend.services.asset_discovery import (
+from backend.services.stores.project_meta_store import project_meta_store
+from backend.services.stores.user_settings_store import user_settings_store
+from backend.services.thumbnail_service import ThumbnailService
+from backend.utils.asset_discovery import (
     PHASE1_METADATA_FILENAME,
     PHASE1_STATUS_FILENAME,
     collect_asset_files,
     to_abs_path,
 )
-from backend.services.atomic_json import read_json_tolerant
-from backend.services.project_meta_store import project_meta_store
-from backend.services.thumbnail_service import ThumbnailService
-from backend.services.user_settings_store import user_settings_store
+from backend.utils.atomic_json import read_json_tolerant
 from config.app_config import (
     ASSETS_DIR,
     DEFAULT_BACKEND_URL,

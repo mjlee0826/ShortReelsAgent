@@ -13,8 +13,8 @@ import traceback
 import uuid
 from typing import Callable, Optional
 
-from backend.api.progress import progress_hub, ws_progress_observer
-from backend.services.job_manager import job_manager
+from backend.services.jobs.job_manager import job_manager
+from backend.services.jobs.progress_hub import progress_hub, ws_progress_observer
 from media_processor.pipeline.progress import ProgressTracker
 
 # work_fn:在 worker thread 內執行實際工作(收到帶 job_id 的 tracker),回傳要落地的結果 dict

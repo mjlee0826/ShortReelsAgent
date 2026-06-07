@@ -14,15 +14,15 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from backend.auth.logto_jwt_verifier import verify_token
-from backend.services.asset_discovery import collect_asset_files
 from backend.services.ingestion_provider import cloud_ingestion_service
+from backend.services.jobs.job_manager import job_manager
 from backend.services.project_cover_service import ProjectCoverService
-from backend.services.project_meta_store import project_meta_store
+from backend.services.stores.project_meta_store import project_meta_store
+from backend.services.stores.user_settings_store import user_settings_store
 from backend.services.thumbnail_service import ThumbnailService
-from backend.services.user_settings_store import user_settings_store
+from backend.utils.asset_discovery import collect_asset_files
 from config.app_config import ASSETS_DIR, COVER_THUMBNAIL_MAX_PX, COVER_THUMBNAIL_SUBDIR
 from config.project_artifacts import PHASE4_BLUEPRINT_FILENAME
-from backend.services.job_manager import job_manager
 from ingestion_engine.models import (
     META_KEY_ACTIVE_PHASE1_JOB_ID,
     META_KEY_AUTO_ANALYZE,

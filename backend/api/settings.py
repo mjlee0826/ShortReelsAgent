@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from backend.auth.logto_jwt_verifier import verify_token
 from backend.services.asset_repository import AssetStrategy
-from backend.services.user_settings_store import UserSettings, user_settings_store
+from backend.services.stores.user_settings_store import UserSettings, user_settings_store
 
 router = APIRouter()
 

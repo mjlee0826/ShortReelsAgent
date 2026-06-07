@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import os
 
-from backend.api.director import director_service
-from backend.services.async_job_runner import async_job_runner
-from backend.services.phase1_lock import phase1_lock
-from backend.services.project_meta_store import project_meta_store
+from backend.services.director_service import director_service
+from backend.services.jobs.async_job_runner import async_job_runner
+from backend.services.jobs.phase1_lock import phase1_lock
+from backend.services.stores.project_meta_store import project_meta_store
 from config.app_config import ASSETS_DIR
 from ingestion_engine import (
     CloudIngestionService,

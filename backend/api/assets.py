@@ -13,12 +13,12 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-# 重用 director.py 的 director_service 單例(避免再建一份 PipelineRunner / 模型池)
-from backend.api.director import director_service
+# 重用共享的 director_service 單例(避免再建一份 PipelineRunner / 模型池)
+from backend.services.director_service import director_service
 from backend.auth.logto_jwt_verifier import verify_token
-from backend.services.async_job_runner import async_job_runner
 from backend.services.asset_repository import AssetDetailView, AssetRepository, AssetView
-from backend.services.phase1_lock import PHASE1_BUSY_MESSAGE, phase1_lock
+from backend.services.jobs.async_job_runner import async_job_runner
+from backend.services.jobs.phase1_lock import PHASE1_BUSY_MESSAGE, phase1_lock
 from backend.services.thumbnail_service import ThumbnailService
 
 router = APIRouter()

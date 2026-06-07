@@ -11,16 +11,16 @@ from media_processor.pipeline import PipelineRunner, ProgressTracker
 from media_tools.media_standardizer import MediaStandardizer
 from template_engine.template_analyzer_facade import TemplateAnalyzerFacade
 from director_agent.director_facade import DirectorFacade
-from backend.services.asset_discovery import (
+from backend.services.asset_repository import AssetRepository
+from backend.services.jobs.phase1_lock import EDITOR_BUSY_MESSAGE, Phase1BusyError, phase1_lock
+from backend.services.stores.project_meta_store import project_meta_store
+from backend.utils.asset_discovery import (
     PHASE1_METADATA_FILENAME,
     PHASE1_STATUS_FILENAME,
     collect_asset_files,
     to_abs_path,
 )
-from backend.services.asset_repository import AssetRepository
-from backend.services.atomic_json import atomic_write_json, read_json_tolerant
-from backend.services.phase1_lock import EDITOR_BUSY_MESSAGE, Phase1BusyError, phase1_lock
-from backend.services.project_meta_store import project_meta_store
+from backend.utils.atomic_json import atomic_write_json, read_json_tolerant
 from config.pipeline_config import EDITOR_PHASE1_LOCK_TIMEOUT_SEC
 from ingestion_engine.models import (
     META_KEY_PHASE1_STATUS,
@@ -368,3 +368,8 @@ class DirectorService:
             "audio_dna": audio_dna,
             "assets_root_url": assets_root_url,
         }
+
+
+# 模組級單例:跨 api 端點與 ingestion_provider 共享同一份 PipelineRunner / 模型池
+# (下放到本模組,讓 api → services 維持單向依賴;呼叫端一律 import 此單例,勿自行再 new)
+director_service = DirectorService()

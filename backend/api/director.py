@@ -6,18 +6,19 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFi
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, Dict
-from backend.services.director_service import DirectorService
+from backend.services.director_service import director_service
 from backend.services.render_service import RenderService
-from backend.services.job_manager import job_manager
-from backend.services.phase1_lock import Phase1BusyError
+from backend.services.jobs.job_manager import job_manager
+from backend.services.jobs.phase1_lock import Phase1BusyError
+from backend.services.jobs.progress_hub import progress_hub, ws_progress_observer
 from backend.auth.logto_jwt_verifier import verify_token
-from backend.api.progress import progress_hub, ws_progress_observer
 from media_processor.pipeline.progress import ProgressTracker
 from config.app_config import ASSETS_DIR, RAW_SUBDIR
 from config.media_formats import AUDIO_EXTENSIONS
 
 router = APIRouter()
-director_service = DirectorService()
+# director_service 為跨模組共享的單例(定義於 backend.services.director_service),此處直接 import 使用;
+# render_service 僅本檔 render_mp4 端點使用,無跨模組共享需求,故就地建立。
 render_service = RenderService()
 
 # 保存背景 job 的 asyncio.Task 參考,避免 task 在執行中被 GC 提前回收

@@ -15,7 +15,7 @@ import json
 import os
 from typing import Optional
 
-from backend.services.asset_discovery import PHASE1_METADATA_FILENAME, to_abs_path
+from backend.utils.asset_discovery import PHASE1_METADATA_FILENAME, to_abs_path
 from backend.services.thumbnail_service import ThumbnailService
 from media_processor.pipeline.context import derive_media_kind
 

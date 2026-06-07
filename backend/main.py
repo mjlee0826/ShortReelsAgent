@@ -19,9 +19,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.api.director import router as director_router
 from backend.api.projects import router as projects_router
 from backend.api.assets import router as assets_router
-from backend.api.progress import router as progress_router, progress_hub
+from backend.api.progress import router as progress_router
 from backend.api.settings import router as settings_router
 from backend.services.ingestion_provider import ingestion_poller
+from backend.services.jobs.progress_hub import progress_hub
 
 
 @asynccontextmanager
