@@ -8,20 +8,10 @@ from __future__ import annotations
 from typing import Any, Optional
 from pydantic import BaseModel
 
-
-class SubjectBbox(BaseModel):
-    """畫面主體必須保留的矩形區域，以百分比座標表示（0–100）。"""
-    x1: float
-    y1: float
-    x2: float
-    y2: float
-
-
-class FaceInfo(BaseModel):
-    """臉部偵測結果摘要。"""
-    face_count: int
-    has_faces: bool
-    largest_face_ratio: float  # 最大臉部面積 / 畫面面積
+# SubjectBbox / FaceInfo 為跨層共用的純 value object，定義已移至中性套件 shared/，
+# 以解除 model 層（MediaPipe）反向 import media_processor 的依賴；
+# 此處 re-export 維持既有 `from media_processor.models import SubjectBbox` 呼叫端向後相容。
+from shared.value_objects import FaceInfo, SubjectBbox
 
 
 class ImageMetadata(BaseModel):
