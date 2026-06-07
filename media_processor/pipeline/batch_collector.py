@@ -32,7 +32,7 @@ from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import Callable, Generic, TypeVar
 
-from model.resource_wait_clock import ResourceWaitClock
+from model.infra.resource_wait_clock import ResourceWaitClock
 
 # 合批項目型別 T、批次結果型別 R(供型別提示,讓 submit 的回傳 Future 型別清晰)
 T = TypeVar("T")

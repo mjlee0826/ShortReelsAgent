@@ -27,14 +27,14 @@ class MusicEngineFacade:
     @property
     def whisper_engine(self):
         if self._whisper is None:
-            from model.whisper_model_manager import WhisperModelManager
+            from model.managers.whisper_model_manager import WhisperModelManager
             self._whisper = WhisperModelManager()
         return self._whisper
 
     @property
     def vad_engine(self):
         if self._vad is None:
-            from model.vad_model_manager import VadModelManager
+            from model.managers.vad_model_manager import VadModelManager
             self._vad = VadModelManager()
         return self._vad
 

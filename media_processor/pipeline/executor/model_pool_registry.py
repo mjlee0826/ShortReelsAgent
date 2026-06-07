@@ -32,10 +32,10 @@ from config.pipeline_config import (
 )
 from media_processor.pipeline.executor.gpu_detect import detect_gpu_ids
 from media_processor.pipeline.progress import ProgressObserver, ProgressTracker
-from model.base_model_manager import BaseModelManager
-from model.gpu_capacity_manager import GpuCapacityManager
-from model.model_pool import ModelPool, PoolBorrowObserver
-from model.resource_wait_clock import ResourceWaitClock
+from model.infra.base_model_manager import BaseModelManager
+from model.infra.gpu_capacity_manager import GpuCapacityManager
+from model.infra.model_pool import ModelPool, PoolBorrowObserver
+from model.infra.resource_wait_clock import ResourceWaitClock
 
 # borrow_for_batch 的 Manager / 回傳型別提示
 _M = TypeVar("_M", bound=BaseModelManager)
@@ -53,7 +53,7 @@ _mediapipe_pool_initialized = False
 _mediapipe_pool_init_lock = threading.Lock()
 
 # ── Saliency pool（模組級，CPU；Option 3）─────────────────────────────────────────
-# U²-Net 已移出 GPU capacity、改純 CPU（見 model.saliency_model_manager），由此獨立 pool 管併發。
+# U²-Net 已移出 GPU capacity、改純 CPU（見 model.managers.saliency_model_manager），由此獨立 pool 管併發。
 # 與 mediapipe pool 同構：放「SALIENCY_POOL_SIZE 個 *不同 slot_id* 的 instance」，每個有獨立的
 # onnxruntime CPU session 與 L3 _inference_lock，才能真正多路 CPU 併發（saliency CPU 推論較重，
 # 需要真平行）。run_saliency() 從此借出。
@@ -370,7 +370,7 @@ def _warm_up_mediapipe_pool() -> None:
     pool 預熱後 _mediapipe_pool_initialized 置 True，borrow_mediapipe 不再 lazy 初始化。
     """
     global _mediapipe_pool_initialized
-    from model.mediapipe_model_manager import MediaPipeModelManager
+    from model.managers.mediapipe_model_manager import MediaPipeModelManager
     for slot_id in range(MEDIAPIPE_POOL_SIZE):
         _mediapipe_pool.put(MediaPipeModelManager(slot_id=slot_id))
     _mediapipe_pool_initialized = True
@@ -409,7 +409,7 @@ def _warm_up_saliency_pool() -> None:
     pool 預熱後 _saliency_pool_initialized 置 True，run_saliency 不再 lazy 初始化。
     """
     global _saliency_pool_initialized
-    from model.saliency_model_manager import SaliencyModelManager
+    from model.managers.saliency_model_manager import SaliencyModelManager
     for slot_id in range(SALIENCY_POOL_SIZE):
         _saliency_pool.put(SaliencyModelManager(slot_id=slot_id))
     _saliency_pool_initialized = True
@@ -419,7 +419,7 @@ def run_saliency(fn: Callable[[_M], _R]) -> _R:
     """
     供 saliency stage 使用：從 CPU pool 借一個 ``SaliencyModelManager`` 執行 ``fn``，用完自動歸還。
 
-    Option 3 起 saliency 為純 CPU 模型（見 model.saliency_model_manager），不再走 GPU capacity
+    Option 3 起 saliency 為純 CPU 模型（見 model.managers.saliency_model_manager），不再走 GPU capacity
     pool / 跨卡 OOM failover —— CPU 不會 CUDA OOM、也無卡可換。pool 未預熱（warmup 失敗 / 未呼叫）
     時以雙重檢查鎖 lazy 建滿整池，避免永久阻塞。
     """
@@ -448,7 +448,7 @@ def _warm_up_vad_pool() -> None:
     pool 預熱後 _vad_pool_initialized 置 True,run_vad 不再 lazy 初始化。
     """
     global _vad_pool_initialized
-    from model.vad_model_manager import VadModelManager
+    from model.managers.vad_model_manager import VadModelManager
     for slot_id in range(VAD_POOL_SIZE):
         mgr = VadModelManager(slot_id=slot_id)
         # warmup 為 best-effort（內部吞例外）：預載 torchcodec，杜絕執行期並發 dlopen 死結

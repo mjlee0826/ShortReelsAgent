@@ -32,7 +32,7 @@ class AbstractImageProcessor(MediaStrategy):
     def saliency_engine(self):
         """U2-Net 顯著性偵測引擎（首次存取時載入至 GPU）。"""
         if self._saliency_engine is None:
-            from model.saliency_model_manager import SaliencyModelManager
+            from model.managers.saliency_model_manager import SaliencyModelManager
             self._saliency_engine = SaliencyModelManager()
         return self._saliency_engine
 
@@ -40,7 +40,7 @@ class AbstractImageProcessor(MediaStrategy):
     def tech_engine(self):
         """MUSIQ 技術畫質評分引擎（首次存取時載入至 GPU）。"""
         if self._tech_engine is None:
-            from model.musiq_model_manager import MusiqModelManager
+            from model.managers.musiq_model_manager import MusiqModelManager
             self._tech_engine = MusiqModelManager()
         return self._tech_engine
 
@@ -48,7 +48,7 @@ class AbstractImageProcessor(MediaStrategy):
     def aes_engine(self):
         """LAION 美學評分引擎（首次存取時載入至 GPU）。"""
         if self._aes_engine is None:
-            from model.laion_model_manager import LaionModelManager
+            from model.managers.laion_model_manager import LaionModelManager
             self._aes_engine = LaionModelManager()
         return self._aes_engine
 
@@ -56,7 +56,7 @@ class AbstractImageProcessor(MediaStrategy):
     def mediapipe_engine(self):
         """MediaPipe 臉部偵測引擎（首次存取時初始化）。"""
         if self._mediapipe_engine is None:
-            from model.mediapipe_model_manager import MediaPipeModelManager
+            from model.managers.mediapipe_model_manager import MediaPipeModelManager
             self._mediapipe_engine = MediaPipeModelManager()
         return self._mediapipe_engine
 

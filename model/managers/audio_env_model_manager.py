@@ -13,7 +13,7 @@ import torch
 import librosa
 import numpy as np
 import gc
-from model.base_model_manager import (
+from model.infra.base_model_manager import (
     BaseModelManager,
     synchronized_inference,
     oom_resilient,

@@ -19,7 +19,7 @@ from contextlib import contextmanager
 from typing import Iterator
 
 from config.media_processor_config import BUDGET_GATE_LOW_PRIORITY_RESERVE_RATIO
-from model.resource_wait_clock import ResourceWaitClock
+from model.infra.resource_wait_clock import ResourceWaitClock
 
 # 無優先權的預設等級：數值越大優先序越高（Qwen 等主瓶頸設正值，其餘維持 0）
 NO_PRIORITY = 0

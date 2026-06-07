@@ -4,7 +4,7 @@ import pillow_heif
 from PIL import Image
 
 from media_processor.processors.abstract_image_processor import AbstractImageProcessor
-from model.qwen_model_manager import QwenModelManager
+from model.managers.qwen_model_manager import QwenModelManager
 from prompt_manager.task_mode import TaskMode
 
 pillow_heif.register_heif_opener()

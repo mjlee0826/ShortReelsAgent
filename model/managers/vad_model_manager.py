@@ -14,7 +14,7 @@ Silero VAD 極輕量（毫秒級 CPU 推論），顯式設 ``self.device = "cpu"
 L2 BudgetGate 依 ``_uses_gpu`` 自動跳過，不佔任何 GPU 預算。
 """
 import torch
-from model.base_model_manager import BaseModelManager, synchronized_inference
+from model.infra.base_model_manager import BaseModelManager, synchronized_inference
 from config.model_config import VAD_REPO, VAD_SAMPLING_RATE
 
 

@@ -48,7 +48,7 @@ class AbstractVideoProcessor(MediaStrategy):
     def whisper_engine(self):
         """語音轉文字引擎（首次存取時載入至 GPU）。"""
         if self._whisper_engine is None:
-            from model.whisper_model_manager import WhisperModelManager
+            from model.managers.whisper_model_manager import WhisperModelManager
             self._whisper_engine = WhisperModelManager()
         return self._whisper_engine
 
@@ -56,7 +56,7 @@ class AbstractVideoProcessor(MediaStrategy):
     def audio_env_engine(self):
         """環境音分類引擎（首次存取時載入至 GPU）。"""
         if self._audio_env_engine is None:
-            from model.audio_env_model_manager import AudioEnvModelManager
+            from model.managers.audio_env_model_manager import AudioEnvModelManager
             self._audio_env_engine = AudioEnvModelManager()
         return self._audio_env_engine
 
@@ -64,7 +64,7 @@ class AbstractVideoProcessor(MediaStrategy):
     def vad_engine(self):
         """語音活動偵測引擎（首次存取時載入至 GPU）。"""
         if self._vad_engine is None:
-            from model.vad_model_manager import VadModelManager
+            from model.managers.vad_model_manager import VadModelManager
             self._vad_engine = VadModelManager()
         return self._vad_engine
 
@@ -72,7 +72,7 @@ class AbstractVideoProcessor(MediaStrategy):
     def saliency_engine(self):
         """顯著性偵測引擎 U2-Net（首次存取時載入至 GPU）。"""
         if self._saliency_engine is None:
-            from model.saliency_model_manager import SaliencyModelManager
+            from model.managers.saliency_model_manager import SaliencyModelManager
             self._saliency_engine = SaliencyModelManager()
         return self._saliency_engine
 
@@ -80,7 +80,7 @@ class AbstractVideoProcessor(MediaStrategy):
     def mediapipe_engine(self):
         """MediaPipe 臉部偵測引擎（首次存取時初始化）。"""
         if self._mediapipe_engine is None:
-            from model.mediapipe_model_manager import MediaPipeModelManager
+            from model.managers.mediapipe_model_manager import MediaPipeModelManager
             self._mediapipe_engine = MediaPipeModelManager()
         return self._mediapipe_engine
 
@@ -88,7 +88,7 @@ class AbstractVideoProcessor(MediaStrategy):
     def tech_engine(self):
         """MUSIQ 技術畫質評分引擎（首次存取時載入至 GPU）。"""
         if self._tech_engine is None:
-            from model.musiq_model_manager import MusiqModelManager
+            from model.managers.musiq_model_manager import MusiqModelManager
             self._tech_engine = MusiqModelManager()
         return self._tech_engine
 
@@ -96,7 +96,7 @@ class AbstractVideoProcessor(MediaStrategy):
     def aes_engine(self):
         """LAION 美學評分引擎（首次存取時載入至 GPU）。"""
         if self._aes_engine is None:
-            from model.laion_model_manager import LaionModelManager
+            from model.managers.laion_model_manager import LaionModelManager
             self._aes_engine = LaionModelManager()
         return self._aes_engine
 

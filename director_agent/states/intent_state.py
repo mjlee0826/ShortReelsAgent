@@ -1,7 +1,7 @@
 import json
 import re
 from director_agent.states.base_state import BaseState
-from model.gemini_model_manager import GeminiModelManager
+from model.managers.gemini_model_manager import GeminiModelManager
 from music_engine.music_engine_facade import MusicEngineFacade
 from prompt_manager.prompt_factory import PromptFactory
 from prompt_manager.task_mode import TaskMode

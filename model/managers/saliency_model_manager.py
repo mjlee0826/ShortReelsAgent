@@ -18,7 +18,7 @@ ModelPool 即時 VRAM 重檢。
 import numpy as np
 from PIL import Image
 from rembg import new_session, remove
-from model.base_model_manager import BaseModelManager, synchronized_inference
+from model.infra.base_model_manager import BaseModelManager, synchronized_inference
 from config.model_config import SALIENCY_MODEL_NAME
 from config.media_processor_config import SALIENCY_TRANSIENT_VRAM_GB
 

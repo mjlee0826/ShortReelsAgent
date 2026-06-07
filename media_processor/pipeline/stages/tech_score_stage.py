@@ -12,7 +12,7 @@ from media_processor.pipeline.work.frame_analysis import get_frame_analysis
 
 if TYPE_CHECKING:
     # 僅型別提示用;執行期改在 _engine() / batch fn 內 lazy import,維持 EAGER_MODELS=false 語意
-    from model.musiq_model_manager import MusiqModelManager
+    from model.managers.musiq_model_manager import MusiqModelManager
 
 _STAGE_NAME = "tech_score"
 
@@ -27,7 +27,7 @@ _MUSIQ_SPEC = BatchSpec(
 
 def _musiq_batch(images: list) -> list:
     """BatchCollector 合批函式:從多卡 pool 借出 MUSIQ(或 singleton)一次評分多張(順序一致)。"""
-    from model.musiq_model_manager import MusiqModelManager
+    from model.managers.musiq_model_manager import MusiqModelManager
     from media_processor.pipeline.executor.model_pool_registry import borrow_for_batch
     return borrow_for_batch(MusiqModelManager, _STAGE_NAME, lambda m: m.score_batch(images))
 
@@ -49,7 +49,7 @@ class TechScoreStage(Stage):
     def _engine(self) -> "MusiqModelManager":
         """延遲取得 MUSIQ singleton(首次使用才載入權重)。"""
         if self._musiq is None:
-            from model.musiq_model_manager import MusiqModelManager
+            from model.managers.musiq_model_manager import MusiqModelManager
             self._musiq = MusiqModelManager()
         return self._musiq
 

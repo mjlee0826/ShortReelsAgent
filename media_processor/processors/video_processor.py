@@ -15,7 +15,7 @@ class VideoProcessor(AbstractVideoProcessor):
 
     def __init__(self):
         super().__init__()
-        from model.qwen_model_manager import QwenModelManager
+        from model.managers.qwen_model_manager import QwenModelManager
         # 主視覺語意引擎（非延遲：為此類的核心差異點）
         self.vision_engine = QwenModelManager()
         # 不需燒錄時間碼，節省處理效能

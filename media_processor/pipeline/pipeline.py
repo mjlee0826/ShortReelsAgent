@@ -28,7 +28,7 @@ from media_processor.pipeline.context import (
 from media_processor.pipeline.node import StageNode
 from media_processor.pipeline.progress import ProgressTracker
 from media_processor.pipeline.stage import Stage
-from model.resource_wait_clock import ResourceWaitClock
+from model.infra.resource_wait_clock import ResourceWaitClock
 
 if TYPE_CHECKING:
     # 僅型別檢查時 import,執行期不依賴,避免不必要的耦合與 import 順序問題

@@ -17,7 +17,7 @@ import mediapipe as mp
 from mediapipe.tasks.python import vision as mp_vision
 from mediapipe.tasks.python.core.base_options import BaseOptions
 
-from model.base_model_manager import BaseModelManager, synchronized_inference
+from model.infra.base_model_manager import BaseModelManager, synchronized_inference
 from media_processor.models import FaceInfo, SubjectBbox
 from config.model_config import (
     MEDIAPIPE_MIN_DETECTION_CONFIDENCE,

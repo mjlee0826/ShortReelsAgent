@@ -40,8 +40,8 @@ from config.media_processor_config import (
     BORROW_VRAM_MAX_WAIT_SEC,
     GPU_SAFETY_BUFFER_GB,
 )
-from model.base_model_manager import BaseModelManager, is_cuda_oom
-from model.resource_wait_clock import ResourceWaitClock
+from model.infra.base_model_manager import BaseModelManager, is_cuda_oom
+from model.infra.resource_wait_clock import ResourceWaitClock
 
 T = TypeVar("T", bound=BaseModelManager)
 

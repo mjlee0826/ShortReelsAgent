@@ -19,7 +19,7 @@ import torch.nn as nn
 import gc
 from PIL import Image
 from transformers import CLIPProcessor, CLIPModel
-from model.base_model_manager import (
+from model.infra.base_model_manager import (
     BaseModelManager,
     synchronized_inference,
     oom_resilient,

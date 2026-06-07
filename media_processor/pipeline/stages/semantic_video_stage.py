@@ -11,8 +11,8 @@ from media_processor.video_strategy import VideoStrategy
 from prompt_manager.task_mode import TaskMode
 
 if TYPE_CHECKING:
-    from model.gemini_model_manager import GeminiModelManager
-    from model.qwen_model_manager import QwenModelManager
+    from model.managers.gemini_model_manager import GeminiModelManager
+    from model.managers.qwen_model_manager import QwenModelManager
 
 _STAGE_NAME = "semantic_video"
 # analyze_media 的媒體型別參數(對齊原 VideoProcessor / ComplexVideoProcessor 呼叫)
@@ -42,14 +42,14 @@ class SemanticVideoStage(Stage):
     def _qwen_engine(self) -> "QwenModelManager":
         """延遲取得本地 Qwen singleton。"""
         if self._qwen is None:
-            from model.qwen_model_manager import QwenModelManager
+            from model.managers.qwen_model_manager import QwenModelManager
             self._qwen = QwenModelManager()
         return self._qwen
 
     def _gemini_engine(self) -> "GeminiModelManager":
         """延遲取得 Gemini API client。"""
         if self._gemini is None:
-            from model.gemini_model_manager import GeminiModelManager
+            from model.managers.gemini_model_manager import GeminiModelManager
             self._gemini = GeminiModelManager()
         return self._gemini
 
@@ -75,7 +75,7 @@ class SemanticVideoStage(Stage):
                 media_input=media_input, media_type=_MEDIA_TYPE_VIDEO, mode=TaskMode.GLOBAL_ANALYSIS
             )
         # lazy import 避免模組載入期耦合(與既有 _qwen_engine 的 lazy 風格一致)
-        from model.qwen_model_manager import QwenModelManager
+        from model.managers.qwen_model_manager import QwenModelManager
         from media_processor.pipeline.executor.model_pool_registry import ModelPoolRegistry
 
         observer = ModelPoolRegistry.make_borrow_observer(

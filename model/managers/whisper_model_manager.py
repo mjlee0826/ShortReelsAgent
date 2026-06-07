@@ -24,7 +24,7 @@ faster-whisper 原生不支援「多檔一次 forward」（其 ``BatchedInferenc
 """
 import numpy as np
 from faster_whisper import WhisperModel
-from model.base_model_manager import (
+from model.infra.base_model_manager import (
     BaseModelManager,
     synchronized_inference,
     oom_resilient,

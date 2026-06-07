@@ -39,8 +39,8 @@ from contextlib import contextmanager
 from typing import Callable, Iterator
 
 from config.media_processor_config import OOM_RETRY_MAX_ATTEMPTS, OOM_RETRY_BACKOFF_SEC
-from model.gpu_gate import GpuGate, BinaryGate, NO_PRIORITY
-from model.resource_wait_clock import ResourceWaitClock
+from model.infra.gpu_gate import GpuGate, BinaryGate, NO_PRIORITY
+from model.infra.resource_wait_clock import ResourceWaitClock
 
 
 # 預設槽位 id：呼叫端未指定時用此值，向後相容既有「一卡一 instance」配置

@@ -11,8 +11,8 @@ from media_processor.pipeline.work.image_work import get_image_work
 from prompt_manager.task_mode import TaskMode
 
 if TYPE_CHECKING:
-    from model.gemini_model_manager import GeminiModelManager
-    from model.qwen_model_manager import QwenModelManager
+    from model.managers.gemini_model_manager import GeminiModelManager
+    from model.managers.qwen_model_manager import QwenModelManager
 
 _STAGE_NAME = "semantic_image"
 # analyze_media 的媒體型別參數(對齊原 ImageProcessor / ComplexImageProcessor 呼叫)
@@ -44,14 +44,14 @@ class SemanticImageStage(Stage):
     def _qwen_engine(self) -> "QwenModelManager":
         """延遲取得本地 Qwen singleton。"""
         if self._qwen is None:
-            from model.qwen_model_manager import QwenModelManager
+            from model.managers.qwen_model_manager import QwenModelManager
             self._qwen = QwenModelManager()
         return self._qwen
 
     def _gemini_engine(self) -> "GeminiModelManager":
         """延遲取得 Gemini API client。"""
         if self._gemini is None:
-            from model.gemini_model_manager import GeminiModelManager
+            from model.managers.gemini_model_manager import GeminiModelManager
             self._gemini = GeminiModelManager()
         return self._gemini
 
@@ -75,7 +75,7 @@ class SemanticImageStage(Stage):
                 pil_image, media_type=_MEDIA_TYPE_IMAGE, mode=TaskMode.GLOBAL_ANALYSIS
             )
         # lazy import 避免模組載入期耦合(與既有 _qwen_engine 的 lazy 風格一致)
-        from model.qwen_model_manager import QwenModelManager
+        from model.managers.qwen_model_manager import QwenModelManager
         from media_processor.pipeline.executor.model_pool_registry import ModelPoolRegistry
 
         observer = ModelPoolRegistry.make_borrow_observer(

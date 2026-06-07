@@ -11,7 +11,7 @@ from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
 from media_processor.pipeline.work.frame_analysis import get_frame_analysis
 
 if TYPE_CHECKING:
-    from model.laion_model_manager import LaionModelManager
+    from model.managers.laion_model_manager import LaionModelManager
 
 _STAGE_NAME = "aes_score"
 
@@ -26,7 +26,7 @@ _LAION_SPEC = BatchSpec(
 
 def _laion_batch(images: list) -> list:
     """BatchCollector 合批函式:從多卡 pool 借出 LAION(或 singleton)一次評分多張(順序一致)。"""
-    from model.laion_model_manager import LaionModelManager
+    from model.managers.laion_model_manager import LaionModelManager
     from media_processor.pipeline.executor.model_pool_registry import borrow_for_batch
     return borrow_for_batch(LaionModelManager, _STAGE_NAME, lambda m: m.score_batch(images))
 
@@ -47,7 +47,7 @@ class AesScoreStage(Stage):
     def _engine(self) -> "LaionModelManager":
         """延遲取得 LAION singleton。"""
         if self._laion is None:
-            from model.laion_model_manager import LaionModelManager
+            from model.managers.laion_model_manager import LaionModelManager
             self._laion = LaionModelManager()
         return self._laion
 

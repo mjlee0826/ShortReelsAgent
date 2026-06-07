@@ -20,7 +20,7 @@ import gc
 from PIL import Image
 import torchvision.transforms as transforms
 import pyiqa
-from model.base_model_manager import (
+from model.infra.base_model_manager import (
     BaseModelManager,
     synchronized_inference,
     oom_resilient,

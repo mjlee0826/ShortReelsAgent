@@ -18,7 +18,7 @@ from media_processor.pipeline.stage import ResourceType
 if TYPE_CHECKING:
     from media_processor.pipeline.executor.executor_registry import ExecutorRegistry
     from media_processor.pipeline.executor.model_pool_registry import AuxPoolRow
-    from model.gpu_capacity_manager import GpuCapacityManager
+    from model.infra.gpu_capacity_manager import GpuCapacityManager
 
 # 分隔線與欄寬具名常數（避免格式 magic number；CLAUDE.md）
 _RULE_WIDTH = 70

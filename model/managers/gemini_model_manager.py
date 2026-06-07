@@ -26,7 +26,7 @@ from prompt_manager.base_prompt_manager import BasePromptManager
 from prompt_manager.default_prompt_manager import DefaultPromptManager
 from prompt_manager.task_mode import TaskMode
 from prompt_manager.prompt_factory import PromptFactory
-from model.base_model_manager import BaseModelManager, synchronized_inference
+from model.infra.base_model_manager import BaseModelManager, synchronized_inference
 from config.model_config import (
     GEMINI_DEFAULT_MODEL,
     GEMINI_STRONG_MODEL,

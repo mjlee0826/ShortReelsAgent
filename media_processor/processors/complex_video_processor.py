@@ -1,7 +1,7 @@
 """複雜影片處理器，使用 Gemini API 進行精確的多模態事件索引。"""
 
 from media_processor.processors.abstract_video_processor import AbstractVideoProcessor
-from model.gemini_model_manager import GeminiModelManager
+from model.managers.gemini_model_manager import GeminiModelManager
 from prompt_manager.task_mode import TaskMode
 
 
