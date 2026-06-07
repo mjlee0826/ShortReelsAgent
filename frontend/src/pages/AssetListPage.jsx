@@ -14,9 +14,6 @@ import { IconButton, Spinner, EmptyState } from '../components/ui';
 
 // 視為「需要重跑 Phase 1」的素材狀態（開始生成時挑這些 + dirty）
 const STATUS_UNPROCESSED = 'unprocessed';
-// 專案 Phase 1 背景預跑狀態值（對齊後端 ingestion_engine/models.py 的 PHASE1_STATUS_PROCESSING）：
-// 素材頁掛載時據此判斷是否有背景同步分析進行中，進而訂閱其 WS 即時進度
-const PHASE1_STATUS_PROCESSING = 'processing';
 
 /**
  * AssetListPage：專案素材管理頁（Layer 5）。
@@ -156,7 +153,8 @@ export default function AssetListPage() {
 
   // 掛載 / 換專案時抓素材：setState 全落在 promise 回呼（非同步）以符合 effect 規範；
   // active 旗標避免請求未回前元件已卸載而對舊狀態 setState。素材載入後再查 Phase 1 進度：
-  // 若背景同步正在分析（processing + active_job_id），訂閱其 WS 補上即時進度。
+  // 只要有進行中的 Phase 1 job（active_job_id；後端已校驗孤兒，重啟後回 null），就訂閱其 WS 補上
+  // 即時進度——涵蓋背景同步預跑與素材頁手動觸發的「重新分析 / 開始生成」，使重整後進度條能接回。
   useEffect(() => {
     let active = true;
     apiService.fetchAssets(projectId)
@@ -167,7 +165,7 @@ export default function AssetListPage() {
         return apiService.fetchPhase1Progress(projectId)
           .then((p) => {
             if (!active) return;
-            if (p.phase1_status === PHASE1_STATUS_PROCESSING && p.active_job_id) {
+            if (p.active_job_id) {
               const pendingPaths = data
                 .filter((a) => a.dirty || a.status === STATUS_UNPROCESSED)
                 .map((a) => a.path);

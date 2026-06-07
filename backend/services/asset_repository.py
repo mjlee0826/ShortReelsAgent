@@ -314,14 +314,21 @@ class AssetRepository:
             for relpath in collect_asset_files(project_dir)
         }
 
-    def clear_dirty(self, user_id: str, project: str, filenames: Optional[list[str]] = None) -> None:
+    def clear_dirty(self, user_id: str, project: str, filenames: Optional[list[str]] = None,
+                    *, used_strategies: Optional[dict[str, str]] = None) -> None:
         """
-        Phase 1 成功後清除 dirty 標記,並把這些素材的「已分析策略」基準推進到當前策略。
+        Phase 1 成功後清除 dirty 標記,並把這些素材的「已分析策略」基準推進到**本輪實際採用的策略**。
 
         基準(analyzed_strategies)供 set_strategy 判斷回退:把策略改回上次分析所用值即不再 dirty。
-        ``filenames``(實為 relpath 清單)為 None 代表整個專案全部重分析(清空 dirty 並更新所有素材
-        基準);否則只處理指定 relpath。經 ``project_meta_store.update`` 在鎖內讀-改-寫,避免與併發的
-        改策略互相覆蓋。
+        ``filenames``(實為 relpath 清單)為 None 代表整個專案全部重分析(更新所有素材基準);否則只處理
+        指定 relpath。經 ``project_meta_store.update`` 在鎖內讀-改-寫,避免與併發的改策略互相覆蓋。
+
+        ``used_strategies`` 為**開跑前 snapshot 的逐檔策略**(run_phase1 實際採用者)。run_phase1 期間
+        使用者可在素材頁改策略(set_strategy 不持 Phase 1 鎖),收尾若改讀 live 值會把「沒跑過的新策略」
+        誤記為已分析基準並清掉 dirty,導致改動被靜默吞掉、永不重跑。故此處:
+        - 基準一律對齊 snapshot(磁碟感知結果真正反映的策略),而非收尾當下的 live 值;
+        - 僅當「素材當前策略仍等於本輪採用的策略」才清其 dirty;中途被改過者保留 dirty,交下輪補跑。
+        傳 None(舊呼叫端 / CLI)時退回讀 live 值,等同原本「整批清 dirty」語意(不引入新偵測)。
         """
         project_dir = self._project_dir(user_id, project)
         # None 代表全部素材:磁碟掃描放在交易外(不需持鎖,亦避免拉長臨界區)
@@ -333,16 +340,22 @@ class AssetRepository:
         default_strategy = self._resolve_default_strategy(user_id)
 
         def _mutate(meta: dict) -> None:
-            """就地推進已分析基準,並清掉本次完成者的 dirty(None 代表清空整份 dirty)。"""
-            strategies = meta.get(META_KEY_ASSET_STRATEGIES, {})
+            """就地推進已分析基準,並只清掉「策略未被中途改動」之完成者的 dirty。"""
+            current = meta.get(META_KEY_ASSET_STRATEGIES, {})
             analyzed = dict(meta.get(META_KEY_ANALYZED_STRATEGIES, {}))
             dirty = set(meta.get(META_KEY_DIRTY_ASSETS, []))
-            remaining = set() if filenames is None else dirty - set(filenames)
-            # 推進基準至當前策略(未設定者視為全域預設),供下次 set_strategy 的回退判斷
+            # 本輪實際採用的策略:有 snapshot 用 snapshot,否則退回 live(舊行為,current==used 恆成立)
+            used_map = used_strategies if used_strategies is not None else current
+            cleared: set[str] = set()
             for fname in analyzed_targets:
-                analyzed[fname] = strategies.get(fname, default_strategy)
+                used = used_map.get(fname, default_strategy)
+                # 基準對齊「真正分析過的策略」,而非收尾當下的 live 值
+                analyzed[fname] = used
+                # 當前策略仍等於本輪採用者才清 dirty;中途被改過則保留,讓下輪以新策略補跑
+                if current.get(fname, default_strategy) == used:
+                    cleared.add(fname)
             meta[META_KEY_ANALYZED_STRATEGIES] = analyzed
-            meta[META_KEY_DIRTY_ASSETS] = sorted(remaining)
+            meta[META_KEY_DIRTY_ASSETS] = sorted(dirty - cleared)
 
         project_meta_store.update(project_dir, _mutate)
 

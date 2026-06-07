@@ -166,7 +166,7 @@ class DirectorService:
             asset_filenames=pending, asset_strategies=strategies, require_success=False,
         )
         # 補跑完成,推進這些素材的 dirty / 已分析基準
-        self.asset_repository.clear_dirty(user_id, folder_name, pending)
+        self.asset_repository.clear_dirty(user_id, folder_name, pending, used_strategies=strategies)
         return success
 
     def _dump_phase1_metadata(self, target_dir: str, success_assets: list[dict],
@@ -226,7 +226,7 @@ class DirectorService:
                 asset_filenames=pending, asset_strategies=strategies, require_success=False,
             )
             # 補跑完成，推進這些素材的 dirty / 已分析基準
-            self.asset_repository.clear_dirty(user_id, folder_name, pending)
+            self.asset_repository.clear_dirty(user_id, folder_name, pending, used_strategies=strategies)
 
         # 載入（可能剛增量合併完成的）success-only 感知快取
         if os.path.exists(phase1_dump_path):

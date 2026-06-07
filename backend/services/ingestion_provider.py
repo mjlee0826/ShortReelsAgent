@@ -15,7 +15,7 @@ import os
 from backend.services.director_service import director_service
 from backend.services.jobs.async_job_runner import async_job_runner
 from backend.services.jobs.phase1_lock import phase1_lock
-from backend.services.stores.project_meta_store import project_meta_store
+from backend.services.jobs.phase1_progress_meta import clear_active_job, publish_active_job
 from config.app_config import ASSETS_DIR
 from ingestion_engine import (
     CloudIngestionService,
@@ -23,7 +23,6 @@ from ingestion_engine import (
     PublicDriveApiAdapter,
 )
 from ingestion_engine.exceptions import Phase1DeferredError
-from ingestion_engine.models import META_KEY_ACTIVE_PHASE1_JOB_ID
 
 
 def _phase1_runner(user_id: str, project_name: str) -> None:
@@ -50,13 +49,6 @@ def _phase1_runner(user_id: str, project_name: str) -> None:
 
     project_dir = os.path.join(ASSETS_DIR, user_id, project_name)
 
-    def _publish_job_id(job_id: str) -> None:
-        """job 建立後立即把 job_id 落地 meta,前端查 phase1-progress 即可拿到並訂閱 WS。"""
-        def _set(meta: dict) -> None:
-            """就地寫入進行中 job_id(其餘欄位不動)。"""
-            meta[META_KEY_ACTIVE_PHASE1_JOB_ID] = job_id
-        project_meta_store.update(project_dir, _set)
-
     def _work(tracker) -> dict:
         """worker thread 內跑增量 Phase 1,透傳 tracker 讓 per-asset 進度經 WS 串流。"""
         success = director_service.run_phase1_incremental(
@@ -65,16 +57,17 @@ def _phase1_runner(user_id: str, project_name: str) -> None:
         return {"success_count": len(success)}
 
     try:
-        async_job_runner.run_tracked_sync(user_id, _work, on_job_created=_publish_job_id)
+        # job 建立後立即把 job_id 落地 meta,前端查 phase1-progress 即可拿到並訂閱 WS
+        async_job_runner.run_tracked_sync(
+            user_id, _work,
+            on_job_created=lambda job_id: publish_active_job(project_dir, job_id),
+        )
     finally:
         # 無論成功 / 失敗都清掉 active job_id;phase1_status(done/failed)由 cloud_ingestion_service 落地。
         # release 放最內層 finally:即使清 job_id 的原子寫失敗(OSError)也務必釋放鎖,
         # 否則該專案會永久卡住無法再分析(鎖洩漏)。
-        def _clear(meta: dict) -> None:
-            """就地移除進行中 job_id(缺鍵亦安全)。"""
-            meta.pop(META_KEY_ACTIVE_PHASE1_JOB_ID, None)
         try:
-            project_meta_store.update(project_dir, _clear)
+            clear_active_job(project_dir)
         finally:
             # 釋放執行鎖,讓編輯頁 / 素材頁 / 下輪同步得以接手
             phase1_lock.release(user_id, project_name)
