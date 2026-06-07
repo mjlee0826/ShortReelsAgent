@@ -54,9 +54,6 @@ export default function AssetListPage() {
   const finishedRef = useRef(new Set());
   // 專案 Phase 1 背景狀態（pending/processing/done/skipped/failed/null）：判斷是否「準備中」用
   const [phase1Status, setPhase1Status] = useState(null);
-  // 以 ref 持有最新 assets，供輪詢回呼計算 pendingPaths 而不必把 assets 放進 effect 依賴（避免重建計時器）
-  const assetsRef = useRef(assets);
-  useEffect(() => { assetsRef.current = assets; }, [assets]);
   // 詳情彈窗：null = 關閉；非 null = 開啟該素材詳情（存 relpath 身分；非選取模式點卡片開啟）
   const [detailPath, setDetailPath] = useState(null);
 
@@ -152,13 +149,28 @@ export default function AssetListPage() {
     }
   }, [connect]);
 
-  // 偵測到背景同步已在跑的 Phase 1 job：直接訂閱其 WS，不重新觸發分析（job 已在後端跑）。
-  // pendingPaths 為目前未處理 / dirty 素材的 relpath，用來初始化進度條 total 與每張卡片處理中動畫;
-  // 連線後 replay buffer 會補播已發生的事件，使進度即時追上。
-  const attachToRunningJob = useCallback(async (jobId, pendingPaths) => {
+  // 偵測到背景同步已在跑的 Phase 1 job：先抓最新素材，再直接訂閱其 WS（不重新觸發分析，job 已在後端跑）。
+  //
+  // 關鍵：初次同步時掛載當下的素材清單可能仍為空——標準化前 list_assets 會隱藏待處理的 raw，故 assets
+  // 一直是 []；待標準化完成、背景翻成 processing 並 publish job_id，輪詢才會走到這裡。此時 _std 卡片已可
+  // 取得，必須重抓一次：否則格線會空白（無卡片可掛處理中動畫）、進度條 total 也算成 0，直到 job 結束才補上。
+  // 重抓後才據最新素材算出待處理（dirty / 未處理）的 relpath 初始化進度條與每張卡片動畫；連線後 replay
+  // buffer 會補播已發生的事件，使進度即時追上。
+  const attachToRunningJob = useCallback(async (jobId) => {
     setErrorMsg('');
     setJobRunning(true);
     finishedRef.current = new Set();
+    // 接上 job 前先抓最新素材（標準化後的 _std 卡片）：讓格線立即顯示卡片，pendingPaths / 進度條 total 才正確
+    let pendingPaths = [];
+    try {
+      const data = await apiService.fetchAssets(projectId);
+      setAssets(data);
+      pendingPaths = data
+        .filter((a) => a.dirty || a.status === STATUS_UNPROCESSED)
+        .map((a) => a.path);
+    } catch {
+      // 抓素材失敗不致命：以空清單續接 WS，replay buffer 仍會補播進度
+    }
     setProgress({ done: 0, total: pendingPaths.length });
     const initialLive = {};
     pendingPaths.forEach((p) => { initialLive[p] = { status: 'processing', stage: null }; });
@@ -170,7 +182,7 @@ export default function AssetListPage() {
       setLiveStatusMap({});
       setProgress({ done: 0, total: 0 });
     }
-  }, [connect]);
+  }, [connect, projectId]);
 
   // 掛載 / 換專案時抓素材：setState 全落在 promise 回呼（非同步）以符合 effect 規範；
   // active 旗標避免請求未回前元件已卸載而對舊狀態 setState。素材載入後再查 Phase 1 進度：
@@ -189,10 +201,7 @@ export default function AssetListPage() {
             // 記錄背景狀態：未收斂（pending/processing）且無 job 時，由下方輪詢 effect 接手顯示「準備中」
             setPhase1Status(p.phase1_status);
             if (p.active_job_id) {
-              const pendingPaths = data
-                .filter((a) => a.dirty || a.status === STATUS_UNPROCESSED)
-                .map((a) => a.path);
-              attachToRunningJob(p.active_job_id, pendingPaths);
+              attachToRunningJob(p.active_job_id);
             }
           })
           .catch(() => {});
@@ -208,9 +217,8 @@ export default function AssetListPage() {
   }, [projectId, attachToRunningJob]);
 
   // 準備中（背景下載 / 標準化進行中、尚未連上 WS job）時週期輪詢 Phase 1 狀態，直到收斂：
-  // - 出現 active_job_id（背景開始感知分析）→ 改訂閱 WS 進度條；
+  // - 出現 active_job_id（背景開始感知分析）→ 改訂閱 WS 進度條（attachToRunningJob 內部會重抓素材）；
   // - 收斂為 skipped/done/failed → 重新載入素材（此時 .mov/.heic 已轉成可預覽的 _std）並結束準備中。
-  // assets 經 assetsRef 取用，不放入依賴，避免素材更新時重建計時器。
   useEffect(() => {
     if (!preparing) return undefined;
     let active = true;
@@ -220,10 +228,7 @@ export default function AssetListPage() {
         if (!active) return;
         setPhase1Status(p.phase1_status);
         if (p.active_job_id) {
-          const pendingPaths = assetsRef.current
-            .filter((a) => a.dirty || a.status === STATUS_UNPROCESSED)
-            .map((a) => a.path);
-          attachToRunningJob(p.active_job_id, pendingPaths);
+          attachToRunningJob(p.active_job_id);
         } else if (!PREPARING_STATUSES.has(p.phase1_status)) {
           loadAssets();
         }
