@@ -182,11 +182,13 @@ class CloudIngestionService:
     ) -> SyncReport:
         """
         在已持有 Phase 1 執行鎖(ingesting)下處理「偵測到素材變動」:
-        汰除舊檔 → 下載 → 一律標準化 →（依設定）跑 Phase 1 或僅標準化後標 SKIPPED。
+        汰除舊檔 → 下載 → 一律標準化 →（依設定）跑 Phase 1 或標 SKIPPED。
 
         進入即把 phase1_status 標 INGESTING(下載 / 標準化階段;auto-on/off 皆然):驅動素材頁與專案
         卡片顯示「處理素材中」,且中途崩潰時下輪 poller 會因非「已收斂」而重抓重做(idempotent),狀態
-        自癒。auto-on 真正進入感知分析前再翻成 PROCESSING(分析中),讓兩階段在 UI 上可區分。
+        自癒。標準化(含)以前都維持 INGESTING;auto-on 待標準化完成、真正進入感知分析前才翻成
+        PROCESSING(分析中)並建立可追進度的 job,讓兩階段在 UI 上可區分(標準化期間持續顯示轉圈,
+        不會因 job_id 提前落地而被前端誤判為分析中)。
         """
         # 進入處理即標 INGESTING:下載 / 標準化共用此狀態,前端據此顯示「處理素材中」轉圈
         self._patch_meta(project_dir, {META_KEY_PHASE1_STATUS: PHASE1_STATUS_INGESTING})
@@ -210,11 +212,20 @@ class CloudIngestionService:
         # signature 記「已分析到哪」）。如此 Phase 1 失敗下輪重試時不會把剛抓好的檔當 changed 再刪一次。
         self._patch_meta(project_dir, {META_KEY_REMOTE_MANIFEST: remote_fp})
 
-        # 使用者設定「建立後不自動分析」：仍先標準化(讓 .mov/.heic 轉成 _std、素材身分穩定、前端可預覽),
-        # 只刻意略過感知分析,待其到素材頁手動觸發。標 SKIPPED + 更新簽章,讓本輪與後續 poller 都視為
-        # 已收斂、不再重複觸發。缺鍵預設 True,使本欄位導入前建立的舊專案維持原本自動分析行為（零破壞）。
+        # 一律先標準化(仍維持 INGESTING):把新下載的 .mov/.heic 等轉成 _std 身分穩定下來,讓素材身分
+        # 穩定、前端可預覽,且日後「開始生成」不因身分漂移而漏跑。auto-on/off 皆走此步。
+        #
+        # 關鍵:標準化必須在「翻成 PROCESSING / 建立可追進度的分析 job 之前」做。標準化期間尚無 _std
+        # 可預覽(list_assets 隱藏待標準化的 raw → 素材清單為空)、也無 per-asset 進度可看,素材頁應持續
+        # 顯示「處理素材中」轉圈。若提前翻成 PROCESSING 並由 _phase1_runner 在 job 建立當下 publish
+        # 出 active_job_id,前端(重整後查 phase1-progress)會誤判分析已開始而 attach,把轉圈換成「空格線
+        # + 0/0 進度條」——正是 auto 開啟時重整素材頁轉圈消失的成因。
+        self._standardize(user_id, project_name)
+
+        # 使用者設定「建立後不自動分析」：標準化已完成,只刻意略過感知分析,待其到素材頁手動觸發。
+        # 標 SKIPPED + 更新簽章,讓本輪與後續 poller 都視為已收斂、不再重複觸發。缺鍵預設 True,
+        # 使本欄位導入前建立的舊專案維持原本自動分析行為（零破壞）。
         if not meta.get(META_KEY_AUTO_ANALYZE, True):
-            self._standardize(user_id, project_name)
             self._patch_meta(project_dir, {
                 META_KEY_PHASE1_STATUS: PHASE1_STATUS_SKIPPED,
                 META_KEY_PHASE1_UPDATED_AT: _now_iso(),
@@ -222,9 +233,10 @@ class CloudIngestionService:
             })
             return self._mark_synced(project_dir, report)
 
-        # 自動分析：跑 Phase 1（其內 run_phase1_incremental 已含標準化）；失敗只標 failed、保留舊簽章
-        # 供下輪重試,不視為同步失敗。鎖已由 ingest 護衛持有,_phase1_runner 不再自行取鎖（避免重入）。
-        # 真正進入感知分析前翻成 PROCESSING(分析中):與 INGESTING(處理素材中)在 UI 上區分兩階段。
+        # 自動分析：標準化已完成(素材身分穩定、前端可預覽),才翻成 PROCESSING 並建立可追進度的分析 job。
+        # 跑 Phase 1（其內 run_phase1_incremental 仍會呼叫標準化,因 idempotent 對已存在 _std 為純掃描
+        # no-op）；失敗只標 failed、保留舊簽章供下輪重試,不視為同步失敗。鎖已由 ingest 護衛持有,
+        # _phase1_runner 不再自行取鎖（避免重入）。PROCESSING(分析中)與 INGESTING(處理素材中)在 UI 上區分兩階段。
         self._patch_meta(project_dir, {META_KEY_PHASE1_STATUS: PHASE1_STATUS_PROCESSING})
         try:
             self._phase1_runner(user_id, project_name)
