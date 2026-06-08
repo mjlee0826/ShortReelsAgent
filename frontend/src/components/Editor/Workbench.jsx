@@ -9,6 +9,11 @@ import RegeneratePanel from './RegeneratePanel';
 import { Button, IconButton } from '../ui';
 import { FaUndo, FaRedo, FaSyncAlt, FaRobot, FaSpinner } from 'react-icons/fa';
 
+// 三欄寬度：左右用固定寬度（清單 / Inspector 維持可讀），中央影片吃滿剩餘空間並隨螢幕放大。
+// 9:16 預覽受高度限制，故不需各 1/3；窄側欄 + 寬中欄能給預覽最多呼吸空間。
+const SNAPSHOT_WIDTH = 'w-[260px]';
+const INSPECTOR_WIDTH = 'w-[360px]';
+
 /**
  * Workbench：兩階段中的「生成後」編輯工作台（三欄版型）。
  *
@@ -62,15 +67,15 @@ export default function Workbench() {
 
       {/* 工具列以下的編輯區（relative：作為生成遮罩的定位基準）*/}
       <div className="relative flex-1 flex flex-col overflow-hidden">
-        {/* 三欄：左 版本快照 / 中 影片 / 右 Inspector，各佔 1/3 */}
+        {/* 三欄：左 版本快照（窄）/ 中 影片（吃滿）/ 右 Inspector（窄）*/}
         <div className="flex flex-1 overflow-hidden">
-          <div className="flex-1 min-w-0 h-full">
+          <div className={`${SNAPSHOT_WIDTH} shrink-0 h-full`}>
             <SnapshotPanel />
           </div>
           <div className="flex-1 min-w-0 h-full relative">
             <VideoPlayer />
           </div>
-          <div className="flex-1 min-w-0 h-full">
+          <div className={`${INSPECTOR_WIDTH} shrink-0 h-full`}>
             <Inspector onRequestRegenerate={() => setShowRegenerate(true)} />
           </div>
         </div>
