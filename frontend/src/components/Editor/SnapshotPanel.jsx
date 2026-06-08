@@ -1,7 +1,8 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import useBlueprintStore from '../../store/useBlueprintStore';
 import useProjectStore from '../../store/useProjectStore';
 import { Button, IconButton, EmptyState } from '../ui';
+import SaveSnapshotModal from './SaveSnapshotModal';
 import { FaPlus, FaTrashAlt, FaHistory, FaLayerGroup } from 'react-icons/fa';
 
 /** 把 ISO 時間轉成精簡的本地顯示字串 */
@@ -26,18 +27,15 @@ export default function SnapshotPanel() {
   const restoreSnapshot = useBlueprintStore((s) => s.restoreSnapshot);
   const deleteSnapshot = useBlueprintStore((s) => s.deleteSnapshot);
 
+  const [showSaveModal, setShowSaveModal] = useState(false);
+
   // 進入 / 切換專案時載入版本清單
   useEffect(() => {
     if (folderName) loadSnapshots(folderName);
   }, [folderName, loadSnapshots]);
 
-  // 存成版本：以目前時間為預設名，讓使用者可改名
-  const handleSave = () => {
-    const defaultLabel = `版本 ${formatTime(new Date().toISOString())}`;
-    const label = window.prompt('為這個版本命名：', defaultLabel);
-    if (label === null) return; // 取消
-    saveSnapshot(folderName, label.trim() || defaultLabel);
-  };
+  // 預設版本名（以目前時間命名，使用者可在彈窗中改）
+  const defaultLabel = `版本 ${formatTime(new Date().toISOString())}`;
 
   const handleDelete = (snapshot) => {
     if (window.confirm(`刪除版本「${snapshot.label}」？`)) {
@@ -58,7 +56,7 @@ export default function SnapshotPanel() {
           fullWidth
           leftIcon={<FaPlus size={12} />}
           disabled={!hasBlueprint}
-          onClick={handleSave}
+          onClick={() => setShowSaveModal(true)}
         >
           存成版本
         </Button>
@@ -92,6 +90,15 @@ export default function SnapshotPanel() {
           ))
         )}
       </div>
+
+      {/* 存成版本：命名彈窗 */}
+      {showSaveModal && (
+        <SaveSnapshotModal
+          defaultLabel={defaultLabel}
+          onSave={(label) => saveSnapshot(folderName, label)}
+          onClose={() => setShowSaveModal(false)}
+        />
+      )}
     </div>
   );
 }
