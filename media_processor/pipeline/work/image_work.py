@@ -16,9 +16,8 @@ ImageWork 自身只保留圖片**專有**的欄位:整張圖尺寸、整張圖 s
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
-from media_processor.models import SubjectBbox
 from media_processor.pipeline.context import AssetContext
 from media_processor.pipeline.work.frame_analysis import FrameAnalysis
 
@@ -32,7 +31,8 @@ class ImageWork:
     單張圖片流經各 Stage 時的中間產物集合。
 
     ``frame`` 由 DecodeImageStage 建立(整張圖即「代表幀」),共用的 per-frame Stage 填入其欄位;
-    image 專屬欄位(saliency_bbox / exif / vlm_result)由對應 image Stage 填入。
+    image 專屬欄位(exif / vlm_result)由對應 image Stage 填入。主體框由 semantic(Qwen)的 vlm_result
+    直接提供、Assembly 解析(無效退臉部 / 全幅),故不再有獨立 saliency 欄位。
     AssemblyImageStage 讀齊 ``frame`` + 專屬欄位組成 ``ImageMetadata``。所有欄位帶預設值。
     """
 
@@ -42,8 +42,6 @@ class ImageWork:
     width: int = 0
     height: int = 0
     aspect_ratio: float = 0.0
-    # 主體定位(image 專有:整張圖 U2-Net saliency;有臉時 Assembly 以 frame.face_bbox 覆蓋)
-    saliency_bbox: Optional[SubjectBbox] = None
     # EXIF 與語意(image 專有)
     exif: dict[str, Any] = field(default_factory=dict)        # {"datetime": ..., "gps_info": ...}
     vlm_result: dict[str, Any] = field(default_factory=dict)  # Qwen / Gemini 回傳的語意欄位

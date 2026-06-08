@@ -28,6 +28,14 @@ _PCT_MAX = 100.0
 _PCT_NDIGITS = 1
 # 換算後寬或高小於此百分比視為無效框:可同時擋掉「模型亂吐」與「座標慣例不符被縮成極小框」
 _MIN_SIDE_PCT = 1.0
+# 找不到主體時的全畫面安全框(x1,y1,x2,y2):代表「不裁切、任意位置皆可」,移除 U²-Net 後的最終 fallback
+_FULL_FRAME = (0.0, 0.0, 100.0, 100.0)
+
+
+def full_frame_bbox() -> SubjectBbox:
+    """主體框最終 fallback:全畫面安全框 (0,0,100,100)。VLM 未給有效框時用,語意為「整幅皆主體」。"""
+    x1, y1, x2, y2 = _FULL_FRAME
+    return SubjectBbox(x1=x1, y1=y1, x2=x2, y2=y2)
 
 
 def parse_qwen_bbox(raw) -> Optional[SubjectBbox]:

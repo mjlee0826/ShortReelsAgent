@@ -17,7 +17,6 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from config.media_processor_config import MINIMUM_AUDIO_FILE_BYTES
-from media_processor.models import SubjectBbox
 from media_processor.pipeline.context import AssetContext
 from media_processor.pipeline.work.frame_analysis import FrameAnalysis
 
@@ -47,7 +46,6 @@ class VideoWork:
     frame: FrameAnalysis = field(default_factory=FrameAnalysis)
 
     # ── 暫存檔路徑(由對應 Stage 建立並登記到 context.temp_paths,結束時統一清除)──
-    tc_file_path: Optional[str] = None   # TimecodeStage 燒錄後的時間碼影片(Complex)
     audio_path: Optional[str] = None     # AudioExtractionStage 抽出的 wav
 
     # ── 音訊分析(VadStage / WhisperStage / AudioEnvStage 產出)──────────────
@@ -59,7 +57,6 @@ class VideoWork:
     # ── 影片結構與視覺(各對應 Stage 產出)──────────────────────────────────
     scene_cuts: list[float] = field(default_factory=list)   # SceneCutStage
     motion_intensity: str = ""                              # MotionIntensityStage(Simple)
-    subject_bbox: Optional[SubjectBbox] = None              # SaliencyUnionStage(Simple,頭/中/尾三幀聯集)
 
     # ── 語意(SemanticVideoStage 產出;Qwen 全局 / Gemini 時間碼事件索引)──────
     vlm_result: dict[str, Any] = field(default_factory=dict)

@@ -27,7 +27,6 @@ from config.media_processor_config import GPU_SAFETY_BUFFER_GB
 from config.pipeline_config import (
     GPU_POOL_ENABLED,
     MEDIAPIPE_POOL_SIZE,
-    SALIENCY_POOL_SIZE,
     VAD_POOL_SIZE,
 )
 from media_processor.pipeline.executor.gpu_detect import detect_gpu_ids
@@ -51,15 +50,6 @@ _R = TypeVar("_R")
 _mediapipe_pool: Queue = Queue()
 _mediapipe_pool_initialized = False
 _mediapipe_pool_init_lock = threading.Lock()
-
-# ── Saliency pool（模組級，CPU；Option 3）─────────────────────────────────────────
-# U²-Net 已移出 GPU capacity、改純 CPU（見 model.managers.saliency_model_manager），由此獨立 pool 管併發。
-# 與 mediapipe pool 同構：放「SALIENCY_POOL_SIZE 個 *不同 slot_id* 的 instance」，每個有獨立的
-# onnxruntime CPU session 與 L3 _inference_lock，才能真正多路 CPU 併發（saliency CPU 推論較重，
-# 需要真平行）。run_saliency() 從此借出。
-_saliency_pool: Queue = Queue()
-_saliency_pool_initialized = False
-_saliency_pool_init_lock = threading.Lock()
 
 # ── VAD pool（模組級，CPU；真平行）─────────────────────────────────────────────
 # 與 mediapipe / saliency pool 同構：放「VAD_POOL_SIZE 個 *不同 slot_id* 的 Silero instance」，
@@ -253,9 +243,9 @@ class ModelPoolRegistry:
 
     def aux_pool_rows(self) -> list[AuxPoolRow]:
         """
-        回傳未納入 GPU capacity 的本地 CPU 模型(VAD / MediaPipe / Saliency)佈局列,供 StartupReporter 顯示。
+        回傳未納入 GPU capacity 的本地 CPU 模型(VAD / MediaPipe)佈局列,供 StartupReporter 顯示。
 
-        份數取自 config 常數(單一資料來源、無 magic number);三者皆於 _warm_up_auxiliary 啟動期 eager 預熱,
+        份數取自 config 常數(單一資料來源、無 magic number);兩者皆於 _warm_up_auxiliary 啟動期 eager 預熱,
         故 status 統一為 AuxPoolRow 預設的 ``eager``(個別載入失敗的降級已由 _warm_up_auxiliary 另行 log)。
         """
         return [
@@ -269,26 +259,21 @@ class ModelPoolRegistry:
                 instances=MEDIAPIPE_POOL_SIZE,
                 placement=f"cpu×{MEDIAPIPE_POOL_SIZE}",
             ),
-            AuxPoolRow(
-                name="SaliencyModelManager",
-                instances=SALIENCY_POOL_SIZE,
-                placement=f"cpu×{SALIENCY_POOL_SIZE}",
-            ),
         ]
 
     def _warm_up_auxiliary(self) -> None:
         """
-        預載未納入 GPU capacity 的本地 CPU pool：VAD(Silero) / MediaPipe / Saliency，三者皆為獨立 CPU pool。
+        預載未納入 GPU capacity 的本地 CPU pool：VAD(Silero) / MediaPipe，兩者皆為獨立 CPU pool。
 
-        三池同構（各放 N 個「不同 slot_id」instance、各有獨立 L3 lock → 借出後真平行），故用統一的
-        ``_warm_up_cpu_pool`` 預熱（DRY，取代原本三段近乎相同的樣板）。每池 warmup 失敗只降級 lazy、
+        兩池同構（各放 N 個「不同 slot_id」instance、各有獨立 L3 lock → 借出後真平行），故用統一的
+        ``_warm_up_cpu_pool`` 預熱（DRY，取代原本近乎相同的樣板）。每池 warmup 失敗只降級 lazy、
         不中斷其餘（stage 首次用到會 lazy 再試）。VAD 改 pool 後，其 torchcodec 預載改在
         ``_warm_up_vad_pool`` 內逐 instance 觸發（仍是單執行緒、避免執行期並發 dlopen 死結）。
         Gemini **刻意不預載**：雲端 API client、無本地權重，且未設金鑰時 ``_initialize`` 會 raise。
+        （U²-Net Saliency 已移出主 pipeline，故不再於此預熱；legacy processor 仍會在需要時自行 lazy 建立。）
         """
         self._warm_up_cpu_pool("VadModelManager", VAD_POOL_SIZE, _warm_up_vad_pool)
         self._warm_up_cpu_pool("MediaPipeModelManager", MEDIAPIPE_POOL_SIZE, _warm_up_mediapipe_pool)
-        self._warm_up_cpu_pool("SaliencyModelManager", SALIENCY_POOL_SIZE, _warm_up_saliency_pool)
 
     def _warm_up_cpu_pool(self, name: str, size: int, warm_fn: Callable[[], None]) -> None:
         """
@@ -364,7 +349,7 @@ def _warm_up_mediapipe_pool() -> None:
     """
     warmup 時建立 MEDIAPIPE_POOL_SIZE 個「不同 slot_id」的 MediaPipeModelManager instance 放進 pool。
 
-    與 _warm_up_saliency_pool 同構：用不同 slot_id（(0,0)、(0,1)…）取得彼此獨立的 singleton，
+    與 _warm_up_vad_pool 同構：用不同 slot_id（(0,0)、(0,1)…）取得彼此獨立的 singleton，
     每個各有自己的 FaceDetector 與 L3 _inference_lock → 借出後可真正多路 CPU 併發（不像共用單一
     (0,0) instance 會被 @synchronized_inference 的 L3 lock 序列化成單路）。
     pool 預熱後 _mediapipe_pool_initialized 置 True，borrow_mediapipe 不再 lazy 初始化。
@@ -381,7 +366,7 @@ def borrow_mediapipe() -> Iterator:
     """
     借用一個 MediaPipe FaceDetector instance（blocking queue），用完自動歸還。
 
-    與 run_saliency 同構：pool 未預熱時（warmup 失敗 / 未呼叫）以雙重檢查鎖 lazy 建滿整池
+    與 run_vad 同構：pool 未預熱時（warmup 失敗 / 未呼叫）以雙重檢查鎖 lazy 建滿整池
     （_warm_up_mediapipe_pool，含不同 slot_id），確保 lazy 路徑同樣具備真平行、且避免永久阻塞。
     """
     global _mediapipe_pool_initialized
@@ -400,49 +385,11 @@ def borrow_mediapipe() -> Iterator:
         _mediapipe_pool.put(mgr)
 
 
-def _warm_up_saliency_pool() -> None:
-    """
-    warmup 時建立 SALIENCY_POOL_SIZE 個「不同 slot_id」的 SaliencyModelManager instance 放進 pool。
-
-    用不同 slot_id（(0,0)、(0,1)…）取得彼此獨立的 singleton，使每個 instance 各有自己的
-    L3 _inference_lock → 借出後可真正多路 CPU 併發（不像共用單一 instance 會被 L3 序列化）。
-    pool 預熱後 _saliency_pool_initialized 置 True，run_saliency 不再 lazy 初始化。
-    """
-    global _saliency_pool_initialized
-    from model.managers.saliency_model_manager import SaliencyModelManager
-    for slot_id in range(SALIENCY_POOL_SIZE):
-        _saliency_pool.put(SaliencyModelManager(slot_id=slot_id))
-    _saliency_pool_initialized = True
-
-
-def run_saliency(fn: Callable[[_M], _R]) -> _R:
-    """
-    供 saliency stage 使用：從 CPU pool 借一個 ``SaliencyModelManager`` 執行 ``fn``，用完自動歸還。
-
-    Option 3 起 saliency 為純 CPU 模型（見 model.managers.saliency_model_manager），不再走 GPU capacity
-    pool / 跨卡 OOM failover —— CPU 不會 CUDA OOM、也無卡可換。pool 未預熱（warmup 失敗 / 未呼叫）
-    時以雙重檢查鎖 lazy 建滿整池，避免永久阻塞。
-    """
-    global _saliency_pool_initialized
-    if not _saliency_pool_initialized:
-        with _saliency_pool_init_lock:
-            if not _saliency_pool_initialized:
-                _warm_up_saliency_pool()
-    # 借 instance 的阻塞（pool 全借出時）計入本 thread 的「等資源」累加，供 stage 拆分 compute/wait
-    with ResourceWaitClock.measure():
-        saliency = _saliency_pool.get()
-    try:
-        return fn(saliency)
-    finally:
-        # finally 確保異常路徑也歸還 instance，避免 pool 被慢慢耗盡
-        _saliency_pool.put(saliency)
-
-
 def _warm_up_vad_pool() -> None:
     """
     warmup 時建立 VAD_POOL_SIZE 個「不同 slot_id」的 VadModelManager instance 放進 pool。
 
-    與 _warm_up_saliency_pool 同構:用不同 slot_id 取得彼此獨立的 Silero singleton,各有自己的
+    與 _warm_up_mediapipe_pool 同構:用不同 slot_id 取得彼此獨立的 Silero singleton,各有自己的
     L3 _inference_lock → 借出後多支影片的 VAD 可真正多路併發。另對每個 instance 呼叫 ``warmup()``
     單執行緒預載 torchcodec(read_audio 首呼叫的 dlopen),避免執行期多 thread 首呼叫撞動態連結器鎖死結。
     pool 預熱後 _vad_pool_initialized 置 True,run_vad 不再 lazy 初始化。

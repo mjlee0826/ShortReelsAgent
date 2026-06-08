@@ -29,7 +29,6 @@ from media_processor.pipeline.stages.assembly_image_stage import AssemblyImageSt
 from media_processor.pipeline.stages.decode_image_stage import DecodeImageStage
 from media_processor.pipeline.stages.exif_stage import ExifStage
 from media_processor.pipeline.stages.legacy.legacy_image_stage import LegacyImagePipelineStage
-from media_processor.pipeline.stages.saliency_stage import SaliencyStage
 from media_processor.pipeline.stages.semantic_image_stage import SemanticImageStage
 
 # ── 影片專屬 Stage ────────────────────────────────────────────────────────────
@@ -37,13 +36,10 @@ from media_processor.pipeline.stages.assembly_video_stage import AssemblyVideoSt
 from media_processor.pipeline.stages.audio_env_stage import AudioEnvStage
 from media_processor.pipeline.stages.audio_extraction_stage import AudioExtractionStage
 from media_processor.pipeline.stages.decode_video_stage import DecodeVideoStage
-from media_processor.pipeline.stages.event_bbox_stage import EventBboxStage
 from media_processor.pipeline.stages.legacy.legacy_video_stage import LegacyVideoPipelineStage
 from media_processor.pipeline.stages.motion_intensity_stage import MotionIntensityStage
-from media_processor.pipeline.stages.saliency_union_stage import SaliencyUnionStage
 from media_processor.pipeline.stages.scene_cut_stage import SceneCutStage
 from media_processor.pipeline.stages.semantic_video_stage import SemanticVideoStage
-from media_processor.pipeline.stages.timecode_stage import TimecodeStage
 from media_processor.pipeline.stages.vad_stage import VadStage
 from media_processor.pipeline.stages.whisper_stage import WhisperStage
 
@@ -67,7 +63,8 @@ class PipelineBuilder:
         """
         圖片 Pipeline(DAG 表達,可旗標回退 Legacy)。
 
-        依賴圖:``decode → {tech, semantic, saliency, aes, cv, face, exif} → assembly``。
+        依賴圖:``decode → {tech, semantic, aes, cv, face, exif} → assembly``。主體框改由 semantic(Qwen)
+        直接輸出,無效時退臉部 / 全畫面安全框,故已移除 U²-Net SaliencyStage。
         評分與過濾已解耦:不再有硬性 reject 短路(避免 MUSIQ 單訊號低估誤刪好素材),tech 退為
         decode 後的平行 Stage 之一,只負責算分寫入 metadata;畫質取捨改由 ContextCompressor 寬容把關。
         """
@@ -79,7 +76,6 @@ class PipelineBuilder:
         parallel = [
             TechScoreStage(),
             SemanticImageStage(context.image_strategy),
-            SaliencyStage(),
             AesScoreStage(),
             CVFeaturesStage(),
             FaceDetectStage(),
@@ -106,9 +102,10 @@ class PipelineBuilder:
         """
         Simple 影片依賴圖(Qwen 全局分析;音訊鏈全拆;不再有 reject 短路)。
 
-        ``decode → {tech, semantic(Qwen), scene, motion, saliency_union, aes, cv, face}``;
+        ``decode → {tech, semantic(Qwen), scene, motion, aes, cv, face}``;
         音訊鏈:``audio_extract``(只依賴 decode、便宜 IO)→ ``vad`` → ``whisper``;``audio_env`` 另只
-        依賴 audio_extract,與語音鏈並行(全拆紅利)。評分與過濾解耦後移除硬 reject(避免 MUSIQ 單訊號
+        依賴 audio_extract,與語音鏈並行(全拆紅利)。主體框改由 semantic(Qwen)直接輸出、無效退全畫面安全框,
+        故已移除 U²-Net SaliencyUnionStage。評分與過濾解耦後移除硬 reject(避免 MUSIQ 單訊號
         低估誤刪),tech 退為 decode 後的平行 Stage 之一;assembly 等齊視覺群 + whisper + audio_env。
         """
         decode = DecodeVideoStage()
@@ -119,7 +116,6 @@ class PipelineBuilder:
             SemanticVideoStage(context.video_strategy),  # SIMPLE → Qwen(GPU)
             SceneCutStage(),
             MotionIntensityStage(),
-            SaliencyUnionStage(),
             AesScoreStage(),
             CVFeaturesStage(),
             FaceDetectStage(),
@@ -145,12 +141,13 @@ class PipelineBuilder:
 
     def _build_complex_video_pipeline(self, context: AssetContext) -> Pipeline:
         """
-        Complex 影片依賴圖(Timecode 與所有非-Gemini 工作並行;Gemini 只等 Timecode)。
+        Complex 影片依賴圖(所有工作 decode 後全並行;Gemini 直接讀原始影片)。
 
-        ``decode → {tech, aes, audio_extract→audio_infer, timecode→semantic(Gemini)→event_bbox, scene, cv, face}
-        → assembly``。tech / aes 對代表幀(中間幀)算畫質 / 美學分,與 Simple/Image 同一條 Stage(只算分、
-        不 gate,故 Complex 無 reject 短路);timecode(最耗時的燒碼)只被 semantic 依賴,與音訊鏈 / 場景 /
-        視覺特徵 / 評分自然重疊。
+        ``decode → {tech, aes, audio_extract→audio_infer, semantic(Gemini), scene, cv, face} → assembly``。
+        tech / aes 對代表幀(中間幀)算畫質 / 美學分,與 Simple/Image 同一條 Stage(只算分、不 gate,故
+        Complex 無 reject 短路)。已移除 TimecodeStage(燒碼重編碼):Gemini 改用原生時間戳,semantic 不再
+        等最耗時的燒碼、decode 後即可上傳,與音訊鏈 / 場景 / 視覺特徵 / 評分自然重疊。逐 event 主體框的
+        正規化已併入 AssemblyVideoStage(原 EventBboxStage 簡化為純資料整形後不再獨立成 Stage)。
         """
         decode = DecodeVideoStage()
         audio_extract = AudioExtractionStage()
@@ -161,12 +158,10 @@ class PipelineBuilder:
         # 代表幀畫質 / 美學評分(與 Simple/Image 共用 Stage,只依賴代表幀)
         tech = TechScoreStage()
         aes = AesScoreStage()
-        timecode = TimecodeStage()
         scene = SceneCutStage()
         cv = CVFeaturesStage()
         face = FaceDetectStage()
         semantic = SemanticVideoStage(context.video_strategy)  # COMPLEX → Gemini(API)
-        event_bbox = EventBboxStage()
 
         decode_name = decode.meta.name
         nodes = [
@@ -177,15 +172,13 @@ class PipelineBuilder:
             StageNode(audio_env, (audio_extract.meta.name,)),
             StageNode(tech, (decode_name,)),
             StageNode(aes, (decode_name,)),
-            StageNode(timecode, (decode_name,)),
             StageNode(scene, (decode_name,)),
             StageNode(cv, (decode_name,)),
             StageNode(face, (decode_name,)),
-            StageNode(semantic, (timecode.meta.name,)),       # Gemini 只等 timecode
-            StageNode(event_bbox, (semantic.meta.name,)),     # 逐 event bbox 需 Gemini 事件清單
+            StageNode(semantic, (decode_name,)),              # Gemini 直接讀原始影片,decode 後即可上傳
             StageNode(
                 AssemblyVideoStage(),
-                # event_bbox 已涵蓋 semantic(vlm_result);加 tech/aes/whisper/audio_env/scene/cv/face 湊齊所有 metadata 來源
+                # semantic(vlm_result,含逐 event 主體框)+ tech/aes/whisper/audio_env/scene/cv/face 湊齊所有 metadata 來源
                 (
                     tech.meta.name,
                     aes.meta.name,
@@ -194,7 +187,7 @@ class PipelineBuilder:
                     scene.meta.name,
                     cv.meta.name,
                     face.meta.name,
-                    event_bbox.meta.name,
+                    semantic.meta.name,
                 ),
             ),
         ]

@@ -21,12 +21,12 @@ _MEDIA_TYPE_VIDEO = "video"
 
 class SemanticVideoStage(Stage):
     """
-    視覺語意分析(Strategy 分派 Hook):SIMPLE 走本地 Qwen 全局分析、COMPLEX 走 Gemini 時間碼事件索引。
+    視覺語意分析(Strategy 分派 Hook):SIMPLE 走本地 Qwen 全局分析、COMPLEX 走 Gemini 多模態事件索引。
 
     - SIMPLE:對**原始**影片做 ``GLOBAL_ANALYSIS``(GPU 資源)。
-    - COMPLEX:對 TimecodeStage 燒好時間碼的影片做 ``TIMECODED_ACTION_INDEX``(API 資源);
-      故 DAG 中本 Stage 只依賴 timecode,不需等音訊 / 視覺特徵 —— 修正了 StageGroup 時代的過度約束。
-    結果 dict 寫入 ``VideoWork.vlm_result``,由 Assembly / EventBbox 後續取用。
+    - COMPLEX:對**原始**影片做 ``TIMECODED_ACTION_INDEX``(API 資源),Gemini 以原生時間戳報事件起訖秒數;
+      已移除燒碼 TimecodeStage,故本 Stage 只依賴 decode、decode 後即可上傳,不需等音訊 / 視覺特徵。
+    結果 dict 寫入 ``VideoWork.vlm_result``,由 Assembly(含逐 event 主體框正規化)後續取用。
     """
 
     def __init__(self, video_strategy: VideoStrategy = VideoStrategy.SIMPLE):
@@ -54,11 +54,11 @@ class SemanticVideoStage(Stage):
         return self._gemini
 
     def run(self, context: AssetContext) -> None:
-        """依策略呼叫對應引擎(Complex 用時間碼影片),語意結果寫入 VideoWork.vlm_result。"""
+        """依策略呼叫對應引擎(Complex 直接讀原始影片),語意結果寫入 VideoWork.vlm_result。"""
         work = get_video_work(context)
         if self._video_strategy == VideoStrategy.COMPLEX:
             work.vlm_result = self._gemini_engine().analyze_media(
-                media_input=work.tc_file_path,
+                media_input=context.file_path,
                 media_type=_MEDIA_TYPE_VIDEO,
                 mode=TaskMode.TIMECODED_ACTION_INDEX,
             )

@@ -15,7 +15,6 @@ from media_processor.pipeline.work.image_work import IMAGE_WORK_KEY, ImageWork
 from media_processor.pipeline.stages.legacy.legacy_base import LegacyProcessStage
 from media_processor.pipeline.stages.legacy.legacy_image_stage import LegacyImagePipelineStage
 from media_processor.pipeline.stages.legacy.legacy_video_stage import LegacyVideoPipelineStage
-from media_processor.pipeline.stages.saliency_stage import SaliencyStage
 from media_processor.pipeline.stages.semantic_image_stage import SemanticImageStage
 from media_processor.pipeline.stages.tech_score_stage import TechScoreStage
 
@@ -30,7 +29,6 @@ __all__ = [
     # 圖片細粒度 Stage
     "DecodeImageStage",
     "TechScoreStage",
-    "SaliencyStage",
     "AesScoreStage",
     "CVFeaturesStage",
     "FaceDetectStage",

@@ -9,7 +9,11 @@ from media_processor.models import (
 )
 from media_processor.pipeline.context import AssetContext, STATUS_SUCCESS
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
-from media_processor.pipeline.utils.vlm_bbox_utils import parse_qwen_bbox
+from media_processor.pipeline.utils.vlm_bbox_utils import (
+    full_frame_bbox,
+    parse_gemini_bbox,
+    parse_qwen_bbox,
+)
 from media_processor.pipeline.work.video_work import VideoWork, get_video_work
 from media_processor.video_strategy import VideoStrategy
 
@@ -26,9 +30,10 @@ class AssemblyVideoStage(Stage):
     """
     依 strategy 把 VideoWork 組裝成最終 metadata 與成功 result(DAG 的唯一 join 點)。
 
-    - SIMPLE → ``VideoMetadata``(含畫質 / 美學 / 動態 / 三幀聯集 subject_bbox / crop_feasibility / faces)。
-    - COMPLEX → ``ComplexVideoMetadata``(以 multimodal_event_index 為主,不含 subject_bbox;含代表幀
-      畫質 / 美學分(供導演選材);**無 faces 欄位** —— 與原版「dict 經 Pydantic coercion 丟棄多餘 faces 鍵」一致)。
+    - SIMPLE → ``VideoMetadata``(含畫質 / 美學 / 動態 / Qwen subject_bbox / crop_feasibility / faces)。
+    - COMPLEX → ``ComplexVideoMetadata``(以 multimodal_event_index 為主;**逐 event 主體框於此就地正規化**
+      ——原 EventBboxStage 簡化為純資料整形後併入本 join 點,不再獨立成 Stage;含代表幀畫質 / 美學分供導演
+      選材;**無 faces 欄位** —— 與原版「dict 經 Pydantic coercion 丟棄多餘 faces 鍵」一致)。
     純組裝(CPU 資源);只在前面 Stage 皆未 reject / error 時才執行(Pipeline 已自動短路)。
     """
 
@@ -58,9 +63,9 @@ class AssemblyVideoStage(Stage):
     def _build_simple(work: VideoWork, vlm: dict) -> VideoMetadata:
         """組 Simple 影片 metadata(逐欄對齊原 VideoProcessor.analyze_visual_semantics)。"""
         frame = work.frame
-        # 主體框優先序:Qwen 直接給的框 → 三幀 saliency 聯集(無效自動退回,零退步)
+        # 主體框優先序:Qwen 直接給的框 → 全畫面安全框(已移除 U²-Net 三幀聯集 fallback)
         vlm_bbox = parse_qwen_bbox(vlm.get("subject_bbox"))
-        subject_bbox = vlm_bbox if vlm_bbox is not None else work.subject_bbox
+        subject_bbox = vlm_bbox if vlm_bbox is not None else full_frame_bbox()
         crop_feasibility = MediaStrategy._compute_crop_feasibility(
             subject_bbox, work.aspect_ratio
         )
@@ -96,9 +101,23 @@ class AssemblyVideoStage(Stage):
         )
 
     @staticmethod
+    def _normalize_event_bboxes(events: list) -> list:
+        """
+        把 Gemini 逐 event 的主體框正規化為 0–100 ``SubjectBbox`` dict(原 EventBboxStage 的工作)。
+
+        直接採 Gemini 在 prompt 輸出的框;缺失 / 格式不符 / 退化即退回全畫面安全框。就地寫回每筆事件的
+        ``subject_bbox`` 並回傳同一清單(供下游前端逐 event 動態框 / 導演取用)。
+        """
+        for event in events:
+            bbox = parse_gemini_bbox(event.get("subject_bbox")) or full_frame_bbox()
+            event["subject_bbox"] = bbox.model_dump()
+        return events
+
+    @staticmethod
     def _build_complex(work: VideoWork, vlm: dict) -> ComplexVideoMetadata:
-        """組 Complex 影片 metadata(以 multimodal_event_index 為主;無 faces,但保留代表幀畫質/美學分)。"""
+        """組 Complex 影片 metadata(逐 event 主體框就地正規化;無 faces,但保留代表幀畫質/美學分)。"""
         frame = work.frame
+        events = AssemblyVideoStage._normalize_event_bboxes(vlm.get(_EVENT_INDEX_KEY, []))
         return ComplexVideoMetadata(
             width=work.width,
             height=work.height,
@@ -125,5 +144,5 @@ class AssemblyVideoStage(Stage):
             dominant_colors=frame.dominant_colors,
             is_dense_indexed=True,
             scene_cuts=work.scene_cuts,
-            multimodal_event_index=vlm.get(_EVENT_INDEX_KEY, []),
+            multimodal_event_index=events,
         )
