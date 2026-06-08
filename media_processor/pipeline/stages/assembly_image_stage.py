@@ -5,7 +5,11 @@ from media_processor.media_strategy import MediaStrategy
 from media_processor.models import ImageMetadata, ProcessorResult
 from media_processor.pipeline.context import AssetContext, STATUS_SUCCESS
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
-from media_processor.pipeline.utils.vlm_bbox_utils import full_frame_bbox, parse_qwen_bbox
+from media_processor.pipeline.utils.vlm_bbox_utils import (
+    full_frame_bbox,
+    parse_qwen_candidates,
+    select_best_candidate,
+)
 from media_processor.pipeline.work.image_work import get_image_work
 
 _STAGE_NAME = "assembly_image"
@@ -38,8 +42,10 @@ class AssemblyImageStage(Stage):
         # 語意欄位以 .get 取值並沿用原版預設,確保缺欄位時行為一致
         vlm = work.vlm_result
 
-        # 主體定位優先序:Qwen 直接給的框 → 臉部 bbox → 全畫面安全框(無效自動往後退)
-        vlm_bbox = parse_qwen_bbox(vlm.get("subject_bbox"))
+        # 主體定位優先序:Qwen top-N 候選中選最佳框 → 臉部 bbox → 全畫面安全框(無效自動往後退)
+        # 相容舊鍵:新 prompt 輸出 subject_candidates,缺漏時退回舊單框 subject_bbox(parse 端會當單一候選)
+        candidates = parse_qwen_candidates(vlm.get("subject_candidates", vlm.get("subject_bbox")))
+        vlm_bbox = select_best_candidate(candidates, work.aspect_ratio)
         if vlm_bbox is not None:
             subject_bbox = vlm_bbox
         elif frame.face_bbox is not None:
@@ -66,6 +72,7 @@ class AssemblyImageStage(Stage):
             color_temperature=frame.color_temperature,
             dominant_colors=frame.dominant_colors,
             subject_bbox=subject_bbox,
+            subject_candidates=candidates,
             crop_feasibility=crop_feasibility,
             faces=frame.face_info,
         )

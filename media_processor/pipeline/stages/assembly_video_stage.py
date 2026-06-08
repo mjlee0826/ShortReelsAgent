@@ -11,8 +11,9 @@ from media_processor.pipeline.context import AssetContext, STATUS_SUCCESS
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
 from media_processor.pipeline.utils.vlm_bbox_utils import (
     full_frame_bbox,
-    parse_gemini_bbox,
-    parse_qwen_bbox,
+    parse_gemini_candidates,
+    parse_qwen_candidates,
+    select_best_candidate,
 )
 from media_processor.pipeline.work.video_work import VideoWork, get_video_work
 from media_processor.video_strategy import VideoStrategy
@@ -63,8 +64,10 @@ class AssemblyVideoStage(Stage):
     def _build_simple(work: VideoWork, vlm: dict) -> VideoMetadata:
         """組 Simple 影片 metadata(逐欄對齊原 VideoProcessor.analyze_visual_semantics)。"""
         frame = work.frame
-        # 主體框優先序:Qwen 直接給的框 → 全畫面安全框(已移除 U²-Net 三幀聯集 fallback)
-        vlm_bbox = parse_qwen_bbox(vlm.get("subject_bbox"))
+        # 主體框優先序:Qwen top-N 候選中選最佳框 → 全畫面安全框(已移除 U²-Net 三幀聯集 fallback)
+        # 相容舊鍵:新 prompt 輸出 subject_candidates,缺漏時退回舊單框 subject_bbox
+        candidates = parse_qwen_candidates(vlm.get("subject_candidates", vlm.get("subject_bbox")))
+        vlm_bbox = select_best_candidate(candidates, work.aspect_ratio)
         subject_bbox = vlm_bbox if vlm_bbox is not None else full_frame_bbox()
         crop_feasibility = MediaStrategy._compute_crop_feasibility(
             subject_bbox, work.aspect_ratio
@@ -95,29 +98,37 @@ class AssemblyVideoStage(Stage):
             dominant_colors=frame.dominant_colors,
             motion_intensity=work.motion_intensity,
             subject_bbox=subject_bbox,
+            subject_candidates=candidates,
             crop_feasibility=crop_feasibility,
             faces=frame.face_info,
             scene_cuts=work.scene_cuts,
         )
 
     @staticmethod
-    def _normalize_event_bboxes(events: list) -> list:
+    def _normalize_event_bboxes(events: list, aspect_ratio: float) -> list:
         """
-        把 Gemini 逐 event 的主體框正規化為 0–100 ``SubjectBbox`` dict(原 EventBboxStage 的工作)。
+        把 Gemini 逐 event 的 top-N 候選主體正規化、選最佳框(原 EventBboxStage 的工作)。
 
-        直接採 Gemini 在 prompt 輸出的框;缺失 / 格式不符 / 退化即退回全畫面安全框。就地寫回每筆事件的
-        ``subject_bbox`` 並回傳同一清單(供下游前端逐 event 動態框 / 導演取用)。
+        逐事件解析 ``subject_candidates``(缺漏時退回舊單框 ``subject_bbox``),依「信心 + 9:16 可裁性」
+        選最佳框寫回 ``subject_bbox``;同時就地寫回排序後的 ``subject_candidates``(dict 清單),供下游
+        前端逐 event 動態框 / 導演按使用者意圖改選。缺失 / 格式不符 / 退化即退回全畫面安全框。
         """
         for event in events:
-            bbox = parse_gemini_bbox(event.get("subject_bbox")) or full_frame_bbox()
-            event["subject_bbox"] = bbox.model_dump()
+            candidates = parse_gemini_candidates(
+                event.get("subject_candidates", event.get("subject_bbox"))
+            )
+            best = select_best_candidate(candidates, aspect_ratio) or full_frame_bbox()
+            event["subject_bbox"] = best.model_dump()
+            event["subject_candidates"] = [candidate.model_dump() for candidate in candidates]
         return events
 
     @staticmethod
     def _build_complex(work: VideoWork, vlm: dict) -> ComplexVideoMetadata:
         """組 Complex 影片 metadata(逐 event 主體框就地正規化;無 faces,但保留代表幀畫質/美學分)。"""
         frame = work.frame
-        events = AssemblyVideoStage._normalize_event_bboxes(vlm.get(_EVENT_INDEX_KEY, []))
+        events = AssemblyVideoStage._normalize_event_bboxes(
+            vlm.get(_EVENT_INDEX_KEY, []), work.aspect_ratio
+        )
         return ComplexVideoMetadata(
             width=work.width,
             height=work.height,

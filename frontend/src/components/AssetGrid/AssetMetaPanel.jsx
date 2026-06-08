@@ -23,6 +23,9 @@ import {
 const LONG_TEXT_KEYS = new Set(['caption', 'cinematic_critique']);
 // 事件索引中代表「秒數」的欄位，統一格式化為 mm:ss
 const EVENT_TIME_KEYS = new Set(['start_time', 'end_time', 'key_timestamp']);
+// 事件卡不以文字列出的欄位：subject_candidates 為 top-N 候選框（已疊在媒體區，文字列出反成雜訊；
+// 該事件的最佳框另以 subject_bbox 顯示座標）
+const EVENT_HIDDEN_KEYS = new Set(['subject_candidates']);
 
 /** 把 SubjectBbox 物件格式化成「(x1, y1) → (x2, y2)」（座標四捨五入為整數百分比）。 */
 function formatBboxCoords(box) {
@@ -158,7 +161,7 @@ function EventCard({ event, index }) {
       <p className="text-xs font-semibold text-ink-muted mb-1.5">事件 #{index + 1}</p>
       <div className="flex flex-col gap-1">
         {Object.entries(event).map(([key, value]) => {
-          if (!hasValue(value)) return null;
+          if (EVENT_HIDDEN_KEYS.has(key) || !hasValue(value)) return null;
           return (
             <div key={key} className="flex items-start justify-between gap-4">
               <span className="text-xs text-ink-faint shrink-0">{EVENT_FIELD_LABELS[key] || key}</span>

@@ -18,6 +18,18 @@ class SubjectBbox(BaseModel):
     y2: float
 
 
+class SubjectCandidate(BaseModel):
+    """
+    VLM 排序輸出的單一候選主體(top-N 選框用)。
+
+    由 prompt 要求模型「由信心高→低」列出畫面前幾名主體;下游 ``select_best_candidate``
+    依「信心 + 9:16 可裁性」聰明挑框,緩解「逼模型一次定案而選錯主體」的失敗模式。
+    """
+    bbox: SubjectBbox
+    label: str = ""          # 主體語意描述(如「紅衣女子」「衝浪板」),供導演按使用者意圖挑選
+    confidence: float = 0.0  # 模型對「此為畫面最主要主體」的信心(0–1)
+
+
 class FaceInfo(BaseModel):
     """臉部偵測結果摘要。"""
     face_count: int

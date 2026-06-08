@@ -67,6 +67,17 @@ COLOR_TEMP_THRESHOLD           = 10.0  # 超過此值判定 warm/cool
 CROP_PARTIAL_THRESHOLD         = 56.0  # >56%（9:16 裁切橫向邊界）→ "partial"
 CROP_NOT_RECOMMENDED_THRESHOLD = 75.0  # >75% → "not_recommended"
 
+# ── 主體框 top-N 候選選擇 (vlm_bbox_utils) ───────────────────────────────────
+# VLM 每幀／每事件最多採信的候選主體數：要求模型「由信心高→低」排序，僅取前 N 個，
+# 緩解「只逼模型一次定案而選錯主體」的失敗模式（mode A）。
+SUBJECT_CANDIDATE_TOP_N              = 3
+# 選框評分權重：score = 信心 * CONF_WEIGHT + 9:16 可裁性 * CROP_FIT_WEIGHT。
+# 信心為主、可裁性為輔，讓「信心略低但能完整入直式框」的主體有機會勝出（貼合 reel 直式輸出）。
+SUBJECT_SELECT_CONFIDENCE_WEIGHT    = 1.0
+SUBJECT_SELECT_CROP_FIT_WEIGHT      = 0.5
+# 候選缺 confidence 時的中性預設：讓未標信心的框仍能參與排序，不被當 0 永遠墊底。
+SUBJECT_CANDIDATE_DEFAULT_CONFIDENCE = 0.5
+
 # K-means 主色計算參數（改用 cv2.kmeans：不經 sklearn/threadpoolctl 的 dl_iterate_phdr 掃描，
 # 避免首呼叫持有動態連結器鎖、與其他執行緒原生擴充 dlopen 形成鎖序倒置死結）
 DOMINANT_COLORS_K      = 3    # 取幾個主色

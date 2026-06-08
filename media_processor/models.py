@@ -8,10 +8,10 @@ from __future__ import annotations
 from typing import Any, Optional
 from pydantic import BaseModel
 
-# SubjectBbox / FaceInfo 為跨層共用的純 value object，定義已移至中性套件 shared/，
+# SubjectBbox / FaceInfo / SubjectCandidate 為跨層共用的純 value object，定義已移至中性套件 shared/，
 # 以解除 model 層（MediaPipe）反向 import media_processor 的依賴；
 # 此處 re-export 維持既有 `from media_processor.models import SubjectBbox` 呼叫端向後相容。
-from shared.value_objects import FaceInfo, SubjectBbox
+from shared.value_objects import FaceInfo, SubjectBbox, SubjectCandidate
 
 
 class ImageMetadata(BaseModel):
@@ -38,6 +38,8 @@ class ImageMetadata(BaseModel):
     dominant_colors: list[str] = []
     # ── 主體定位 ──
     subject_bbox: SubjectBbox
+    # top-N 候選主體(信心遞減);subject_bbox 為其中經「信心 + 9:16 可裁性」選出的最佳框
+    subject_candidates: list[SubjectCandidate] = []
     crop_feasibility: str = "full"
     faces: Optional[FaceInfo] = None
 
@@ -74,6 +76,8 @@ class VideoMetadata(BaseModel):
     motion_intensity: str = ""
     # ── 主體定位 ──
     subject_bbox: SubjectBbox
+    # top-N 候選主體(信心遞減);subject_bbox 為其中經「信心 + 9:16 可裁性」選出的最佳框
+    subject_candidates: list[SubjectCandidate] = []
     crop_feasibility: str = "full"
     faces: Optional[FaceInfo] = None
     # ── 影片結構 ──

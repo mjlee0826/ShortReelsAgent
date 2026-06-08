@@ -72,8 +72,9 @@ export default function AssetDetailModal({ projectName, path, filename, thumbnai
   const metadata = detail?.metadata;
   // metadata_kind 缺(無 metadata)時退回 AssetView.media_kind 判斷影片
   const isVideo = (detail?.metadata_kind || asset?.media_kind) === 'video';
-  // 圖片與 Simple 影片皆有單一 subject_bbox → 疊靜態主體框;Complex 影片無此欄位(框在逐 event)
+  // 圖片與 Simple 影片:subject_bbox 為最佳框、subject_candidates 為 top-N 候選 → 疊靜態候選框群
   const overlayBbox = metadata?.subject_bbox;
+  const overlayCandidates = metadata?.subject_candidates;
   // Complex 影片的逐 event 動態框來源:有 multimodal_event_index 時交給 viewer 依播放秒數切換
   const eventIndex = metadata?.multimodal_event_index;
 
@@ -100,6 +101,7 @@ export default function AssetDetailModal({ projectName, path, filename, thumbnai
               isVideo={isVideo}
               thumbnailUrl={thumbnailUrl || asset?.thumbnail_url}
               subjectBbox={overlayBbox}
+              subjectCandidates={overlayCandidates}
               events={eventIndex}
               filename={filename}
             />

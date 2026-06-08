@@ -35,6 +35,9 @@ class ContextCompressor:
             # --- 2. 特徵降維 (Dimensionality Reduction) ---
             # 以 bbox 中心點（(x1+x2)/2, (y1+y2)/2）提供導演計算 object_position 的基準
             raw_bbox = metadata.get("subject_bbox", _DEFAULT_BBOX)
+            # top-N 候選主體（含 label/信心/各自 bbox）：bbox 為系統自動選定的最佳框，
+            # subjects 提供替代主體讓導演按使用者意圖／情緒改選（mode A 誤選主體的補救）
+            subjects = self._compress_subjects(metadata.get("subject_candidates", []))
             faces = metadata.get("faces") or _EMPTY_FACES
 
             base_info = {
@@ -44,7 +47,7 @@ class ContextCompressor:
                 "res": {"w": metadata.get("width"), "h": metadata.get("height")},
                 "aes": metadata.get("aesthetic_score", _DEFAULT_AES_SCORE),
                 "cap": metadata.get("caption", ""),
-                # bbox：導演計算 object_position 的依據（取代舊的 focus 單點）
+                # bbox：導演計算 object_position 的依據（系統自動選定的最佳主體框）
                 "bbox": raw_bbox,
                 "crop": metadata.get("crop_feasibility", "full"),
                 # 視覺語意標籤
@@ -60,6 +63,10 @@ class ContextCompressor:
                 "time": metadata.get("creation_time", ""),
                 "geo": metadata.get("location_gps", ""),
             }
+
+            # 候選主體清單（多於一個時才補充，省 token；單一主體時 bbox 已足夠）
+            if len(subjects) > 1:
+                base_info["subjects"] = subjects
 
             # 臉部資訊（有臉時補充）
             if faces.get("has_faces"):
@@ -88,6 +95,25 @@ class ContextCompressor:
             compressed_list.append(base_info)
 
         return compressed_list
+
+    @staticmethod
+    def _compress_subjects(candidates: list) -> list:
+        """
+        把 metadata 的 subject_candidates 降維成導演可讀的精簡候選清單。
+
+        只保留 label / 信心 / bbox(導演據 bbox 中心改算 object_position),已依信心遞減排序。
+        缺值給安全預設,確保送進導演的 JSON 結構穩定。
+        """
+        compact = []
+        for candidate in candidates:
+            compact.append(
+                {
+                    "label": candidate.get("label", ""),
+                    "conf": candidate.get("confidence", 0.0),
+                    "bbox": candidate.get("bbox", _DEFAULT_BBOX),
+                }
+            )
+        return compact
 
     @staticmethod
     def _is_low_quality(metadata: dict) -> bool:
