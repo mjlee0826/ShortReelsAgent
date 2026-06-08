@@ -16,7 +16,7 @@
 3. **生成表單只用一次卻永久佔位**：`SidebarForm` 生成後仍佔右側上半，空間浪費。
 4. **沒利用 9:16 垂直影片的版面特性**：預覽又高又窄，左右水平空間閒置。
 
-**目標版面**：中央 9:16 預覽、底部真實時間軸、選取片段後在右側檢視器調屬性、AI 對話退居為可收合 copilot 抽屜。
+**目標版面（三欄）**：左 1/3 版本快照清單、中 1/3 為 9:16 預覽、右 1/3 為 Inspector（選取片段後調屬性）、底部全寬真實時間軸；AI 對話為可收合的側邊 copilot 抽屜（工具列「💬 AI」開關）。
 
 ---
 
@@ -142,6 +142,14 @@ blueprint 僅存在於前端 in-memory store，且 `useProjectStore.selectProjec
 
 **索引制鍵值**：選取 / 就地編輯 / 刪除一律以時間軸**陣列索引**為鍵，
 因 `clip_id` 是素材 relpath、同一素材可重複出現於多段而不唯一。
+
+**具名快照（持久化版本檢查點）**：與線性 Undo 互補——Undo 是自動、逐步；快照是手動具名、可跳回任一版本。
+- 後端 `snapshot_store`（`services/stores/snapshot_store.py`）以 `editor_snapshots.json` 落地每專案的快照
+  list（`{ id, label, created_at, blueprint }`，原子寫入 + per-path 鎖，保留上限 `MAX_SNAPSHOTS`）；
+  `director_service` 解析專案路徑後委派；端點 `GET/POST /api/projects/{f}/snapshots`、
+  `GET/DELETE …/snapshots/{id}`（list 只回 meta、get 回 blueprint+assets_root_url）。
+- 前端三欄左欄 `SnapshotPanel`：「存成版本」存當前 blueprint；每筆可還原 / 刪除。
+  **還原時先把當前推進 Undo 堆疊**再替換，故還原本身可 Undo、非破壞性。
 
 ## 9. 里程碑
 

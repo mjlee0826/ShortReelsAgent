@@ -80,6 +80,60 @@ async def get_blueprint(folder_name: str, user_id: str = Depends(verify_token)):
     return result
 
 
+class SnapshotCreateRequest(BaseModel):
+    """建立快照的請求體：前端送來要存檔的標籤與當前 blueprint。"""
+    label: str
+    blueprint: Dict
+
+
+@router.get("/projects/{folder_name}/snapshots")
+async def list_snapshots(folder_name: str, user_id: str = Depends(verify_token)):
+    """列出專案的所有編輯器快照 meta（不含 blueprint），供左欄版本清單。"""
+    try:
+        return await asyncio.to_thread(director_service.list_snapshots, folder_name, user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/projects/{folder_name}/snapshots")
+async def create_snapshot(folder_name: str, req: SnapshotCreateRequest, user_id: str = Depends(verify_token)):
+    """把前端傳入的當前 blueprint 存成一筆具名快照，回傳新快照 meta。"""
+    try:
+        return await asyncio.to_thread(
+            director_service.save_snapshot, folder_name, req.label, req.blueprint, user_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/projects/{folder_name}/snapshots/{snapshot_id}")
+async def get_snapshot(folder_name: str, snapshot_id: str, user_id: str = Depends(verify_token)):
+    """以 id 取回快照供還原，回傳 { blueprint, assets_root_url }；不存在回 404。"""
+    try:
+        result = await asyncio.to_thread(
+            director_service.get_snapshot, folder_name, snapshot_id, user_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    if result is None:
+        raise HTTPException(status_code=404, detail="找不到指定的快照")
+    return result
+
+
+@router.delete("/projects/{folder_name}/snapshots/{snapshot_id}")
+async def delete_snapshot(folder_name: str, snapshot_id: str, user_id: str = Depends(verify_token)):
+    """刪除指定快照；找不到回 404。"""
+    try:
+        deleted = await asyncio.to_thread(
+            director_service.delete_snapshot, folder_name, snapshot_id, user_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    if not deleted:
+        raise HTTPException(status_code=404, detail="找不到指定的快照")
+    return {"deleted": True}
+
+
 @router.post("/upload_music/{folder_name}")
 async def upload_music(folder_name: str, file: UploadFile = File(...), user_id: str = Depends(verify_token)):
     """

@@ -9,8 +9,8 @@ const DRAWER_WIDTH = 'w-[440px]';
 /**
  * AiCopilotDrawer：可收合的 AI 導演對話抽屜（copilot）。
  *
- * 由工作台工具列的「💬 AI」切換。對話式微調仍走 submitPrompt(true)，
- * 屬「重新生成」邊界；其結果會推進 Undo 快照（政策 C）。內容沿用 ChatBox。
+ * 由工作台工具列「💬 AI」切換，從右側滑入、覆蓋於編輯區之上；收合時移出畫面並停用互動。
+ * 對話式微調仍走 submitPrompt(true)（重新生成邊界），結果會推進 Undo 快照。內容沿用 ChatBox。
  * @param {boolean} open 是否展開
  * @param {() => void} onClose 收合抽屜
  */

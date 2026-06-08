@@ -13,6 +13,7 @@ from template_engine.template_analyzer_facade import TemplateAnalyzerFacade
 from director_agent.director_facade import DirectorFacade
 from backend.services.asset_repository import AssetRepository
 from backend.services.stores.project_meta_store import project_meta_store
+from backend.services.stores.snapshot_store import snapshot_store
 from backend.utils.asset_discovery import (
     PHASE1_METADATA_FILENAME,
     PHASE1_STATUS_FILENAME,
@@ -424,6 +425,34 @@ class DirectorService:
             "blueprint": blueprint,
             "assets_root_url": self._assets_root_url(folder_name, user_id),
         }
+
+    # ── 編輯器具名快照（版本檢查點）：解析專案路徑後委派 snapshot_store ──────────────
+
+    def list_snapshots(self, folder_name: str, user_id: str = None) -> list:
+        """列出專案的所有快照 meta（不含 blueprint，供左欄版本清單）。"""
+        target_dir = self._require_target_dir(folder_name, user_id)
+        return snapshot_store.list_meta(target_dir)
+
+    def save_snapshot(self, folder_name: str, label: str, blueprint: dict, user_id: str = None) -> dict:
+        """把前端傳入的當前 blueprint 存成一筆具名快照，回傳新快照 meta。"""
+        target_dir = self._require_target_dir(folder_name, user_id)
+        return snapshot_store.add(target_dir, label, blueprint)
+
+    def get_snapshot(self, folder_name: str, snapshot_id: str, user_id: str = None) -> dict:
+        """以 id 取回快照供還原，回傳 { blueprint, assets_root_url }；不存在回 None。"""
+        target_dir = self._require_target_dir(folder_name, user_id)
+        snapshot = snapshot_store.get(target_dir, snapshot_id)
+        if snapshot is None:
+            return None
+        return {
+            "blueprint": snapshot.get("blueprint"),
+            "assets_root_url": self._assets_root_url(folder_name, user_id),
+        }
+
+    def delete_snapshot(self, folder_name: str, snapshot_id: str, user_id: str = None) -> bool:
+        """刪除指定快照；有刪到回 True，找不到回 False。"""
+        target_dir = self._require_target_dir(folder_name, user_id)
+        return snapshot_store.delete(target_dir, snapshot_id)
 
 
 # 模組級單例:跨 api 端點與 ingestion_provider 共享同一份 PipelineRunner / 模型池

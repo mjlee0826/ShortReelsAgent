@@ -34,3 +34,7 @@ PHASE3_AUDIO_DNA_FILENAME = "phase3_audio_dna.json"
 
 # Phase 4 最終剪輯藍圖落地檔(供 Remotion 算圖;其存在與否即「專案是否已生成藍圖」旗標)。
 PHASE4_BLUEPRINT_FILENAME = "phase4_blueprint.json"
+
+# 編輯器具名快照(版本檢查點)落地檔(list,每筆含 id / label / created_at / blueprint),
+# 供編輯器左欄版本清單跨重整還原;與 undo 的線性堆疊互補(見 docs/editor_redesign.md)。
+EDITOR_SNAPSHOTS_FILENAME = "editor_snapshots.json"

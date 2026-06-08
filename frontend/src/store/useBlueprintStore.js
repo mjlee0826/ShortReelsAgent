@@ -74,6 +74,8 @@ const useBlueprintStore = create((set, get) => ({
   seekRequest: { seconds: 0, nonce: 0 },
   // Undo/Redo 快照堆疊：past 為歷史版本、future 為被 undo 出去、可再 redo 的版本
   history: { past: [], future: [] },
+  // 持久化具名快照 meta 列表（[{ id, label, created_at }]，由後端讀寫；blueprint 不在此）
+  snapshots: [],
 
   updateForm: (key, value) => set({ [key]: value }),
 
@@ -92,6 +94,7 @@ const useBlueprintStore = create((set, get) => ({
     selection: { type: null, clipIndex: null },
     seekRequest: { seconds: 0, nonce: 0 },
     history: { past: [], future: [] },
+    snapshots: [],
   }),
 
   // ── 編輯器：選取 ───────────────────────────────────────────────────────────
@@ -130,6 +133,58 @@ const useBlueprintStore = create((set, get) => ({
         console.warn('[Editor] 載入既有藍圖失敗：', error.response?.data?.detail || error.message);
       }
       set({ isLoadingBlueprint: false });
+    }
+  },
+
+  // ── 編輯器：持久化具名快照（版本檢查點，存後端、可跨重整還原）─────────────────
+
+  // 載入專案的快照清單（左欄版本列表）
+  loadSnapshots: async (folderName) => {
+    if (!folderName) return;
+    try {
+      const snapshots = await apiService.listSnapshots(folderName);
+      set({ snapshots });
+    } catch (error) {
+      console.warn('[Editor] 載入快照清單失敗：', error.response?.data?.detail || error.message);
+    }
+  },
+
+  // 把當前 blueprint 存成具名快照；成功後把新 meta 置頂加入清單
+  saveSnapshot: async (folderName, label) => {
+    const blueprint = get().blueprint;
+    if (!folderName || !blueprint) return;
+    try {
+      const meta = await apiService.saveSnapshot(folderName, label, blueprint);
+      set((state) => ({ snapshots: [meta, ...state.snapshots] }));
+    } catch (error) {
+      alert(`儲存版本失敗：${error.response?.data?.detail || error.message}`);
+    }
+  },
+
+  // 還原快照：取回該版 blueprint，先把當前推進 Undo 堆疊（還原本身可 Undo），再替換
+  restoreSnapshot: async (folderName, snapshotId) => {
+    if (!folderName) return;
+    try {
+      const result = await apiService.getSnapshot(folderName, snapshotId);
+      set((state) => ({
+        blueprint: result.blueprint,
+        assetsRootUrl: result.assets_root_url,
+        history: pushHistory(state.history, state.blueprint),
+        selection: { ...EMPTY_SELECTION },
+      }));
+    } catch (error) {
+      alert(`還原版本失敗：${error.response?.data?.detail || error.message}`);
+    }
+  },
+
+  // 刪除快照並從清單移除
+  deleteSnapshot: async (folderName, snapshotId) => {
+    if (!folderName) return;
+    try {
+      await apiService.deleteSnapshot(folderName, snapshotId);
+      set((state) => ({ snapshots: state.snapshots.filter((s) => s.id !== snapshotId) }));
+    } catch (error) {
+      alert(`刪除版本失敗：${error.response?.data?.detail || error.message}`);
     }
   },
 

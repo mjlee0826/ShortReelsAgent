@@ -2,20 +2,19 @@ import React, { useState } from 'react';
 import useBlueprintStore from '../../store/useBlueprintStore';
 import VideoPlayer from '../RemotionPlayer/VideoPlayer';
 import Inspector from './Inspector';
+import SnapshotPanel from './SnapshotPanel';
 import TimelinePanel from './Timeline/TimelinePanel';
 import AiCopilotDrawer from './AiCopilotDrawer';
 import RegeneratePanel from './RegeneratePanel';
 import { Button, IconButton } from '../ui';
 import { FaUndo, FaRedo, FaSyncAlt, FaRobot, FaSpinner } from 'react-icons/fa';
 
-// 右側檢視器固定寬度（M1；resize 可後續再加）
-const INSPECTOR_WIDTH = 'w-[420px]';
-
 /**
- * Workbench：兩階段中的「生成後」編輯工作台。
+ * Workbench：兩階段中的「生成後」編輯工作台（三欄版型）。
  *
- * 版面：頂部工具列（復原 / 重做 / 重新生成 / AI）＋ 中央預覽 ＋ 右側檢視器 ＋ 底部時間軸，
- * AI copilot 為右側可收合抽屜、重新生成為彈窗。對應設計文件 §1 目標版面。
+ * 版面：頂部工具列（復原 / 重做 / 重新生成 / AI）＋ 三欄（左：版本快照、中：影片預覽、
+ * 右：Inspector 屬性工作台）＋ 底部全寬時間軸；AI copilot 為彈窗、重新生成為彈窗。
+ * 對應設計文件 §1 目標版面與使用者指定的 1/3 三欄配置。
  */
 export default function Workbench() {
   const isProcessing = useBlueprintStore((s) => s.isProcessing);
@@ -61,22 +60,25 @@ export default function Workbench() {
         </div>
       )}
 
-      {/* 工具列以下的編輯區（relative：作為抽屜與遮罩的定位基準，不覆蓋工具列）*/}
+      {/* 工具列以下的編輯區（relative：作為生成遮罩的定位基準）*/}
       <div className="relative flex-1 flex flex-col overflow-hidden">
-        {/* 主要區：中央預覽 + 右側檢視器 */}
+        {/* 三欄：左 版本快照 / 中 影片 / 右 Inspector，各佔 1/3 */}
         <div className="flex flex-1 overflow-hidden">
-          <div className="flex-1 min-w-[300px] relative">
+          <div className="flex-1 min-w-0 h-full">
+            <SnapshotPanel />
+          </div>
+          <div className="flex-1 min-w-0 h-full relative">
             <VideoPlayer />
           </div>
-          <div className={`${INSPECTOR_WIDTH} shrink-0 h-full`}>
+          <div className="flex-1 min-w-0 h-full">
             <Inspector onRequestRegenerate={() => setShowRegenerate(true)} />
           </div>
         </div>
 
-        {/* 底部時間軸 */}
+        {/* 底部時間軸（全寬）*/}
         <TimelinePanel />
 
-        {/* AI copilot 抽屜（右側可收合）*/}
+        {/* AI copilot 抽屜（右側可收合，覆蓋於編輯區之上）*/}
         <AiCopilotDrawer open={showCopilot} onClose={() => setShowCopilot(false)} />
 
         {/* 生成中遮罩 */}
@@ -89,7 +91,7 @@ export default function Workbench() {
         )}
       </div>
 
-      {/* 重新生成彈窗（Modal 為 fixed，置於最外層）*/}
+      {/* 重新生成彈窗 */}
       {showRegenerate && <RegeneratePanel onClose={() => setShowRegenerate(false)} />}
     </div>
   );
