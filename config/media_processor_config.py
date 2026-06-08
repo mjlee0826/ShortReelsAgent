@@ -4,9 +4,19 @@ media_processor/ 與 media_tools/ 所有模組從此處 import，避免 magic nu
 """
 import os
 
-# ── 畫質過濾 (ImageProcessor / ContextCompressor) ─────────────────────────────
-# MUSIQ 技術畫質分數低於此值的圖片直接 reject，避免模糊/噪點素材進入導演決策
+# ── 畫質過濾 ───────────────────────────────────────────────────────────────
+# MUSIQ 技術畫質分數低於此值即 reject。⚠️ 僅 legacy ImageProcessor（USE_LEGACY_IMAGE_PIPELINE）
+# 仍沿用此硬性單訊號門檻；現行細粒度 pipeline 已移除硬 reject（評分與過濾解耦），改由
+# ContextCompressor 做下方的「寬容雙訊號」非破壞性過濾，避免 MUSIQ 單訊號低估造成好素材誤刪。
 TECHNICAL_SCORE_FILTER_THRESHOLD = 40.0
+
+# ── 軟性畫質過濾 (ContextCompressor) ──────────────────────────────────────────
+# 評分與過濾解耦後，tech/aes 一律由 Phase 1 算好存進 metadata（含 Complex）；導演端只做
+# 「非破壞性 + 多訊號 + 寬容」的最終把關：唯有技術分「極低」AND 美學分「也低」雙重條件同時成立
+# 才剔除。單一訊號偏低不再誤刪（MUSIQ 對動態模糊/低光素材常單邊低估）；缺分數的舊快取一律放行。
+# 兩者皆為 0~100 分制。
+TECHNICAL_SCORE_REJECT_THRESHOLD = 20.0   # 技術分低於此才視為「極可能是壞幀／嚴重模糊」
+AESTHETIC_SCORE_REJECT_THRESHOLD = 30.0   # 美學分低於此才視為「構圖／內容也乏善可陳」
 
 # ── MUSIQ 視覺評分模型 (MusiqModelManager) ────────────────────────────────────
 # 推論前 PIL 圖片的最大短邊長度（過大會吃 VRAM 且分數震盪）
@@ -70,10 +80,6 @@ KMEANS_EPSILON         = 0.2  # 中心位移小於此值（像素 0–255 尺度
 MOTION_SAMPLE_FRAMES      = 10               # 動態強度 frame diff 取樣幀數
 SALIENCY_SAMPLE_POSITIONS = (0.1, 0.5, 0.9)  # 三幀 saliency 取樣位置（影片長度 %）
 MIDDLE_FRAME_POSITION     = 0.5              # 代表幀位置（對應 SALIENCY_SAMPLE_POSITIONS 中點）
-
-# ComplexVideo / ContextCompressor 強制放行分數
-# ComplexVideo 無 technical_score 欄位，ContextCompressor 以此值強制通過畫質篩選
-TECHNICAL_SCORE_FORCE_PASS = 100.0
 
 # ── Dynamic Batching 參數 (BatchCollector) ──────────────────────
 # 各支援 batch 推論的模型一次合批的最大樣本數（上限；實際批量受上游併發與 timeout 決定）。

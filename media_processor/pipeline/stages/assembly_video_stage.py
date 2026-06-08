@@ -26,8 +26,8 @@ class AssemblyVideoStage(Stage):
     依 strategy 把 VideoWork 組裝成最終 metadata 與成功 result(DAG 的唯一 join 點)。
 
     - SIMPLE → ``VideoMetadata``(含畫質 / 美學 / 動態 / 三幀聯集 subject_bbox / crop_feasibility / faces)。
-    - COMPLEX → ``ComplexVideoMetadata``(以 multimodal_event_index 為主,不含整體畫質 / subject_bbox;
-      **亦無 faces 欄位** —— 與原版「dict 經 Pydantic 模型 coercion 丟棄多餘 faces 鍵」逐欄一致)。
+    - COMPLEX → ``ComplexVideoMetadata``(以 multimodal_event_index 為主,不含 subject_bbox;含代表幀
+      畫質 / 美學分(供導演選材);**無 faces 欄位** —— 與原版「dict 經 Pydantic coercion 丟棄多餘 faces 鍵」一致)。
     純組裝(CPU 資源);只在前面 Stage 皆未 reject / error 時才執行(Pipeline 已自動短路)。
     """
 
@@ -93,7 +93,7 @@ class AssemblyVideoStage(Stage):
 
     @staticmethod
     def _build_complex(work: VideoWork, vlm: dict) -> ComplexVideoMetadata:
-        """組 Complex 影片 metadata(逐欄對齊原 ComplexVideoProcessor.analyze_visual_semantics;無 faces)。"""
+        """組 Complex 影片 metadata(以 multimodal_event_index 為主;無 faces,但保留代表幀畫質/美學分)。"""
         frame = work.frame
         return ComplexVideoMetadata(
             width=work.width,
@@ -113,6 +113,9 @@ class AssemblyVideoStage(Stage):
             camera_angle=vlm.get("camera_angle", ""),
             action_tags=vlm.get("action_tags", []),
             time_of_day=vlm.get("time_of_day", ""),
+            # 代表幀(中間幀)畫質/美學分,與 Simple/Image 同一條 TechScore/AesScore Stage 產出
+            technical_score=round(frame.tech_score, _SCORE_NDIGITS),
+            aesthetic_score=round(frame.aes_score, _SCORE_NDIGITS),
             brightness=frame.brightness,
             color_temperature=frame.color_temperature,
             dominant_colors=frame.dominant_colors,

@@ -6,8 +6,7 @@ FrameAnalysis:單一 PIL 幀的分析結果容器,image 與 video 共用 (Value 
 影片的「代表幀」本質上就是一張圖,因此「對一張 PIL 幀做技術分 / 美學分 / 色彩特徵 / 臉部偵測」
 這組 per-frame 分析,image(整張圖)與 video(中間代表幀)邏輯完全相同。把這些欄位抽成共用的
 ``FrameAnalysis``,讓 ``TechScoreStage`` / ``AesScoreStage`` / ``CVFeaturesStage`` /
-``FaceDetectStage`` / ``RejectFilterStage`` 五個 Stage 變成 media-agnostic,image / video 直接共用、
-影片端不必重寫一份。
+``FaceDetectStage`` 四個 Stage 變成 media-agnostic,image / video 直接共用、影片端不必重寫一份。
 
 - ``ImageWork`` 持有一個 FrameAnalysis(代表整張圖)。
 - ``VideoWork`` 持有一個 FrameAnalysis(代表中間幀);saliency 聯集 / 逐 event bbox 屬影片專有,不放這裡。

@@ -1,41 +1,48 @@
 from config.media_processor_config import (
-    TECHNICAL_SCORE_FILTER_THRESHOLD,
-    TECHNICAL_SCORE_FORCE_PASS,
+    AESTHETIC_SCORE_REJECT_THRESHOLD,
+    TECHNICAL_SCORE_REJECT_THRESHOLD,
 )
+
+# 缺臉資訊時的空 dict 預設(避免 None.get)
+_EMPTY_FACES: dict = {}
+# bbox 缺值時的全幅預設(導演計算 object_position 的保底基準)
+_DEFAULT_BBOX = {"x1": 0, "y1": 0, "x2": 100, "y2": 100}
+# 美學分缺值時回給導演的中性預設(0~100 分制)
+_DEFAULT_AES_SCORE = 60.0
 
 
 class ContextCompressor:
     """
-    Strategy Pattern: 負責素材的特徵降維與防禦性過濾。
-    實作「寬容過濾邏輯」：確保 ComplexVideo 不會因為缺乏技術分數而被誤刪。
+    Strategy Pattern: 負責素材的特徵降維與「非破壞性」防禦過濾。
+
+    評分與過濾已解耦:tech / aes 一律由 Phase 1 算好寫進 metadata(現含 Complex)。本層只做寬容的
+    最終把關 —— 唯有「技術分極低」AND「美學分也低」雙重條件同時成立才剔除,避免 MUSIQ 對動態模糊 /
+    低光素材的單訊號低估造成好素材被誤刪;缺任一分數的舊快取一律放行。導演端仍拿得到原始分數自行取捨。
     """
+
     def compress(self, raw_assets: list) -> list:
+        """逐素材做寬容雙訊號過濾 + 特徵降維,回傳給導演的精簡清單。"""
         compressed_list = []
 
         for asset in raw_assets:
             metadata = asset.get("metadata", {})
 
-            # --- 1. 防禦性快篩 ---
-            # ComplexVideo 無 technical_score，給予 TECHNICAL_SCORE_FORCE_PASS 強制放行
-            tech_score = metadata.get("technical_score")
-            if tech_score is None:
-                tech_score = TECHNICAL_SCORE_FORCE_PASS
-
-            if tech_score < TECHNICAL_SCORE_FILTER_THRESHOLD:
-                print(f"[Compressor] 剔除畫質過低素材: {asset.get('file')}")
+            # --- 1. 寬容雙訊號過濾(非破壞性:不刪檔,只是不送進導演決策)---
+            if self._is_low_quality(metadata):
+                print(f"[Compressor] 剔除技術+美學雙低素材: {asset.get('file')}")
                 continue
 
             # --- 2. 特徵降維 (Dimensionality Reduction) ---
             # 以 bbox 中心點（(x1+x2)/2, (y1+y2)/2）提供導演計算 object_position 的基準
-            raw_bbox = metadata.get("subject_bbox", {"x1": 0, "y1": 0, "x2": 100, "y2": 100})
-            faces = metadata.get("faces") or {}
+            raw_bbox = metadata.get("subject_bbox", _DEFAULT_BBOX)
+            faces = metadata.get("faces") or _EMPTY_FACES
 
             base_info = {
                 # 素材 id = relpath 身分(如 raw/photo.jpg);與 blueprint clip_id、/static URL 片段一致
                 "id": asset.get("file"),
                 "type": asset.get("type"),
                 "res": {"w": metadata.get("width"), "h": metadata.get("height")},
-                "aes": metadata.get("aesthetic_score", 60.0),
+                "aes": metadata.get("aesthetic_score", _DEFAULT_AES_SCORE),
                 "cap": metadata.get("caption", ""),
                 # bbox：導演計算 object_position 的依據（取代舊的 focus 單點）
                 "bbox": raw_bbox,
@@ -81,3 +88,20 @@ class ContextCompressor:
             compressed_list.append(base_info)
 
         return compressed_list
+
+    @staticmethod
+    def _is_low_quality(metadata: dict) -> bool:
+        """
+        技術分與美學分「雙雙偏低」才判定為低品質而剔除(寬容把關)。
+
+        任一分數缺值(如無分數的舊 Complex 快取)即放行,絕不因單一訊號低估誤刪;
+        兩者皆存在且同時低於各自門檻,才視為「壞幀 + 構圖也差」的真低品質素材。
+        """
+        tech_score = metadata.get("technical_score")
+        aes_score = metadata.get("aesthetic_score")
+        if tech_score is None or aes_score is None:
+            return False
+        return (
+            tech_score < TECHNICAL_SCORE_REJECT_THRESHOLD
+            and aes_score < AESTHETIC_SCORE_REJECT_THRESHOLD
+        )

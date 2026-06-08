@@ -216,11 +216,15 @@ class MediaStandardizer:
         try:
             from PIL import Image
             import pillow_heif
-            heif_file = pillow_heif.read_heif(input_path)
-            image = Image.frombytes(
-                heif_file.mode, heif_file.size, heif_file.data,
-                "raw", heif_file.mode, heif_file.stride,
-            )
+            # 註冊 HEIF opener（idempotent），讓 Image.open 依「實際內容」嗅探格式而非信任副檔名：
+            # 真 HEIC 走 HEIF plugin；副檔名雖為 .HEIC、內容其實是 JPEG/PNG 者（iPhone 照片經
+            # Google Drive/Photos 相容性轉檔後仍掛 .HEIC 名）也能正確開啟。
+            # 不可再用 pillow_heif.read_heif()：它只認 HEIF 容器，遇到 JPEG 內容會丟
+            # 「No 'ftyp' box」。改走內容嗅探，與 decode_image_stage 的讀檔方式一致。
+            pillow_heif.register_heif_opener()
+            with Image.open(input_path) as opened:
+                # 統一轉 RGB：JPEG 不支援 alpha/P 模式存檔，HEIC 來源也可能非 RGB
+                image = opened.convert("RGB")
             image.save(temp_path, "JPEG", quality=_JPEG_QUALITY)
             # 完整存檔成功才原子改名成最終身分：reader 不會看到半成品
             os.replace(temp_path, output_path)
@@ -228,5 +232,7 @@ class MediaStandardizer:
         except Exception as e:
             # 失敗時清掉中途檔，避免殘留垃圾；最終 _std.jpg 從未出現，idempotent 重跑時會自動重轉
             self._remove_quietly(temp_path)
-            print(f"   ❌ 圖片轉檔失敗: {e}")
+            # 附上檔案大小，日後遇到「真損毀／空檔」可與「副檔名 vs 內容不符」一眼區分
+            size = os.path.getsize(input_path) if os.path.exists(input_path) else -1
+            print(f"   ❌ 圖片轉檔失敗 ({size} bytes): {e}")
             return False

@@ -84,7 +84,7 @@ class ComplexVideoMetadata(BaseModel):
     """
     複雜影片素材的感知元數據（ComplexVideoProcessor 輸出）。
     以 multimodal_event_index 取代單一 subject_bbox，提供逐段視聽高潮點；
-    複雜影片依靠事件區塊判斷，不進行整體畫質/美學打分。
+    整體畫質/美學分數（代表幀）同樣保留，供導演端寬容過濾與選材參考（與 Simple/Image 一致）。
     """
     width: int
     height: int
@@ -105,6 +105,9 @@ class ComplexVideoMetadata(BaseModel):
     camera_angle: str = ""
     action_tags: list[str] = []
     time_of_day: str = ""
+    # ── 品質評分（代表幀；缺值預設 0.0 以相容無分數的舊快取）──
+    technical_score: float = 0.0
+    aesthetic_score: float = 0.0
     # ── 視覺特徵（cv2/PIL）──
     brightness: float = 0.0
     color_temperature: str = ""

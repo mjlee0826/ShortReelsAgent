@@ -57,16 +57,20 @@ class ComplexVideoProcessor(AbstractVideoProcessor):
             bbox = self._get_saliency_at_time(raw_file_path, key_t)
             event["subject_bbox"] = bbox.model_dump()
 
-        # 從中間幀計算全局視覺特徵（一次 VideoCapture）
+        # 從中間幀計算全局視覺特徵 + 畫質/美學分數（一次 VideoCapture）
+        tech_score, aes_score = 0.0, 0.0
         brightness, color_temperature, dominant_colors = 0.0, "", []
         face_info = None
         pil_mid = self._extract_middle_frame_pil(raw_file_path, duration)
         if pil_mid is not None:
+            # 代表幀畫質（MUSIQ）+ 美學（LAION）評分，與 Simple/Image 一致供導演選材
+            tech_score = self.tech_engine.get_technical_score(pil_mid)
+            aes_score = self.aes_engine.get_aesthetic_score(pil_mid)
             brightness, color_temperature, dominant_colors, face_info = (
                 self._compute_frame_features(pil_mid)
             )
 
-        # 複雜影片以事件區塊為單位，不進行整體畫質/美學打分
+        # 複雜影片仍以事件區塊為主，但保留代表幀畫質/美學分供導演端寬容過濾與選材
         return {
             "is_dense_indexed": True,
             "cinematic_critique": vlm_result.get("cinematic_critique", ""),
@@ -75,6 +79,8 @@ class ComplexVideoProcessor(AbstractVideoProcessor):
             "camera_angle": vlm_result.get("camera_angle", ""),
             "action_tags": vlm_result.get("action_tags", []),
             "time_of_day": vlm_result.get("time_of_day", ""),
+            "technical_score": round(tech_score, 2),
+            "aesthetic_score": round(aes_score, 2),
             "brightness": brightness,
             "color_temperature": color_temperature,
             "dominant_colors": dominant_colors,
