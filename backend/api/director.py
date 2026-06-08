@@ -35,6 +35,11 @@ class GenerateRequest(BaseModel):
     # 用戶已上傳至 assets 資料夾的音訊檔名（有值時優先於 music_strategy）
     user_music_file: Optional[str] = None
 
+    # 是否重新挑配樂：初始生成 / 「重新生成」為 True；純對話微調為 False（避免每次微調默默換掉 BGM）
+    regenerate_music: bool = True
+    # 不重抓配樂時，沿用前端傳回的上一版 bgm_track（保留手動的音量 / 起播與曲目）
+    previous_bgm_track: Optional[Dict] = None
+
 
 @router.post("/generate")
 async def generate_timeline(req: GenerateRequest, user_id: str = Depends(verify_token)):
@@ -50,6 +55,8 @@ async def generate_timeline(req: GenerateRequest, user_id: str = Depends(verify_
             old_timeline=req.previous_timeline,
             music_strategy=req.music_strategy,
             user_music_file=req.user_music_file,
+            regenerate_music=req.regenerate_music,
+            previous_bgm_track=req.previous_bgm_track,
         )
         return result
     except AssetsNotAnalyzedError as e:
@@ -78,6 +85,35 @@ async def get_blueprint(folder_name: str, user_id: str = Depends(verify_token)):
     if result is None:
         raise HTTPException(status_code=404, detail="此專案尚未生成過影片藍圖")
     return result
+
+
+class ChangeMusicRequest(BaseModel):
+    """music-only 換曲請求：只重挑配樂、不重剪時間軸。"""
+    asset_folder_name: str
+    music_strategy: str = "search_copyright"  # search_copyright | search_free | none
+    user_music_file: Optional[str] = None     # 已上傳的自訂音訊檔名（優先於策略）
+    user_prompt: Optional[str] = None         # 搜尋關鍵字 / 音樂風格描述（選填）
+    previous_bgm_track: Optional[Dict] = None # 沿用上一版的音量 / 起播
+
+
+@router.post("/change_music")
+async def change_music(req: ChangeMusicRequest, user_id: str = Depends(verify_token)):
+    """
+    只更換配樂、保留現有時間軸（music-only）：只跑配樂引擎取得新曲，組出 bgm_track 回傳，
+    不經導演重剪。回傳 { bgm_track }，由前端就地套用到當前 blueprint（可 Undo）。
+    """
+    try:
+        return await asyncio.to_thread(
+            director_service.change_music,
+            req.asset_folder_name, req.music_strategy, req.user_music_file,
+            req.user_prompt, req.previous_bgm_track, user_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        print("\n❌ [換曲錯誤]")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 class SnapshotCreateRequest(BaseModel):

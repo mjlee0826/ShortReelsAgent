@@ -21,7 +21,7 @@ export default function Inspector({ onRequestRegenerate }) {
       {selectionType === 'clip' ? (
         <ClipInspector />
       ) : selectionType === 'bgm' ? (
-        <BgmInspector onRequestRegenerate={onRequestRegenerate} />
+        <BgmInspector />
       ) : (
         <ProjectInspector onRequestRegenerate={onRequestRegenerate} />
       )}

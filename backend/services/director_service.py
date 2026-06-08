@@ -118,6 +118,20 @@ class DirectorService:
             return f"{self.backend_url}/static/{user_id}/{folder_name}/"
         return f"{self.backend_url}/static/{folder_name}/"
 
+    def _audio_cache_url(self, audio_dna: dict) -> str:
+        """把配樂 audio_dna 的實體標準檔轉成全域快取池 cache URL；無有效檔回 None（生成與換曲共用）。"""
+        if not (audio_dna and isinstance(audio_dna, dict)):
+            return None
+        source_audio_path = audio_dna.get("local_path", {}).get("standard", "")
+        if not (source_audio_path and os.path.exists(source_audio_path)):
+            return None
+        try:
+            rel_path = os.path.relpath(source_audio_path, TEMP_TEMPLATES_DIR)
+            return f"{self.backend_url}/cache/{rel_path}".replace('\\', '/')
+        except Exception as e:
+            print(f"⚠️ [Service] 轉換快取連結失敗: {e}")
+            return None
+
     def _standardize(self, target_dir: str) -> None:
         """
         標準化某專案素材：掃 raw/ 原始檔，``_std`` 衍生檔輸出到 standardized/（分層，解計數錯亂）。
@@ -286,7 +300,9 @@ class DirectorService:
                     template: str = None,
                     subtitles: bool = True, filters: bool = True, old_timeline: dict = None,
                     music_strategy: str = "search_copyright",
-                    user_music_file: str = None):
+                    user_music_file: str = None,
+                    regenerate_music: bool = True,
+                    previous_bgm_track: dict = None):
         """
         執行完整生成工作流（Phase 2–4）：讀取素材頁已落地的 Phase 1 感知快取，提取範本 DNA，
         呼叫導演大腦產生藍圖。感知分析（Phase 1）已改由素材頁專屬擁有，本方法不再代跑。
@@ -366,6 +382,8 @@ class DirectorService:
             previous_timeline=old_timeline,
             user_music_file=user_music_file_path,
             music_strategy=music_strategy,
+            regenerate_music=regenerate_music,
+            previous_bgm_track=previous_bgm_track,
         )
 
         # 【新增】如果大腦有去抓新的音樂 (new_audio_dna 有值)，就覆寫舊的並 Dump 存檔
@@ -375,24 +393,12 @@ class DirectorService:
                 json.dump(audio_dna, f, ensure_ascii=False, indent=2)
                 print(f"💾 [Dump] 配樂 DNA 已更新並儲存至 {phase3_dump_path}")
 
-        # --- 6. 全域快取池：轉換為獨立 URL ---
-        if audio_dna and isinstance(audio_dna, dict):
-            source_audio_path = audio_dna.get("local_path", {}).get("standard", "")
-            
-            if source_audio_path and os.path.exists(source_audio_path):
-                try:
-                    rel_path = os.path.relpath(source_audio_path, TEMP_TEMPLATES_DIR)
-                    audio_url = f"{self.backend_url}/cache/{rel_path}".replace('\\', '/')
-                    
-                    if "bgm_track" in final_blueprint and isinstance(final_blueprint["bgm_track"], dict):
-                        final_blueprint["bgm_track"]["track_id"] = audio_url
-                        
-                    print(f"🎵 [Service] 已套用全域快取配樂連結: {audio_url}")
-                except Exception as e:
-                    print(f"⚠️ [Service] 轉換快取連結失敗: {e}")
-            else:
-                print(f"⚠️ [Service] 找不到實體配樂檔案: {source_audio_path}")
-        
+        # --- 6. 全域快取池：把實體配樂檔轉成獨立 cache URL，套進 bgm_track ---
+        audio_url = self._audio_cache_url(audio_dna)
+        if audio_url and isinstance(final_blueprint.get("bgm_track"), dict):
+            final_blueprint["bgm_track"]["track_id"] = audio_url
+            print(f"🎵 [Service] 已套用全域快取配樂連結: {audio_url}")
+
         with open(blueprint_dump_path, 'w', encoding='utf-8') as f:
             json.dump(final_blueprint, f, ensure_ascii=False, indent=2)
             print(f"💾 [Dump] 最終劇本藍圖已儲存至 {blueprint_dump_path}")
@@ -425,6 +431,47 @@ class DirectorService:
             "blueprint": blueprint,
             "assets_root_url": self._assets_root_url(folder_name, user_id),
         }
+
+    def change_music(self, folder_name: str, music_strategy: str = "search_copyright",
+                     user_music_file: str = None, user_prompt: str = None,
+                     previous_bgm_track: dict = None, user_id: str = None) -> dict:
+        """
+        music-only 換曲：只跑配樂引擎挑新曲、組出 bgm_track 回傳，不重剪時間軸（不經導演 LLM）。
+
+        沿用前一版 bgm_track 的音量 / 起播（只換曲目）；策略為 none 時回 track_id=None（移除配樂）。
+        回傳 { "bgm_track": {...} }，由前端就地套用到當前 blueprint。
+        """
+        # 直接使用獨立的配樂決策模組（與生成流程的 IntentState 共用同一入口，不假跑狀態機）
+        from director_agent.music_director import MusicDirector
+
+        target_dir = self._require_target_dir(folder_name, user_id)
+        # 自訂音訊與其他原始素材同存 raw/，於 raw/ 下解析絕對路徑
+        user_music_file_path = (
+            os.path.join(target_dir, RAW_SUBDIR, user_music_file) if user_music_file else None
+        )
+
+        # 只解析配樂（不續接 SchedulingState，故不會重剪時間軸）
+        audio_dna = MusicDirector().resolve(
+            music_strategy=music_strategy,
+            user_music_file=user_music_file_path,
+            user_prompt=user_prompt or "",
+        ) or {}
+
+        audio_url = self._audio_cache_url(audio_dna)
+        prev = previous_bgm_track or {}
+        if audio_url:
+            # 換曲：曲目換新、起播歸零；沿用使用者既有音量（保留手動混音）
+            bgm_track = {
+                "track_id": audio_url,
+                "start_at": prev.get("start_at", 0.0),
+                "source_start": 0.0,
+                "volume": prev.get("volume", 1.0),
+            }
+        else:
+            # 策略 none 或抓取失敗：移除配樂
+            bgm_track = {"track_id": None}
+
+        return {"bgm_track": bgm_track}
 
     # ── 編輯器具名快照（版本檢查點）：解析專案路徑後委派 snapshot_store ──────────────
 

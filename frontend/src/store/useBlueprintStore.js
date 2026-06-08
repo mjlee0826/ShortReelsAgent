@@ -52,6 +52,8 @@ const useBlueprintStore = create((set, get) => ({
   // --- 音訊上傳狀態 ---
   uploadedMusicFile: null,
   isUploadingMusic: false,
+  // music-only 換曲進行中（配樂引擎抓取較久，用於彈窗 loading）
+  isChangingMusic: false,
 
   // --- 生成結果狀態 ---
   blueprint: null,
@@ -91,6 +93,7 @@ const useBlueprintStore = create((set, get) => ({
     redirectToAssetsProject: null,
     chatHistory: [],
     uploadedMusicFile: null,
+    isChangingMusic: false,
     userPrompt: '',
     templateSource: '',
     selection: { type: null, clipIndex: null },
@@ -240,6 +243,28 @@ const useBlueprintStore = create((set, get) => ({
     bgm_track: { ...(bp.bgm_track || {}), [key]: value },
   })),
 
+  // music-only 換曲：只重挑配樂、保留時間軸；成功後就地套用新 bgm_track（推進 Undo，可還原）
+  changeMusic: async (folderName, { musicStrategy, userMusicFile, userPrompt }) => {
+    if (!folderName || !get().blueprint) return;
+    set({ isChangingMusic: true });
+    try {
+      const result = await apiService.changeMusic({
+        asset_folder_name: folderName,
+        music_strategy: musicStrategy,
+        user_music_file: userMusicFile || null,
+        user_prompt: userPrompt || null,
+        previous_bgm_track: get().blueprint?.bgm_track ?? null,
+      });
+      get().mutateBlueprint((bp) => ({ ...bp, bgm_track: result.bgm_track }));
+      set({ isChangingMusic: false });
+      return true;
+    } catch (error) {
+      alert(`換曲失敗：${error.response?.data?.detail || error.message}`);
+      set({ isChangingMusic: false });
+      return false;
+    }
+  },
+
   // 刪除片段並 ripple 接合；同步修正選取索引（刪到選取者則清空、刪在其前則前移）
   removeClip: (index) => {
     get().mutateBlueprint((bp) => ({ ...bp, timeline: removeAt(bp.timeline, index) }));
@@ -340,6 +365,9 @@ const useBlueprintStore = create((set, get) => ({
         previous_timeline: isRefinement && state.blueprint ? state.blueprint : null,
         music_strategy: state.musicStrategy,
         user_music_file: state.uploadedMusicFile || null,
+        // 對話微調不重抓配樂（沿用上一版 bgm_track）；初始生成 / 重新生成才重挑配樂
+        regenerate_music: !isRefinement,
+        previous_bgm_track: isRefinement ? (state.blueprint?.bgm_track ?? null) : null,
       };
 
       const result = await apiService.generateTimeline(payload);

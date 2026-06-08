@@ -162,6 +162,12 @@ class DirectorApiService {
     return response.data;
   }
 
+  // music-only 換曲：只重挑配樂、保留時間軸，回傳 { bgm_track }
+  async changeMusic(payload) {
+    const response = await apiClient.post('/api/change_music', payload);
+    return response.data;
+  }
+
   // 上傳自訂 BGM 至指定素材資料夾，回傳 { filename: "..." }
   async uploadMusic(folderName, file) {
     try {

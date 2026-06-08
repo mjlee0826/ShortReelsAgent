@@ -97,7 +97,7 @@
 | pip_video 畫中畫 | **唯讀(D5)** | 顯示 |
 | reason AI 說明 | 唯讀 | 文字 |
 
-**全域面板**（點配樂軌 / 空白處）：`bgm_track.volume`、`bgm_track.source_start` 為就地編輯；`fps`、`aspect_ratio` 唯讀（衍生值，見 §6 #2）；策略 / 換曲 / 總開關導向「重新生成」面板。
+**全域面板**（點配樂軌 / 空白處）：`bgm_track.volume`、`bgm_track.source_start` 為就地編輯；換曲 / 換策略走 music-only 的 ChangeMusicModal（見 §6 第 2 級）；`fps`、`aspect_ratio` 唯讀（衍生值，見 §6 #2）；字幕 / 濾鏡總開關導向「重新生成」面板。
 
 ---
 
@@ -107,12 +107,14 @@
 |---|---|---|
 | 1 | 逐段屬性保留只靠 LLM 遵守 prompt（非確定性） | 可接受，用 **Undo 快照**兜底 |
 | 2 | `global_settings.fps` 每次從素材重算（`director_agent/director_facade.py:47-57`），不沿用前版 | **fps / 比例做唯讀衍生值**，不開放手動改，問題消失 |
-| 3 | 每次 refinement 都重跑 `IntentState` 重新搜尋 / 抓配樂（`director_agent/states/intent_state.py`），會默默換掉 BGM 並蓋掉手動 bgm 設定 | **M3 後端小修**：使用者沒要求改音樂時跳過重抓、沿用上一版 `bgm_track`（`GenerateRequest` 加 `previous_bgm_track` / `regenerate_music`） |
+| 3 | 每次 refinement 都重跑 `IntentState` 重新搜尋 / 抓配樂（`director_agent/states/intent_state.py`），會默默換掉 BGM 並蓋掉手動 bgm 設定 | **已修（M3）**：`GenerateRequest` 加 `regenerate_music` / `previous_bgm_track`；對話微調送 `regenerate_music=false`，`IntentState` 跳過搜尋、facade 直接沿用上一版 `bgm_track` |
 
-**音樂編輯的三個層級**（與 §3 一致）：
-1. **音量 / 起播**：純前端就地編輯，已落地（BgmInspector → `updateBgmField`），不碰後端。
-2. **換一首 / 換策略（music-only）**：抓新檔必須碰後端，但**時間軸原封不動**——M3 新增一條 music-only 路徑，只跑配樂引擎、直接組 `bgm_track` 套回現有 timeline，**不經導演 LLM 重剪**；前端套用回傳 `bgm_track`（就地、可 Undo）。
+**音樂編輯的三個層級**（與 §3 一致，皆已落地）：
+1. **音量 / 起播**：純前端就地編輯（BgmInspector → `updateBgmField`），不碰後端。
+2. **換一首 / 換策略（music-only）**：抓新檔必須碰後端，但**時間軸原封不動**——後端 `POST /api/change_music`（`director_service.change_music`）呼叫獨立的 `MusicDirector` 解析配樂、組 `bgm_track`，**不經導演 LLM 重剪**；前端 `ChangeMusicModal`（由 BgmInspector 開啟）套用回傳的 `bgm_track`（就地、可 Undo），沿用既有音量。
 3. **整支重生**：改導演指令 / 字幕·濾鏡總開關等，才走 RegeneratePanel 全量重生。
+
+**對話微調的音樂保護**：`submitPrompt(true)` 送 `regenerate_music=false` ＋ 當前 `bgm_track`；後端 `IntentState` 跳過抓取、`director_facade` 以 `previous_bgm_track` 覆蓋最終藍圖的 `bgm_track`，確保只想改某片段時 BGM 與手動混音完整保留。
 
 ---
 
@@ -155,4 +157,4 @@ blueprint 僅存在於前端 in-memory store，且 `useProjectStore.selectProjec
 
 - **M1**：骨架 + 兩階段 + 檢視器即時編輯（5 組）+ 唯讀時間軸視覺化 + Undo/Redo。
 - **M2**：時間軸拖拉裁切 / 重排 + playhead 雙向同步（`@remotion/player` 的 `PlayerRef`）。
-- **M3**：後端音樂重抓修正（§6 #3）+ 配樂軌就地編輯落地 + **music-only 換曲路徑**（§6 音樂編輯第 2 級：只換音樂、保留時間軸）。
+- **M3**（已完成）：後端音樂重抓修正（§6 #3，對話微調不再誤換 BGM）+ 配樂軌就地編輯 + music-only 換曲（§6 音樂編輯第 2 級：只換音樂、保留時間軸）。

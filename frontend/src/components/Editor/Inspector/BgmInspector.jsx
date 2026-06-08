@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import useBlueprintStore from '../../../store/useBlueprintStore';
 import { SliderRow, NumberRow, InspectorSection } from './controls';
 import { Button } from '../../ui';
-import { FaSyncAlt, FaMusic } from 'react-icons/fa';
+import ChangeMusicModal from '../ChangeMusicModal';
+import { FaExchangeAlt, FaMusic } from 'react-icons/fa';
 
 const VOLUME_MIN = 0;
 const VOLUME_MAX = 1;
@@ -26,13 +27,13 @@ function trackLabel(trackId) {
 /**
  * BgmInspector：選中配樂軌時的全域配樂設定。
  *
- * 音量 / 起播點為就地編輯（即時預覽）；更換曲目 / 配樂策略屬「重新生成」，
- * 透過 onRequestRegenerate 開啟 RegeneratePanel 處理。
- * @param {() => void} onRequestRegenerate 要求開啟重新生成面板
+ * 音量 / 起播點為就地編輯（即時預覽）；更換曲目 / 策略走 music-only 換曲
+ * （只換配樂、保留時間軸），由 ChangeMusicModal 處理。
  */
-export default function BgmInspector({ onRequestRegenerate }) {
+export default function BgmInspector() {
   const bgm = useBlueprintStore((s) => s.blueprint?.bgm_track);
   const updateBgmField = useBlueprintStore((s) => s.updateBgmField);
+  const [showChangeMusic, setShowChangeMusic] = useState(false);
 
   const label = trackLabel(bgm?.track_id);
 
@@ -66,13 +67,15 @@ export default function BgmInspector({ onRequestRegenerate }) {
       )}
 
       <div className="p-5">
-        <Button variant="secondary" size="md" fullWidth leftIcon={<FaSyncAlt size={12} />} onClick={onRequestRegenerate}>
+        <Button variant="secondary" size="md" fullWidth leftIcon={<FaExchangeAlt size={12} />} onClick={() => setShowChangeMusic(true)}>
           變更配樂 / 換一首
         </Button>
         <p className="text-xs text-ink-faint mt-2.5 leading-relaxed">
-          更換曲目或配樂策略需要 AI 重新挑選，將透過「重新生成」進行。
+          只更換配樂、保留時間軸；AI 會重新挑選曲目，套用後可復原。
         </p>
       </div>
+
+      {showChangeMusic && <ChangeMusicModal onClose={() => setShowChangeMusic(false)} />}
     </div>
   );
 }
