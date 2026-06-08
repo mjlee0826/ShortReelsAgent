@@ -9,6 +9,7 @@ from media_processor.models import (
 )
 from media_processor.pipeline.context import AssetContext, STATUS_SUCCESS
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
+from media_processor.pipeline.utils.vlm_bbox_utils import parse_qwen_bbox
 from media_processor.pipeline.work.video_work import VideoWork, get_video_work
 from media_processor.video_strategy import VideoStrategy
 
@@ -57,8 +58,11 @@ class AssemblyVideoStage(Stage):
     def _build_simple(work: VideoWork, vlm: dict) -> VideoMetadata:
         """組 Simple 影片 metadata(逐欄對齊原 VideoProcessor.analyze_visual_semantics)。"""
         frame = work.frame
+        # 主體框優先序:Qwen 直接給的框 → 三幀 saliency 聯集(無效自動退回,零退步)
+        vlm_bbox = parse_qwen_bbox(vlm.get("subject_bbox"))
+        subject_bbox = vlm_bbox if vlm_bbox is not None else work.subject_bbox
         crop_feasibility = MediaStrategy._compute_crop_feasibility(
-            work.subject_bbox, work.aspect_ratio
+            subject_bbox, work.aspect_ratio
         )
         return VideoMetadata(
             width=work.width,
@@ -85,7 +89,7 @@ class AssemblyVideoStage(Stage):
             color_temperature=frame.color_temperature,
             dominant_colors=frame.dominant_colors,
             motion_intensity=work.motion_intensity,
-            subject_bbox=work.subject_bbox,
+            subject_bbox=subject_bbox,
             crop_feasibility=crop_feasibility,
             faces=frame.face_info,
             scene_cuts=work.scene_cuts,

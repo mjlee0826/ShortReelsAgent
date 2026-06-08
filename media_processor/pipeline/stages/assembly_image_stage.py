@@ -5,6 +5,7 @@ from media_processor.media_strategy import MediaStrategy
 from media_processor.models import ImageMetadata, ProcessorResult
 from media_processor.pipeline.context import AssetContext, STATUS_SUCCESS
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
+from media_processor.pipeline.utils.vlm_bbox_utils import parse_qwen_bbox
 from media_processor.pipeline.work.image_work import get_image_work
 
 _STAGE_NAME = "assembly_image"
@@ -19,7 +20,8 @@ class AssemblyImageStage(Stage):
     平行群之後的唯一 join 點:讀齊 ImageWork 全部欄位,組裝成 ImageMetadata 與成功 result。
 
     在此完成兩件原本散在 process() 尾段、且依賴「saliency + face 兩個並行結果」的事:
-    1. **主體 bbox 解析**:有臉時用 face_bbox 覆蓋 saliency_bbox(對齊原版覆蓋邏輯)。
+    1. **主體 bbox 解析**(優先序):Qwen 直接給的主體框 → 臉部 face_bbox → U²-Net saliency_bbox。
+       Qwen 框無效 / 缺失時自動退回後兩者,確保「接入 VLM 框零退步」(Simple 影像走本地 Qwen)。
     2. **crop_feasibility**:依解析後的 subject_bbox 與 aspect_ratio 計算。
     純組裝邏輯(CPU 資源);成功時設 ``context.status=SUCCESS`` 供 Runner 收集。
     本 Stage 只在前面群組皆未 reject / error 時才會執行(Pipeline 已自動短路)。
@@ -33,13 +35,18 @@ class AssemblyImageStage(Stage):
         """解析 bbox → 算 crop → 組 ImageMetadata → 寫入成功 result 並標記狀態。"""
         work = get_image_work(context)
         frame = work.frame
-
-        # 主體定位:有臉以臉部 bbox 覆蓋 saliency(與原 process() 一致)
-        subject_bbox = frame.face_bbox if frame.face_bbox is not None else work.saliency_bbox
-        crop_feasibility = MediaStrategy._compute_crop_feasibility(subject_bbox, work.aspect_ratio)
-
         # 語意欄位以 .get 取值並沿用原版預設,確保缺欄位時行為一致
         vlm = work.vlm_result
+
+        # 主體定位優先序:Qwen 直接給的框 → 臉部 bbox → U²-Net saliency(無效自動往後退,零退步)
+        vlm_bbox = parse_qwen_bbox(vlm.get("subject_bbox"))
+        if vlm_bbox is not None:
+            subject_bbox = vlm_bbox
+        elif frame.face_bbox is not None:
+            subject_bbox = frame.face_bbox
+        else:
+            subject_bbox = work.saliency_bbox
+        crop_feasibility = MediaStrategy._compute_crop_feasibility(subject_bbox, work.aspect_ratio)
         metadata = ImageMetadata(
             width=work.width,
             height=work.height,
