@@ -25,6 +25,8 @@ from config.pipeline_config import EDITOR_PHASE1_LOCK_TIMEOUT_SEC
 from ingestion_engine.models import (
     META_KEY_PHASE1_STATUS,
     PHASE1_STATUS_DONE,
+    PHASE1_STATUS_FAILED,
+    PHASE1_STATUS_PROCESSING,
     PHASE1_STATUS_SKIPPED,
 )
 
@@ -64,6 +66,24 @@ class DirectorService:
             project_meta_store.write(project_dir, meta)
         except Exception as e:
             print(f"⚠️ [Service] 更新專案 meta 失敗: {e}")
+
+    def _mark_phase1_status(self, target_dir: str, status: str) -> None:
+        """
+        原子更新 project_meta 的 phase1_status，供總覽卡片 / 素材頁顯示分析階段。
+
+        run_phase1 是「感知分析」這個動作本身，故由它統一擁有 PROCESSING→DONE/FAILED 轉換，
+        讓 reanalyze / generate / 雲端增量 / 編輯器補跑四個進入點顯示一致（解卡片不顯示「分析中」）。
+        無 meta 不強建（沿用 _update_project_meta 的容錯立場；CLI 無 meta 的資料夾據此自然略過）；
+        走 ProjectMetaStore.update 的交易式原子寫，與 poller / REST 併發寫不互相覆蓋。
+        """
+        # 先確認 meta 存在再寫，避免替 CLI / 無 meta 的資料夾憑空造出半截 meta
+        if project_meta_store.read(target_dir) is None:
+            return
+
+        def _set(meta: dict) -> None:
+            """就地寫入 phase1_status（其餘欄位原樣保留）。"""
+            meta[META_KEY_PHASE1_STATUS] = status
+        project_meta_store.update(target_dir, _set)
 
     def _resolve_target_dir(self, folder_name: str, user_id: str = None) -> str:
         """依是否有 user_id 決定素材資料夾路徑（user 資料隔離）。"""
@@ -110,38 +130,49 @@ class DirectorService:
         """
         target_dir = self._require_target_dir(folder_name, user_id)
 
-        # 標準化:讓素材身分穩定(raw → standardized 分層)再收集
-        self._standardize(target_dir)
+        # 進入感知分析即標 PROCESSING:總覽卡片 / 素材頁據此顯示「分析中」。此前的下載 / 標準化
+        # (雲端) = INGESTING 由雲端狀態機負責;PROCESSING→DONE/FAILED 這段改由本方法統一擁有,
+        # 讓 reanalyze / generate / 雲端增量 / 編輯器補跑四個進入點顯示一致。
+        self._mark_phase1_status(target_dir, PHASE1_STATUS_PROCESSING)
+        try:
+            # 標準化:讓素材身分穩定(raw → standardized 分層)再收集
+            self._standardize(target_dir)
 
-        # 收集待處理素材身分(relpath,如 raw/photo.jpg);子集重分析只留指定 relpath
-        asset_relpaths = collect_asset_files(target_dir)
-        is_subset = asset_filenames is not None
-        if is_subset:
-            wanted = set(asset_filenames)
-            asset_relpaths = [rel for rel in asset_relpaths if rel in wanted]
-        print(f"[Service] 正在處理 {len(asset_relpaths)} 個素材...")
+            # 收集待處理素材身分(relpath,如 raw/photo.jpg);子集重分析只留指定 relpath
+            asset_relpaths = collect_asset_files(target_dir)
+            is_subset = asset_filenames is not None
+            if is_subset:
+                wanted = set(asset_filenames)
+                asset_relpaths = [rel for rel in asset_relpaths if rel in wanted]
+            print(f"[Service] 正在處理 {len(asset_relpaths)} 個素材...")
 
-        # Pipeline 需絕對路徑讀檔;身分(asset_id=relpath)由 runner 依 base_dir(target_dir)還原
-        asset_files = [to_abs_path(target_dir, rel) for rel in asset_relpaths]
+            # Pipeline 需絕對路徑讀檔;身分(asset_id=relpath)由 runner 依 base_dir(target_dir)還原
+            asset_files = [to_abs_path(target_dir, rel) for rel in asset_relpaths]
 
-        # 以 Pipeline 框架並行跑感知分析：asset 間並行，輸出依輸入順序、僅收 success；
-        # 全域預設一律 SIMPLE，逐檔 COMPLEX（Gemini 深度索引）由 asset_strategies 覆寫；
-        # status_sink 另收每個 asset（含 rejected / error）的精簡狀態供 UI 落地
-        status_sink: list[dict] = []
-        raw_assets_metadata = self.pipeline_runner.run(
-            asset_files, target_dir, tracker=tracker,
-            asset_strategies=asset_strategies, status_sink=status_sink,
-        )
-        if require_success and not raw_assets_metadata:
-            raise ValueError("資料夾內沒有成功解析的有效素材！")
+            # 以 Pipeline 框架並行跑感知分析：asset 間並行，輸出依輸入順序、僅收 success；
+            # 全域預設一律 SIMPLE，逐檔 COMPLEX（Gemini 深度索引）由 asset_strategies 覆寫；
+            # status_sink 另收每個 asset（含 rejected / error）的精簡狀態供 UI 落地
+            status_sink: list[dict] = []
+            raw_assets_metadata = self.pipeline_runner.run(
+                asset_files, target_dir, tracker=tracker,
+                asset_strategies=asset_strategies, status_sink=status_sink,
+            )
+            if require_success and not raw_assets_metadata:
+                raise ValueError("資料夾內沒有成功解析的有效素材！")
 
-        # 本次實際重跑到的檔名（子集合併時用來移除舊條目）
-        reprocessed_ids = {entry["asset_id"] for entry in status_sink}
-        self._dump_phase1_metadata(target_dir, raw_assets_metadata, reprocessed_ids, merge=is_subset)
-        self._dump_phase1_status(target_dir, status_sink, merge=is_subset)
+            # 本次實際重跑到的檔名（子集合併時用來移除舊條目）
+            reprocessed_ids = {entry["asset_id"] for entry in status_sink}
+            self._dump_phase1_metadata(target_dir, raw_assets_metadata, reprocessed_ids, merge=is_subset)
+            self._dump_phase1_status(target_dir, status_sink, merge=is_subset)
 
-        # 更新專案 meta 的素材數量／最後修改時間（雲端預跑時讓專案列表即時反映）
-        self._update_project_meta(target_dir, folder_name)
+            # 更新專案 meta 的素材數量／最後修改時間（雲端預跑時讓專案列表即時反映）
+            self._update_project_meta(target_dir, folder_name)
+        except Exception:
+            # 分析中途失敗:標 FAILED 讓卡片顯示「分析失敗」,再拋回呼叫端決定後續(雲端不前進簽章供重試)
+            self._mark_phase1_status(target_dir, PHASE1_STATUS_FAILED)
+            raise
+        # 分析完成:標 DONE(覆蓋開頭 PROCESSING),卡片轉「待生成 / 可編輯」
+        self._mark_phase1_status(target_dir, PHASE1_STATUS_DONE)
         return raw_assets_metadata
 
     def run_phase1_incremental(self, folder_name: str, user_id: str = None,

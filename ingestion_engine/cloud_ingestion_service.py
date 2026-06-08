@@ -40,7 +40,6 @@ from ingestion_engine.models import (
     PHASE1_STATUS_DONE,
     PHASE1_STATUS_FAILED,
     PHASE1_STATUS_INGESTING,
-    PHASE1_STATUS_PROCESSING,
     PHASE1_STATUS_SKIPPED,
     RemoteEntry,
     SOURCE_GDRIVE,
@@ -233,11 +232,12 @@ class CloudIngestionService:
             })
             return self._mark_synced(project_dir, report)
 
-        # 自動分析：標準化已完成(素材身分穩定、前端可預覽),才翻成 PROCESSING 並建立可追進度的分析 job。
-        # 跑 Phase 1（其內 run_phase1_incremental 仍會呼叫標準化,因 idempotent 對已存在 _std 為純掃描
-        # no-op）；失敗只標 failed、保留舊簽章供下輪重試,不視為同步失敗。鎖已由 ingest 護衛持有,
-        # _phase1_runner 不再自行取鎖（避免重入）。PROCESSING(分析中)與 INGESTING(處理素材中)在 UI 上區分兩階段。
-        self._patch_meta(project_dir, {META_KEY_PHASE1_STATUS: PHASE1_STATUS_PROCESSING})
+        # 自動分析：標準化已完成(素材身分穩定、前端可預覽),交給 Phase 1 跑感知分析。
+        # PROCESSING(分析中)改由 run_phase1 進入分析時自行標記(四個進入點統一擁有 PROCESSING→DONE);
+        # 本層刻意不再預先標 PROCESSING——否則「簽章變動但無待分析素材」(如純刪檔)時 run_phase1 會
+        # 早退、不標任何狀態,卡片將卡在 PROCESSING;該收斂情形改由本層收尾統一標 DONE(見下方成功分支)。
+        # 失敗只標 failed、保留舊簽章供下輪重試,不視為同步失敗。鎖已由 ingest 護衛持有,
+        # _phase1_runner 不再自行取鎖（避免重入）。INGESTING(處理素材中)→ PROCESSING(分析中)兩階段在 UI 上區分。
         try:
             self._phase1_runner(user_id, project_name)
         except Exception as exc:  # noqa: BLE001 - Phase 1 任何失敗都只隔離此 project
