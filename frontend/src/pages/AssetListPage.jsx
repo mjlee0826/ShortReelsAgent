@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { FaArrowLeft, FaExclamationCircle, FaImages } from 'react-icons/fa';
 import { apiService } from '../services/api.service';
 import useProjectStore from '../store/useProjectStore';
@@ -37,12 +37,14 @@ const PREPARING_POLL_INTERVAL_MS = 3000;
 export default function AssetListPage() {
   const { projectId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const currentProject = useProjectStore((s) => s.currentProject);
   const selectProject = useProjectStore((s) => s.selectProject);
 
   const [assets, setAssets] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState('');
+  // 由編輯器因素材未分析跳轉進來時，location.state.notice 作為初始提示帶入（避免在 effect 內同步 setState）
+  const [errorMsg, setErrorMsg] = useState(() => location.state?.notice || '');
   const [selected, setSelected] = useState(new Set());
   // 選取模式：開啟後卡片才顯示勾選框、整卡可點選（與 selected 為獨立關注點）
   const [selectionMode, setSelectionMode] = useState(false);
@@ -65,6 +67,13 @@ export default function AssetListPage() {
 
   // 詳情彈窗對應的素材（以 relpath 身分查找）；供彈窗取顯示檔名與縮圖後備
   const detailAsset = detailPath ? assets.find((a) => a.path === detailPath) : null;
+
+  // 提示已透過 errorMsg 初始值帶入；此處只清掉 history state，避免重整 / 返回時殘留同一則提示
+  useEffect(() => {
+    if (location.state?.notice) {
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
 
   // ── 載入素材 ───────────────────────────────────────────────────────────────
   // 可重用的 refetch：供 WebSocket job 結束後取最終持久化狀態（在事件回呼內呼叫，非 effect）。

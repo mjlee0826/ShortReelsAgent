@@ -118,6 +118,18 @@ class DirectorApiService {
     }
   }
 
+  // 送出藍圖至後端雲端算圖，回傳 MP4 Blob。
+  // 刻意走 apiClient（axios）而非裸 fetch：interceptor 會自動附上 Authorization token，
+  // 修掉先前裸 fetch 缺 token 導致 render_mp4 被 verify_token 擋下的問題。
+  async renderMp4(blueprint, assetsRootUrl) {
+    const response = await apiClient.post(
+      '/api/render_mp4',
+      { blueprint, assets_root_url: assetsRootUrl },
+      { responseType: 'blob' }
+    );
+    return response.data;
+  }
+
   // 上傳自訂 BGM 至指定素材資料夾，回傳 { filename: "..." }
   async uploadMusic(folderName, file) {
     try {

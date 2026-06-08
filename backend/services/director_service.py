@@ -12,7 +12,6 @@ from media_tools.media_standardizer import MediaStandardizer
 from template_engine.template_analyzer_facade import TemplateAnalyzerFacade
 from director_agent.director_facade import DirectorFacade
 from backend.services.asset_repository import AssetRepository
-from backend.services.jobs.phase1_lock import EDITOR_BUSY_MESSAGE, Phase1BusyError, phase1_lock
 from backend.services.stores.project_meta_store import project_meta_store
 from backend.utils.asset_discovery import (
     PHASE1_METADATA_FILENAME,
@@ -21,7 +20,6 @@ from backend.utils.asset_discovery import (
     to_abs_path,
 )
 from backend.utils.atomic_json import atomic_write_json, read_json_tolerant
-from config.pipeline_config import EDITOR_PHASE1_LOCK_TIMEOUT_SEC
 from ingestion_engine.models import (
     META_KEY_PHASE1_STATUS,
     PHASE1_STATUS_DONE,
@@ -29,6 +27,21 @@ from ingestion_engine.models import (
     PHASE1_STATUS_PROCESSING,
     PHASE1_STATUS_SKIPPED,
 )
+
+
+# 素材尚未(完整)分析就嘗試生成時,run_workflow 對前端回報用的訊息(避免 magic string)
+ASSETS_NOT_ANALYZED_MESSAGE = (
+    "素材尚未分析完成（有未處理或策略已變更的素材），請先到素材頁完成分析再生成。"
+)
+
+
+class AssetsNotAnalyzedError(Exception):
+    """
+    生成前置條件未滿足:偵測到未處理 / 策略已變更(dirty)的素材。
+
+    感知分析(Phase 1)已改由素材頁專屬擁有,run_workflow 不再代跑;偵測到尚未分析的素材即拋此例外,
+    由 API 層轉成 409 + 機器可讀 code,讓前端只在此情境引導使用者跳轉素材頁完成分析。
+    """
 
 
 class DirectorService:
@@ -262,44 +275,15 @@ class DirectorService:
         # 原子寫:併發讀者(素材頁 list_assets)恆見完整檔,不再讀到半截 JSON 而 500
         atomic_write_json(dump_path, status_map)
 
-    def _ensure_phase1_assets(self, folder_name: str, user_id: str,
-                              phase1_dump_path: str,
-                              tracker: ProgressTracker = None) -> list[dict]:
-        """
-        取得供 Phase 4 使用的 success-only 感知結果（編輯器生成用）。
-
-        直接沿用素材頁已分析的快取，只對「dirty（策略已變更）∪ 未處理」的素材，
-        用其逐檔 Simple/Complex 策略補跑 Phase 1（增量合併回 phase1_assets_metadata.json），
-        補跑後推進其 dirty / 已分析基準。無 user_id（CLI / 無認證）時退回整批分析。
-        """
-        # 無 user_id 無法套用逐檔策略，退回整批分析（維持 CLI 相容）
-        if not user_id:
-            return self.run_phase1(folder_name, user_id=user_id, tracker=tracker)
-
-        # 只補跑「dirty ∪ 未處理」的素材，沿用其逐檔策略；其餘沿用既有快取
-        pending = self.asset_repository.select_pending(user_id, folder_name)
-        if pending:
-            strategies = self.asset_repository.get_asset_strategies(user_id, folder_name)
-            self.run_phase1(
-                folder_name, user_id=user_id, tracker=tracker,
-                asset_filenames=pending, asset_strategies=strategies, require_success=False,
-            )
-            # 補跑完成，推進這些素材的 dirty / 已分析基準
-            self.asset_repository.clear_dirty(user_id, folder_name, pending, used_strategies=strategies)
-
-        # 載入（可能剛增量合併完成的）success-only 感知快取
-        if os.path.exists(phase1_dump_path):
-            with open(phase1_dump_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        return []
-
     def run_workflow(self, prompt: str, folder_name: str, user_id: str = None,
                     template: str = None,
                     subtitles: bool = True, filters: bool = True, old_timeline: dict = None,
                     music_strategy: str = "search_copyright",
-                    user_music_file: str = None,
-                    tracker: ProgressTracker = None):
-        """執行完整生成工作流；tracker 非 None 時把 Phase 1 進度事件廣播給其訂閱者（WebSocket）。"""
+                    user_music_file: str = None):
+        """
+        執行完整生成工作流（Phase 2–4）：讀取素材頁已落地的 Phase 1 感知快取，提取範本 DNA，
+        呼叫導演大腦產生藍圖。感知分析（Phase 1）已改由素材頁專屬擁有，本方法不再代跑。
+        """
         # 若有 user_id，素材路徑改為 assets/{user_id}/{folder_name}/，實現使用者資料隔離
         target_dir = self._require_target_dir(folder_name, user_id)
         
@@ -334,21 +318,16 @@ class DirectorService:
         
         # --- 否則，執行完整的新生成流程 ---
         else:
-            # Phase 1：直接沿用素材頁分析結果，只補跑尚未分析 / 策略已變更的素材（移除編輯器全域策略）。
-            # 與雲端同步 / 素材頁的 Phase 1 互斥:阻塞等前景分析做完(上限 EDITOR_PHASE1_LOCK_TIMEOUT_SEC)
-            # 再讀新鮮快取,避免雙重佔用 GPU 與讀到半寫快取;逾時則回 Phase1BusyError 讓使用者稍候再試。
-            if not phase1_lock.acquire(
-                user_id, folder_name, blocking=True, timeout=EDITOR_PHASE1_LOCK_TIMEOUT_SEC
-            ):
-                raise Phase1BusyError(EDITOR_BUSY_MESSAGE)
-            try:
-                raw_assets_metadata = self._ensure_phase1_assets(
-                    folder_name, user_id, phase1_dump_path, tracker
-                )
-            finally:
-                phase1_lock.release(user_id, folder_name)
-            if not raw_assets_metadata:
-                raise ValueError("沒有可用的已分析素材，請先到素材頁完成分析。")
+            # Phase 1（感知分析）已改由素材頁專屬擁有（reanalyze / 開始生成），run_workflow 不再代跑,
+            # 也不再需要與素材頁互斥的 phase1_lock。此處僅讀取素材頁已落地的 success-only 感知快取。
+            # 不信任使用者已先分析:偵測「未處理 ∪ 策略已變更(dirty)」素材,有就拋 AssetsNotAnalyzedError,
+            # 由 API 轉 409 讓前端跳轉素材頁。無 user_id(CLI)無法算 pending,退而僅檢查快取是否存在。
+            pending = self.asset_repository.select_pending(user_id, folder_name) if user_id else []
+            if os.path.exists(phase1_dump_path):
+                with open(phase1_dump_path, 'r', encoding='utf-8') as f:
+                    raw_assets_metadata = json.load(f)
+            if pending or not raw_assets_metadata:
+                raise AssetsNotAnalyzedError(ASSETS_NOT_ANALYZED_MESSAGE)
 
             if template:
                 print(f"[Service] 正在提取範本 DNA: {template}")

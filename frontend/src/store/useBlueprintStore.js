@@ -7,6 +7,39 @@
  */
 import { create } from 'zustand';
 import { apiService } from '../services/api.service';
+import { removeAt, reorder } from '../utils/timeline';
+
+// Undo/Redo 快照保留上限，避免記憶體無限成長（具名常數，禁 magic number）
+const HISTORY_LIMIT = 50;
+// 無選取時的初始選取狀態
+const EMPTY_SELECTION = { type: null, clipIndex: null };
+
+/**
+ * 推進一筆 Undo 快照：把舊 blueprint 推入 past（超過上限則丟最舊），並清空 future。
+ * 任何「會改變 blueprint 的操作」（手動就地編輯 / AI 微調）都應呼叫，確保可被 Undo。
+ * @param {object} history 目前的 { past, future }
+ * @param {object|null} prevBlueprint 變更前的 blueprint（null 代表首次生成，不推快照）
+ * @returns {object} 新的 { past, future }
+ */
+function pushHistory(history, prevBlueprint) {
+  if (!prevBlueprint) return { past: history.past, future: [] };
+  return { past: [...history.past, prevBlueprint].slice(-HISTORY_LIMIT), future: [] };
+}
+
+/**
+ * 計算「陣列元素由 from 移到 to」後，某個舊索引對應的新索引。
+ * 用於重排後把選取狀態映射到正確的片段（避免選取錯位）。
+ * @param {number} i 變更前的索引
+ * @param {number} from 被移動元素的原索引
+ * @param {number} to 被移動元素的新索引
+ * @returns {number} 變更後的索引
+ */
+function remapIndexAfterMove(i, from, to) {
+  if (i === from) return to;                 // 被移動者本身
+  if (from < i && i <= to) return i - 1;     // 落在 (from, to] 的元素前移一格
+  if (to <= i && i < from) return i + 1;     // 落在 [to, from) 的元素後移一格
+  return i;                                  // 其餘不受影響
+}
 
 const useBlueprintStore = create((set, get) => ({
   // --- 表單狀態 ---
@@ -25,9 +58,18 @@ const useBlueprintStore = create((set, get) => ({
   assetsRootUrl: '',
   isProcessing: false,
   errorMsg: '',
+  // 生成因素材未分析失敗時設為該專案名稱：EditorPage 據此跳轉素材頁，跳轉後清空
+  redirectToAssetsProject: null,
 
   // --- 對話歷史紀錄 ---
   chatHistory: [],
+
+  // --- 編輯器互動狀態 ---
+  // 目前選取對象：type 為 'clip'|'bgm'|'project'|null；clipIndex 僅在 type==='clip' 時有效
+  // 以「陣列索引」識別片段，因 clip_id 是素材 relpath、同一素材可重複出現於多段而不唯一
+  selection: { type: null, clipIndex: null },
+  // Undo/Redo 快照堆疊：past 為歷史版本、future 為被 undo 出去、可再 redo 的版本
+  history: { past: [], future: [] },
 
   updateForm: (key, value) => set({ [key]: value }),
 
@@ -37,10 +79,87 @@ const useBlueprintStore = create((set, get) => ({
     assetsRootUrl: '',
     isProcessing: false,
     errorMsg: '',
+    redirectToAssetsProject: null,
     chatHistory: [],
     uploadedMusicFile: null,
     userPrompt: '',
     templateSource: '',
+    selection: { type: null, clipIndex: null },
+    history: { past: [], future: [] },
+  }),
+
+  // ── 編輯器：選取 ───────────────────────────────────────────────────────────
+
+  // 設定目前選取對象；右側檢視器依此切換顯示 Clip / Bgm / Project 面板
+  select: (type, clipIndex = null) => set({ selection: { type, clipIndex } }),
+  clearSelection: () => set({ selection: { ...EMPTY_SELECTION } }),
+
+  // ── 編輯器：就地編輯（直接改前端 blueprint，即時預覽，不打後端）───────────────
+
+  /**
+   * 就地編輯核心：以 producer 產生新 blueprint，並推進 Undo 快照。
+   * producer 必須是純函式 (blueprint) => newBlueprint（immutable，不修改輸入）。
+   * @param {(bp: object) => object} producer 由舊 blueprint 算出新 blueprint
+   */
+  mutateBlueprint: (producer) => set((state) => {
+    if (!state.blueprint) return {};
+    const next = producer(state.blueprint);
+    if (!next || next === state.blueprint) return {};
+    return { blueprint: next, history: pushHistory(state.history, state.blueprint) };
+  }),
+
+  // 更新某片段的單一欄位（字幕 / 濾鏡 / 縮放 / 轉場 / 音量 / 裁切數值），不重排
+  updateClipField: (index, key, value) => get().mutateBlueprint((bp) => ({
+    ...bp,
+    timeline: bp.timeline.map((clip, i) => (i === index ? { ...clip, [key]: value } : clip)),
+  })),
+
+  // 更新配樂軌欄位（音量 / 起播點）；bgm_track 不存在時補成空物件再寫入
+  updateBgmField: (key, value) => get().mutateBlueprint((bp) => ({
+    ...bp,
+    bgm_track: { ...(bp.bgm_track || {}), [key]: value },
+  })),
+
+  // 刪除片段並 ripple 接合；同步修正選取索引（刪到選取者則清空、刪在其前則前移）
+  removeClip: (index) => {
+    get().mutateBlueprint((bp) => ({ ...bp, timeline: removeAt(bp.timeline, index) }));
+    set((state) => {
+      const sel = state.selection;
+      if (sel.type !== 'clip') return {};
+      if (sel.clipIndex === index) return { selection: { ...EMPTY_SELECTION } };
+      if (sel.clipIndex > index) return { selection: { ...sel, clipIndex: sel.clipIndex - 1 } };
+      return {};
+    });
+  },
+
+  // 重排片段並 ripple 接合；同步把選取索引映射到重排後的新位置
+  reorderClips: (fromIndex, toIndex) => {
+    if (fromIndex === toIndex) return;
+    get().mutateBlueprint((bp) => ({ ...bp, timeline: reorder(bp.timeline, fromIndex, toIndex) }));
+    set((state) => {
+      const sel = state.selection;
+      if (sel.type !== 'clip') return {};
+      return { selection: { ...sel, clipIndex: remapIndexAfterMove(sel.clipIndex, fromIndex, toIndex) } };
+    });
+  },
+
+  // ── 編輯器：Undo / Redo（手動編輯與 AI 微調共用同一快照堆疊）─────────────────
+
+  undo: () => set((state) => {
+    if (state.history.past.length === 0) return {};
+    const past = [...state.history.past];
+    const restored = past.pop();
+    const future = state.blueprint ? [state.blueprint, ...state.history.future] : state.history.future;
+    return { blueprint: restored, history: { past, future }, selection: { ...EMPTY_SELECTION } };
+  }),
+
+  redo: () => set((state) => {
+    if (state.history.future.length === 0) return {};
+    const [restored, ...future] = state.history.future;
+    const past = state.blueprint
+      ? [...state.history.past, state.blueprint].slice(-HISTORY_LIMIT)
+      : state.history.past;
+    return { blueprint: restored, history: { past, future }, selection: { ...EMPTY_SELECTION } };
   }),
 
   // 上傳自訂 BGM 至素材資料夾，成功後記錄檔名
@@ -61,6 +180,9 @@ const useBlueprintStore = create((set, get) => ({
   },
 
   clearUploadedMusic: () => set({ uploadedMusicFile: null }),
+
+  // 跳轉素材頁後清掉旗標，避免重複導航
+  clearAssetsRedirect: () => set({ redirectToAssetsProject: null }),
 
   submitPrompt: async (isRefinement = false, refinementPrompt = '') => {
     set({ isProcessing: true, errorMsg: '' });
@@ -102,10 +224,14 @@ const useBlueprintStore = create((set, get) => ({
 
       const result = await apiService.generateTimeline(payload);
 
+      // AI 微調結果也推進 Undo 快照（讓使用者能一鍵還原 AI 的改動，政策 C 安全網）；
+      // 時間軸結構可能整個改變，故清空選取避免索引錯位
       set((prev) => ({
         blueprint: result.blueprint,
         assetsRootUrl: result.assets_root_url,
         isProcessing: false,
+        history: pushHistory(prev.history, prev.blueprint),
+        selection: { ...EMPTY_SELECTION },
         chatHistory: [
           ...prev.chatHistory,
           { role: 'system', content: '✅ 導演已更新劇本與時間軸！請查看左側預覽。' }
@@ -113,7 +239,22 @@ const useBlueprintStore = create((set, get) => ({
       }));
 
     } catch (error) {
-      const backendError = error.response?.data?.detail || error.message || String(error);
+      const detail = error.response?.data?.detail;
+      // 後端回 409 + code=ASSETS_NOT_ANALYZED：素材尚未分析，設旗標讓 EditorPage 跳轉素材頁
+      if (error.response?.status === 409 && detail?.code === 'ASSETS_NOT_ANALYZED') {
+        set((prev) => ({
+          isProcessing: false,
+          redirectToAssetsProject: folderName,
+          chatHistory: [
+            ...prev.chatHistory,
+            { role: 'error', content: `⚠️ ${detail.message}` }
+          ]
+        }));
+        return;
+      }
+      // 其餘錯誤：detail 可能是字串（一般 HTTPException）或物件，取出可讀訊息
+      const backendError =
+        (typeof detail === 'string' ? detail : detail?.message) || error.message || String(error);
       set((prev) => ({
         errorMsg: `生成失敗：${backendError}`,
         isProcessing: false,

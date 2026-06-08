@@ -12,14 +12,20 @@ const MUSIC_OPTIONS = [
 ];
 const MUSIC_NONE = 'none';
 const ALLOWED_AUDIO_ACCEPT = '.mp3,.wav,.m4a,.aac,.flac,.ogg';
+const PROMPT_ROWS = 5;
 
 /**
- * SidebarForm：AI 導演生成表單。
+ * GenerationForm：AI 導演生成 / 重新生成的共用表單（DRY）。
  *
  * 收集導演指令、範本網址、配樂策略與字幕 / 濾鏡開關後送出生成。
- * 影片分析策略已移除（需求 4），改由素材頁的逐檔 Simple/Complex 設定決定，編輯器直接沿用 assets 的分析結果。
+ * 同時供「初始生成」(SetupView) 與「重新生成」(RegeneratePanel) 使用；
+ * 兩者皆屬「重新生成」邊界（需 AI 重新推理），故統一呼叫 submitPrompt(false)。
+ *
+ * @param {string} submitLabel 送出按鈕文字
+ * @param {boolean} showProject 是否顯示當前專案唯讀列（初始生成顯示、重新生成可省）
+ * @param {() => void} onSubmitted 送出後回呼（例如關閉 Modal）
  */
-export default function SidebarForm() {
+export default function GenerationForm({ submitLabel = '🎬 開始生成影片', showProject = true, onSubmitted }) {
   const {
     userPrompt, templateSource,
     enableSubtitles, enableFilters,
@@ -29,6 +35,7 @@ export default function SidebarForm() {
 
   const currentProject = useProjectStore((s) => s.currentProject);
 
+  // 送出前驗證指令非空；送出後立即回呼（loading 遮罩由工作台顯示）
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!userPrompt) {
@@ -36,6 +43,7 @@ export default function SidebarForm() {
       return;
     }
     submitPrompt(false);
+    onSubmitted?.();
   };
 
   const handleMusicUpload = (e) => {
@@ -46,17 +54,19 @@ export default function SidebarForm() {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-5 p-6">
+    <form onSubmit={handleSubmit} className="flex flex-col gap-5">
       {/* 1. 當前專案（唯讀標示）*/}
-      <div className="flex flex-col gap-1.5">
-        <label className="text-sm font-medium text-ink-muted flex items-center gap-2">
-          <FaFilm className="text-accent" /> 當前專案
-        </label>
-        <div className="bg-surface-2/60 text-ink-muted px-3.5 py-2.5 rounded-xl border border-border truncate select-none">
-          {currentProject?.display_name || '—'}
-          <span className="ml-2 text-xs text-ink-faint font-mono">{currentProject?.name}</span>
+      {showProject && (
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-ink-muted flex items-center gap-2">
+            <FaFilm className="text-accent" /> 當前專案
+          </label>
+          <div className="bg-surface-2/60 text-ink-muted px-3.5 py-2.5 rounded-xl border border-border truncate select-none">
+            {currentProject?.display_name || '—'}
+            <span className="ml-2 text-xs text-ink-faint font-mono">{currentProject?.name}</span>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* 2. Template 網址 */}
       <Input
@@ -115,16 +125,16 @@ export default function SidebarForm() {
       </div>
 
       {/* 4. 導演指令 */}
-      <div className="flex flex-col gap-1.5 flex-1">
+      <div className="flex flex-col gap-1.5">
         <label className="text-sm font-medium text-ink-muted flex items-center gap-2">
           <FaMagic className="text-accent" /> 導演指令 (User Prompt)
         </label>
         <textarea
-          rows="5"
+          rows={PROMPT_ROWS}
           value={userPrompt}
           onChange={(e) => updateForm('userPrompt', e.target.value)}
           placeholder="請描述你想剪輯的風格、內容或音樂需求..."
-          className="bg-surface-2 text-ink placeholder-ink-faint p-4 rounded-xl border border-border focus:border-accent focus:outline-none resize-none transition-colors flex-1 leading-relaxed"
+          className="bg-surface-2 text-ink placeholder-ink-faint p-4 rounded-xl border border-border focus:border-accent focus:outline-none resize-none transition-colors leading-relaxed"
         />
       </div>
 
@@ -148,7 +158,7 @@ export default function SidebarForm() {
 
       {/* 6. 提交 */}
       <Button type="submit" size="lg" fullWidth loading={isProcessing} className="mt-1">
-        {isProcessing ? 'AI 導演思考中...' : '🎬 開始生成影片'}
+        {isProcessing ? 'AI 導演思考中...' : submitLabel}
       </Button>
     </form>
   );

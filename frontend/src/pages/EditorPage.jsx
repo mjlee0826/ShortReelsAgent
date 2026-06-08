@@ -1,70 +1,38 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import RightPanel from '../components/RightPanel/RightPanel';
-import VideoPlayer from '../components/RemotionPlayer/VideoPlayer';
+import React, { useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import AppHeader from '../components/AppHeader/AppHeader';
+import SetupView from '../components/Editor/SetupView';
+import Workbench from '../components/Editor/Workbench';
+import useBlueprintStore from '../store/useBlueprintStore';
 
+/**
+ * EditorPage：編輯器頁的兩階段殼層。
+ *
+ * 依 blueprint 是否存在條件渲染（不新增路由）：
+ *   - 尚未生成 → SetupView（聚焦的生成前畫面）
+ *   - 已有藍圖 → Workbench（AI 粗剪 + 人工精修工作台）
+ * 另負責「素材未分析」的守門跳轉。
+ */
 export default function EditorPage() {
-  const [panelWidth, setPanelWidth] = useState(500);
-  const isDragging = useRef(false);
+  const navigate = useNavigate();
+  const blueprint = useBlueprintStore((s) => s.blueprint);
+  const redirectToAssetsProject = useBlueprintStore((s) => s.redirectToAssetsProject);
+  const clearAssetsRedirect = useBlueprintStore((s) => s.clearAssetsRedirect);
 
-  const handleMouseDown = (e) => {
-    isDragging.current = true;
-    document.body.style.cursor = 'col-resize';
-    e.preventDefault();
-  };
-
-  const handleMouseMove = useCallback((e) => {
-    if (!isDragging.current) return;
-    const newWidth = window.innerWidth - e.clientX;
-    if (newWidth >= 350 && newWidth <= 800) {
-      setPanelWidth(newWidth);
-    }
-  }, []);
-
-  const handleMouseUp = useCallback(() => {
-    if (isDragging.current) {
-      isDragging.current = false;
-      document.body.style.cursor = 'default';
-    }
-  }, []);
-
+  // 生成因素材未分析失敗：帶提示跳轉素材頁，讓使用者先完成分析（reactive 守門）
   useEffect(() => {
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [handleMouseMove, handleMouseUp]);
+    if (!redirectToAssetsProject) return;
+    const project = redirectToAssetsProject;
+    clearAssetsRedirect();
+    navigate(`/projects/${project}/assets`, {
+      state: { notice: '請先完成素材分析，再回編輯器生成影片。' },
+    });
+  }, [redirectToAssetsProject, clearAssetsRedirect, navigate]);
 
   return (
     <div className="flex flex-col h-screen w-full font-sans bg-canvas overflow-hidden">
       <AppHeader />
-
-      {/* 主要編輯區：左右兩欄 */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* 左側：影片預覽器 */}
-        <div className="flex-1 min-w-[300px] relative">
-          <VideoPlayer />
-        </div>
-
-        {/* 垂直拖拉分隔線 */}
-        <div
-          onMouseDown={handleMouseDown}
-          className="w-1.5 hover:w-2 bg-surface-2 border-x border-border cursor-col-resize hover:bg-accent active:bg-accent-hover transition-colors flex flex-col items-center justify-center shrink-0 z-20 group"
-          title="左右拖曳調整控制台寬度"
-        >
-          <div className="h-10 flex gap-[2px] opacity-30 group-hover:opacity-100">
-            <div className="w-[1px] bg-white h-full"></div>
-            <div className="w-[1px] bg-white h-full"></div>
-          </div>
-        </div>
-
-        {/* 右側：控制面板 */}
-        <div style={{ width: `${panelWidth}px` }} className="shrink-0 h-full relative">
-          <RightPanel />
-        </div>
-      </div>
+      {blueprint ? <Workbench /> : <SetupView />}
     </div>
   );
 }

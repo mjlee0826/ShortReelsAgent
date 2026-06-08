@@ -2,14 +2,13 @@ import React, { useMemo, useState } from 'react';
 import { Player } from '@remotion/player';
 import MainTimeline from './MainTimeline';
 import useBlueprintStore from '../../store/useBlueprintStore';
+import { apiService } from '../../services/api.service';
 // 【新增】引入科技感圖示 (包含 FaRocket 增加動態感)
-import { FaDownload, FaSpinner, FaRocket } from 'react-icons/fa';
+import { FaSpinner, FaRocket } from 'react-icons/fa';
 
 export default function VideoPlayer() {
   const { blueprint, assetsRootUrl } = useBlueprintStore();
   const [isRendering, setIsRendering] = useState(false);
-
-  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5174';
 
   // 1. 判斷藍圖是否為空 (嚴格條件)
   const isBlueprintEmpty = !blueprint || !blueprint.timeline || blueprint.timeline.length === 0;
@@ -25,35 +24,25 @@ export default function VideoPlayer() {
     return { totalFrames: frames > 0 ? frames : 150, targetFps: fps };
   }, [blueprint, isBlueprintEmpty]);
 
-  // 3. 雲端算圖下載邏輯
+  // 3. 雲端算圖下載邏輯（算圖、認證交由 apiService.renderMp4 處理，這裡只負責觸發下載）
   const handleDownloadMp4 = async () => {
     if (isBlueprintEmpty) return;
     setIsRendering(true);
 
     try {
-      const response = await fetch(`${BACKEND_URL}/api/render_mp4`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          blueprint: blueprint,
-          assets_root_url: assetsRootUrl
-        })
-      });
-
-      if (!response.ok) throw new Error('伺服器算圖失敗');
-
-      const blob = await response.blob();
+      const blob = await apiService.renderMp4(blueprint, assetsRootUrl);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = 'ShortReelsAgent_Output.mp4';
       document.body.appendChild(a);
       a.click();
-      
+
       a.remove();
       window.URL.revokeObjectURL(url);
     } catch (error) {
-      alert(`❌ 匯出失敗：${error.message}`);
+      const msg = error.response?.data?.detail || error.message || String(error);
+      alert(`❌ 匯出失敗：${msg}`);
     } finally {
       setIsRendering(false);
     }
