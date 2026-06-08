@@ -45,16 +45,16 @@ export default function Workbench() {
 
         <div className="flex-1" />
 
-        <Button variant="secondary" size="sm" leftIcon={<FaSyncAlt size={11} />} onClick={() => setShowRegenerate(true)}>
+        <Button variant="secondary" size="md" leftIcon={<FaSyncAlt size={14} />} onClick={() => setShowRegenerate(true)}>
           重新生成
         </Button>
         <Button
           variant={showCopilot ? 'primary' : 'secondary'}
-          size="sm"
-          leftIcon={<FaRobot size={12} />}
+          size="md"
+          leftIcon={<FaRobot size={15} />}
           onClick={() => setShowCopilot((v) => !v)}
         >
-          AI
+          AI 導演
         </Button>
       </div>
 

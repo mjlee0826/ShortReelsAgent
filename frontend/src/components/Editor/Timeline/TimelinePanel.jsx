@@ -3,6 +3,7 @@ import useBlueprintStore from '../../../store/useBlueprintStore';
 import { clipDuration, MIN_CLIP_DURATION } from '../../../utils/timeline';
 import ClipBlock from './ClipBlock';
 import Playhead from './Playhead';
+import { IconButton } from '../../ui';
 import { FaMusic, FaFilm, FaSearchMinus, FaSearchPlus } from 'react-icons/fa';
 
 // 縮放：每秒像素的預設 / 範圍 / 級距（具名常數，禁 magic number）
@@ -15,10 +16,10 @@ const ZOOM_STEP = 20;
 const DRAG_THRESHOLD_PX = 4;
 
 // 軌道高度
-const RULER_H = 22;
-const VIDEO_TRACK_H = 56;
-const BGM_TRACK_H = 30;
-const LABEL_COL = 'w-14';
+const RULER_H = 26;
+const VIDEO_TRACK_H = 88;
+const BGM_TRACK_H = 48;
+const LABEL_COL = 'w-16';
 
 // 刻度尺：每格目標像素，據此挑「漂亮」的時間間隔
 const RULER_TARGET_PX = 70;
@@ -235,27 +236,27 @@ export default function TimelinePanel() {
   return (
     <div className="bg-surface border-t border-border select-none">
       {/* 標題 + 縮放控制 */}
-      <div className="flex items-center justify-between px-4 py-1.5 border-b border-border/60">
-        <span className="text-xs text-ink-faint">時間軸</span>
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
+      <div className="flex items-center justify-between px-4 py-2 border-b border-border/60">
+        <span className="text-sm font-medium text-ink-muted">時間軸</span>
+        <div className="flex items-center gap-2">
+          <IconButton
+            tone="accent"
+            className="border border-border bg-surface-2"
             onClick={() => setPxPerSecond((v) => Math.max(MIN_PX_PER_SEC, v - ZOOM_STEP))}
-            className="text-ink-faint hover:text-ink transition-colors disabled:opacity-30"
             disabled={pxPerSecond <= MIN_PX_PER_SEC}
             title="縮小"
           >
-            <FaSearchMinus size={12} />
-          </button>
-          <button
-            type="button"
+            <FaSearchMinus size={15} />
+          </IconButton>
+          <IconButton
+            tone="accent"
+            className="border border-border bg-surface-2"
             onClick={() => setPxPerSecond((v) => Math.min(MAX_PX_PER_SEC, v + ZOOM_STEP))}
-            className="text-ink-faint hover:text-ink transition-colors disabled:opacity-30"
             disabled={pxPerSecond >= MAX_PX_PER_SEC}
             title="放大"
           >
-            <FaSearchPlus size={12} />
-          </button>
+            <FaSearchPlus size={15} />
+          </IconButton>
         </div>
       </div>
 
@@ -274,7 +275,7 @@ export default function TimelinePanel() {
         {/* 右側可橫向捲動的軌道區 */}
         <div className="flex-1 overflow-x-auto">
           {clips.length === 0 ? (
-            <div className="h-[80px] flex items-center justify-center text-xs text-ink-faint">尚無片段</div>
+            <div className="h-[150px] flex items-center justify-center text-sm text-ink-faint">尚無片段</div>
           ) : (
             <div ref={contentRef} className="relative" style={{ width: `${contentWidth}px`, minWidth: '100%' }}>
               {/* 刻度尺（可點擊 seek）*/}
