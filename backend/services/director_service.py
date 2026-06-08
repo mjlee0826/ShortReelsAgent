@@ -111,6 +111,12 @@ class DirectorService:
             raise ValueError(f"找不到素材資料夾: {target_dir}")
         return target_dir
 
+    def _assets_root_url(self, folder_name: str, user_id: str = None) -> str:
+        """組出素材靜態根 URL：依 user_id 決定是否多一層使用者隔離路徑（生成與讀回共用，避免重複）。"""
+        if user_id:
+            return f"{self.backend_url}/static/{user_id}/{folder_name}/"
+        return f"{self.backend_url}/static/{folder_name}/"
+
     def _standardize(self, target_dir: str) -> None:
         """
         標準化某專案素材：掃 raw/ 原始檔，``_std`` 衍生檔輸出到 standardized/（分層，解計數錯亂）。
@@ -393,16 +399,30 @@ class DirectorService:
         # 更新專案 meta（最後修改時間、素材數量、藍圖狀態）
         self._update_project_meta(target_dir, folder_name)
 
-        # 回傳 assets_root_url 依 user_id 決定路徑層級
-        if user_id:
-            assets_root_url = f"{self.backend_url}/static/{user_id}/{folder_name}/"
-        else:
-            assets_root_url = f"{self.backend_url}/static/{folder_name}/"
-
         return {
             "blueprint": final_blueprint,
             "audio_dna": audio_dna,
-            "assets_root_url": assets_root_url,
+            "assets_root_url": self._assets_root_url(folder_name, user_id),
+        }
+
+    def load_blueprint(self, folder_name: str, user_id: str = None) -> dict:
+        """
+        讀回先前生成並落地的最終藍圖（PHASE4），供前端重新進入編輯器時自動載入。
+
+        回傳結構與 run_workflow 對齊：{ "blueprint": ..., "assets_root_url": ... }；
+        尚未生成過（或檔案半寫 / 損毀）時回傳 None，由 API 層轉 404。
+        """
+        target_dir = self._require_target_dir(folder_name, user_id)
+        blueprint_path = os.path.join(target_dir, PHASE4_BLUEPRINT_FILENAME)
+        if not os.path.exists(blueprint_path):
+            return None
+        # 容錯讀取：半寫 / 損毀回 None，視同尚未生成
+        blueprint = read_json_tolerant(blueprint_path, None)
+        if not blueprint:
+            return None
+        return {
+            "blueprint": blueprint,
+            "assets_root_url": self._assets_root_url(folder_name, user_id),
         }
 
 

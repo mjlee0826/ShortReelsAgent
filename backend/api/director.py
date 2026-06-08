@@ -64,6 +64,22 @@ async def generate_timeline(req: GenerateRequest, user_id: str = Depends(verify_
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/projects/{folder_name}/blueprint")
+async def get_blueprint(folder_name: str, user_id: str = Depends(verify_token)):
+    """
+    讀回專案先前生成並落地的最終藍圖，供重新進入編輯器時自動載入。
+    找不到素材資料夾或尚未生成過藍圖時回 404（前端視為「無已存結果」，不報錯）。
+    """
+    try:
+        result = await asyncio.to_thread(director_service.load_blueprint, folder_name, user_id)
+    except ValueError as e:
+        # 找不到素材資料夾
+        raise HTTPException(status_code=404, detail=str(e))
+    if result is None:
+        raise HTTPException(status_code=404, detail="此專案尚未生成過影片藍圖")
+    return result
+
+
 @router.post("/upload_music/{folder_name}")
 async def upload_music(folder_name: str, file: UploadFile = File(...), user_id: str = Depends(verify_token)):
     """

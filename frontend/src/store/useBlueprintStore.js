@@ -57,6 +57,8 @@ const useBlueprintStore = create((set, get) => ({
   blueprint: null,
   assetsRootUrl: '',
   isProcessing: false,
+  // 重新進入編輯器時，向後端讀回既有藍圖的載入中旗標（避免閃過 SetupView）
+  isLoadingBlueprint: false,
   errorMsg: '',
   // 生成因素材未分析失敗時設為該專案名稱：EditorPage 據此跳轉素材頁，跳轉後清空
   redirectToAssetsProject: null,
@@ -78,6 +80,7 @@ const useBlueprintStore = create((set, get) => ({
     blueprint: null,
     assetsRootUrl: '',
     isProcessing: false,
+    isLoadingBlueprint: false,
     errorMsg: '',
     redirectToAssetsProject: null,
     chatHistory: [],
@@ -93,6 +96,36 @@ const useBlueprintStore = create((set, get) => ({
   // 設定目前選取對象；右側檢視器依此切換顯示 Clip / Bgm / Project 面板
   select: (type, clipIndex = null) => set({ selection: { type, clipIndex } }),
   clearSelection: () => set({ selection: { ...EMPTY_SELECTION } }),
+
+  // ── 編輯器：自動載入既有藍圖 ───────────────────────────────────────────────
+
+  /**
+   * 重新進入編輯器時，向後端讀回該專案先前生成的藍圖。
+   * 已有 blueprint（記憶體仍在 / 正在生成）或正在載入時略過，避免覆蓋當前編輯。
+   * 後端 404（尚未生成過）屬正常情況，靜默維持 SetupView。
+   * @param {string} folderName 專案資料夾名稱
+   */
+  loadSavedBlueprint: async (folderName) => {
+    if (!folderName || get().blueprint || get().isLoadingBlueprint) return;
+    set({ isLoadingBlueprint: true });
+    try {
+      const result = await apiService.fetchBlueprint(folderName);
+      // 視為「初始載入」：重置選取與 Undo 堆疊（這份藍圖即新的起點）
+      set({
+        blueprint: result.blueprint,
+        assetsRootUrl: result.assets_root_url,
+        selection: { ...EMPTY_SELECTION },
+        history: { past: [], future: [] },
+        isLoadingBlueprint: false,
+      });
+    } catch (error) {
+      // 404 = 尚未生成過，保持 SetupView；其餘錯誤留下可見軌跡
+      if (error.response?.status !== 404) {
+        console.warn('[Editor] 載入既有藍圖失敗：', error.response?.data?.detail || error.message);
+      }
+      set({ isLoadingBlueprint: false });
+    }
+  },
 
   // ── 編輯器：就地編輯（直接改前端 blueprint，即時預覽，不打後端）───────────────
 

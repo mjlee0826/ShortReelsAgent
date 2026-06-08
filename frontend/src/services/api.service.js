@@ -118,6 +118,13 @@ class DirectorApiService {
     }
   }
 
+  // 讀回專案先前生成並落地的最終藍圖，回傳 { blueprint, assets_root_url }。
+  // 尚未生成過時後端回 404，呼叫端應視為「無已存結果」而非錯誤。
+  async fetchBlueprint(projectName) {
+    const response = await apiClient.get(`/api/projects/${projectName}/blueprint`);
+    return response.data;
+  }
+
   // 送出藍圖至後端雲端算圖，回傳 MP4 Blob。
   // 刻意走 apiClient（axios）而非裸 fetch：interceptor 會自動附上 Authorization token，
   // 修掉先前裸 fetch 缺 token 導致 render_mp4 被 verify_token 擋下的問題。

@@ -122,7 +122,23 @@
 
 ---
 
-## 8. 里程碑
+## 8. 持久化與重新進入（自動載入）
+
+blueprint 僅存在於前端 in-memory store，且 `useProjectStore.selectProject` 會 `reset()`，
+故重新進入編輯器或重整後會遺失。但後端其實已把最終藍圖落地（`PHASE4_BLUEPRINT_FILENAME`）。
+
+因此：
+- 後端新增 `GET /api/projects/{folder_name}/blueprint`（`director_service.load_blueprint`），
+  回傳 `{ blueprint, assets_root_url }`；尚未生成過回 404。`assets_root_url` 由共用 helper
+  `_assets_root_url` 計算（與 `run_workflow` 一致，避免重複）。
+- 前端 `EditorPage` 進入時以 `useLayoutEffect` 呼叫 `loadSavedBlueprint`：記憶體無 blueprint
+  才向後端讀回；載入中顯示動畫，避免閃過 SetupView；404 視為正常（保持 SetupView）。
+- 依賴含 `blueprint` 以化解 `selectProject` 非同步 reset 與本效果的競態。
+
+**索引制鍵值**：選取 / 就地編輯 / 刪除一律以時間軸**陣列索引**為鍵，
+因 `clip_id` 是素材 relpath、同一素材可重複出現於多段而不唯一。
+
+## 9. 里程碑
 
 - **M1**：骨架 + 兩階段 + 檢視器即時編輯（5 組）+ 唯讀時間軸視覺化 + Undo/Redo。
 - **M2**：時間軸拖拉裁切 / 重排 + playhead 雙向同步（`@remotion/player` 的 `PlayerRef`）。
