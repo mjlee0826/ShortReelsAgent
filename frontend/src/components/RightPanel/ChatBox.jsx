@@ -8,7 +8,11 @@ import { FaPaperPlane, FaUser, FaRobot, FaExclamationTriangle } from 'react-icon
  */
 export default function ChatBox() {
   const [chatInput, setChatInput] = useState('');
-  const { isProcessing, submitPrompt, blueprint, chatHistory } = useBlueprintStore();
+  // 以 selector 個別訂閱：避免播放時每幀 playhead 更新造成整個對話框重繪
+  const isProcessing = useBlueprintStore((s) => s.isProcessing);
+  const submitPrompt = useBlueprintStore((s) => s.submitPrompt);
+  const blueprint = useBlueprintStore((s) => s.blueprint);
+  const chatHistory = useBlueprintStore((s) => s.chatHistory);
   const scrollRef = useRef(null);
 
   // 對話更新或進入處理中時自動捲到底

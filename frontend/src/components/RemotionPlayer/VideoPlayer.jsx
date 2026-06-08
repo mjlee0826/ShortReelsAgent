@@ -7,8 +7,11 @@ import { apiService } from '../../services/api.service';
 import { FaSpinner, FaRocket } from 'react-icons/fa';
 
 export default function VideoPlayer() {
-  const { blueprint, assetsRootUrl } = useBlueprintStore();
+  // 以 selector 個別訂閱：避免每幀 setPlayhead 造成 VideoPlayer 整個重繪（並重建 Player 的 inputProps）
+  const blueprint = useBlueprintStore((s) => s.blueprint);
+  const assetsRootUrl = useBlueprintStore((s) => s.assetsRootUrl);
   const seekRequest = useBlueprintStore((s) => s.seekRequest);
+  const setPlayhead = useBlueprintStore((s) => s.setPlayhead);
   const [isRendering, setIsRendering] = useState(false);
   // Remotion 播放器實例 ref：供時間軸點擊片段時 seek（playhead 雙向同步的基礎）
   const playerRef = useRef(null);
@@ -27,12 +30,25 @@ export default function VideoPlayer() {
     return { totalFrames: frames > 0 ? frames : 150, targetFps: fps };
   }, [blueprint, isBlueprintEmpty]);
 
+  // 穩定 inputProps 參考：僅在 blueprint / assetsRootUrl 真正變動時更新，避免 Remotion 無謂重繪
+  const inputProps = useMemo(() => ({ blueprint, assetsRootUrl }), [blueprint, assetsRootUrl]);
+
   // 監聽 seek 請求（nonce 變化）：把秒數換算成 frame 並跳轉播放器。
   // 依 nonce 觸發，故重複點同一片段（秒數相同）仍能再次 seek。
   useEffect(() => {
     if (seekRequest.nonce === 0 || isBlueprintEmpty || !playerRef.current) return;
     playerRef.current.seekTo(Math.round(seekRequest.seconds * targetFps));
   }, [seekRequest.nonce, seekRequest.seconds, targetFps, isBlueprintEmpty]);
+
+  // 監聽播放器 frameupdate：把目前 frame 換算成秒回寫 store，驅動時間軸 playhead 同步移動。
+  // blueprint 變更（重掛 Player）時重新綁定；isBlueprintEmpty 時 Player 未掛載故略過。
+  useEffect(() => {
+    const player = playerRef.current;
+    if (!player || isBlueprintEmpty) return;
+    const onFrame = (e) => setPlayhead(e.detail.frame / targetFps);
+    player.addEventListener('frameupdate', onFrame);
+    return () => player.removeEventListener('frameupdate', onFrame);
+  }, [targetFps, isBlueprintEmpty, blueprint, setPlayhead]);
 
   // 3. 雲端算圖下載邏輯（算圖、認證交由 apiService.renderMp4 處理，這裡只負責觸發下載）
   const handleDownloadMp4 = async () => {
@@ -124,7 +140,7 @@ export default function VideoPlayer() {
           <Player
             ref={playerRef}
             component={MainTimeline}
-            inputProps={{ blueprint, assetsRootUrl }}
+            inputProps={inputProps}
             durationInFrames={totalFrames}
             fps={targetFps}
             compositionWidth={1080}

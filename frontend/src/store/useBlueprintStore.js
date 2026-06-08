@@ -7,7 +7,7 @@
  */
 import { create } from 'zustand';
 import { apiService } from '../services/api.service';
-import { removeAt, reorder } from '../utils/timeline';
+import { removeAt, reorder, repack } from '../utils/timeline';
 
 // Undo/Redo 快照保留上限，避免記憶體無限成長（具名常數，禁 magic number）
 const HISTORY_LIMIT = 50;
@@ -72,6 +72,8 @@ const useBlueprintStore = create((set, get) => ({
   selection: { type: null, clipIndex: null },
   // 預覽 seek 請求：時間軸點片段時請求播放器跳轉；nonce 確保即使秒數相同也能再次觸發
   seekRequest: { seconds: 0, nonce: 0 },
+  // 播放頭目前秒數：由 VideoPlayer 監聽 Remotion frameupdate 回寫，時間軸 Playhead 據此定位
+  playheadSeconds: 0,
   // Undo/Redo 快照堆疊：past 為歷史版本、future 為被 undo 出去、可再 redo 的版本
   history: { past: [], future: [] },
   // 持久化具名快照 meta 列表（[{ id, label, created_at }]，由後端讀寫；blueprint 不在此）
@@ -93,6 +95,7 @@ const useBlueprintStore = create((set, get) => ({
     templateSource: '',
     selection: { type: null, clipIndex: null },
     seekRequest: { seconds: 0, nonce: 0 },
+    playheadSeconds: 0,
     history: { past: [], future: [] },
     snapshots: [],
   }),
@@ -105,6 +108,9 @@ const useBlueprintStore = create((set, get) => ({
 
   // 請求預覽播放器跳轉到指定秒數（VideoPlayer 監聽 nonce 後換算成 frame 並 seekTo）
   seekTo: (seconds) => set((state) => ({ seekRequest: { seconds, nonce: state.seekRequest.nonce + 1 } })),
+
+  // 由 VideoPlayer 回寫目前播放頭秒數（不進 Undo / 不影響 blueprint）
+  setPlayhead: (seconds) => set({ playheadSeconds: seconds }),
 
   // ── 編輯器：自動載入既有藍圖 ───────────────────────────────────────────────
 
@@ -207,6 +213,26 @@ const useBlueprintStore = create((set, get) => ({
     ...bp,
     timeline: bp.timeline.map((clip, i) => (i === index ? { ...clip, [key]: value } : clip)),
   })),
+
+  // 拖拽期間用：先存一筆 Undo 快照當基準（整段拖拽只記一次，避免洗版 Undo 堆疊）
+  commitSnapshot: () => set((state) => (
+    state.blueprint ? { history: pushHistory(state.history, state.blueprint) } : {}
+  )),
+
+  // 拖邊裁切（時間軸）：設片段時長與來源 in/out 後 ripple 接合；不推快照（基準已於拖拽起點存好）。
+  // duration 必填；sourceStart / sourceEnd 僅 video 傳入（image 無來源窗）。
+  trimClipTransient: (index, { duration, sourceStart, sourceEnd }) => set((state) => {
+    if (!state.blueprint) return {};
+    const timeline = state.blueprint.timeline.map((clip, i) => {
+      if (i !== index) return clip;
+      // 以目前 start_at + duration 設 end_at 決定時長；repack 隨後重算全軌 start_at/end_at
+      const next = { ...clip, end_at: (clip.start_at ?? 0) + duration };
+      if (sourceStart !== undefined) next.source_start = sourceStart;
+      if (sourceEnd !== undefined) next.source_end = sourceEnd;
+      return next;
+    });
+    return { blueprint: { ...state.blueprint, timeline: repack(timeline) } };
+  }),
 
   // 更新配樂軌欄位（音量 / 起播點）；bgm_track 不存在時補成空物件再寫入
   updateBgmField: (key, value) => get().mutateBlueprint((bp) => ({
