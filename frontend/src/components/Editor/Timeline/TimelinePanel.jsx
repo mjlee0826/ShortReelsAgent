@@ -30,6 +30,13 @@ export default function TimelinePanel() {
   const bgm = useBlueprintStore((s) => s.blueprint?.bgm_track);
   const selection = useBlueprintStore((s) => s.selection);
   const select = useBlueprintStore((s) => s.select);
+  const seekTo = useBlueprintStore((s) => s.seekTo);
+
+  // 點片段：選取並讓預覽跳轉到該片段在時間軸上的起點
+  const handleClipClick = (index, startAt) => {
+    select('clip', index);
+    seekTo(startAt ?? 0);
+  };
 
   // 各片段時長與總時長（供寬度百分比計算）
   const { durations, total } = useMemo(() => {
@@ -63,7 +70,7 @@ export default function TimelinePanel() {
               <button
                 key={`${clip.clip_id}-${index}`}
                 type="button"
-                onClick={() => select('clip', index)}
+                onClick={() => handleClipClick(index, clip.start_at)}
                 style={{ width: `${widthPct}%` }}
                 title={`片段 ${index + 1}｜${clip.clip_id}｜${durations[index].toFixed(2)}s`}
                 className={`relative h-full rounded-lg border text-left px-2 py-1 overflow-hidden transition-colors ${

@@ -9,7 +9,7 @@ import { Button, IconButton } from '../ui';
 import { FaUndo, FaRedo, FaSyncAlt, FaRobot, FaSpinner } from 'react-icons/fa';
 
 // 右側檢視器固定寬度（M1；resize 可後續再加）
-const INSPECTOR_WIDTH = 'w-[340px]';
+const INSPECTOR_WIDTH = 'w-[420px]';
 
 /**
  * Workbench：兩階段中的「生成後」編輯工作台。

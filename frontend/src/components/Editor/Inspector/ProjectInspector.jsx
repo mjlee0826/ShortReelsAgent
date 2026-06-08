@@ -21,9 +21,9 @@ export default function ProjectInspector({ onRequestRegenerate }) {
 
   return (
     <div className="flex flex-col">
-      <div className="px-4 py-3 border-b border-border bg-surface-2/40">
-        <h3 className="text-sm font-bold text-ink flex items-center gap-2"><FaCog className="text-accent" /> 專案 / 輸出</h3>
-        <p className="text-[11px] text-ink-faint mt-0.5">點選時間軸上的片段或配樂軌可編輯細項</p>
+      <div className="px-5 py-4 border-b border-border bg-surface-2/40">
+        <h3 className="text-base font-bold text-ink flex items-center gap-2"><FaCog className="text-accent" /> 專案 / 輸出</h3>
+        <p className="text-xs text-ink-faint mt-0.5">點選時間軸上的片段或配樂軌可編輯細項</p>
       </div>
 
       <InspectorSection title="輸出規格">
@@ -32,11 +32,11 @@ export default function ProjectInspector({ onRequestRegenerate }) {
         <ReadonlyRow label="比例" value={global?.aspect_ratio || DEFAULT_ASPECT} locked />
       </InspectorSection>
 
-      <div className="p-4">
-        <Button variant="secondary" size="sm" fullWidth leftIcon={<FaSyncAlt size={11} />} onClick={onRequestRegenerate}>
+      <div className="p-5">
+        <Button variant="secondary" size="md" fullWidth leftIcon={<FaSyncAlt size={12} />} onClick={onRequestRegenerate}>
           重新生成 / 變更設定
         </Button>
-        <p className="text-[11px] text-ink-faint mt-2 leading-relaxed">
+        <p className="text-xs text-ink-faint mt-2.5 leading-relaxed">
           字幕 / 濾鏡總開關、配樂策略與導演指令的變更需 AI 重新生成。
         </p>
       </div>

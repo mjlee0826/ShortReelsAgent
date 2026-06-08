@@ -38,9 +38,9 @@ export default function BgmInspector({ onRequestRegenerate }) {
 
   return (
     <div className="flex flex-col">
-      <div className="px-4 py-3 border-b border-border bg-surface-2/40">
-        <h3 className="text-sm font-bold text-ink flex items-center gap-2"><FaMusic className="text-accent" /> 配樂</h3>
-        <p className="text-[11px] text-ink-faint mt-0.5 truncate">{label || '目前無配樂'}</p>
+      <div className="px-5 py-4 border-b border-border bg-surface-2/40">
+        <h3 className="text-base font-bold text-ink flex items-center gap-2"><FaMusic className="text-accent" /> 配樂</h3>
+        <p className="text-xs text-ink-faint mt-0.5 truncate">{label || '目前無配樂'}</p>
       </div>
 
       {label ? (
@@ -60,16 +60,16 @@ export default function BgmInspector({ onRequestRegenerate }) {
           />
         </InspectorSection>
       ) : (
-        <div className="px-4 py-6 text-center text-xs text-ink-faint">
+        <div className="px-5 py-6 text-center text-sm text-ink-faint">
           這部影片目前沒有配樂。<br />可在「重新生成」中選擇配樂策略或上傳音樂。
         </div>
       )}
 
-      <div className="p-4">
-        <Button variant="secondary" size="sm" fullWidth leftIcon={<FaSyncAlt size={11} />} onClick={onRequestRegenerate}>
+      <div className="p-5">
+        <Button variant="secondary" size="md" fullWidth leftIcon={<FaSyncAlt size={12} />} onClick={onRequestRegenerate}>
           變更配樂 / 換一首
         </Button>
-        <p className="text-[11px] text-ink-faint mt-2 leading-relaxed">
+        <p className="text-xs text-ink-faint mt-2.5 leading-relaxed">
           更換曲目或配樂策略需要 AI 重新挑選，將透過「重新生成」進行。
         </p>
       </div>

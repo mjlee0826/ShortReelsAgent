@@ -68,10 +68,10 @@ export default function ClipInspector() {
   return (
     <div className="flex flex-col">
       {/* 標題列 + 結構操作（重排 / 刪除，皆 ripple 接合）*/}
-      <div className="px-4 py-3 border-b border-border bg-surface-2/40 flex items-center justify-between gap-2">
+      <div className="px-5 py-4 border-b border-border bg-surface-2/40 flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <h3 className="text-sm font-bold text-ink">片段 {clipIndex + 1}</h3>
-          <p className="text-[11px] text-ink-faint mt-0.5">時長 {clipDuration(clip).toFixed(2)}s</p>
+          <h3 className="text-base font-bold text-ink">片段 {clipIndex + 1}</h3>
+          <p className="text-xs text-ink-faint mt-0.5">時長 {clipDuration(clip).toFixed(2)}s</p>
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <IconButton
@@ -154,7 +154,7 @@ export default function ClipInspector() {
       {/* AI 決策說明 */}
       {clip.reason && (
         <InspectorSection title="🤖 AI 決策說明" collapsible defaultOpen={false}>
-          <p className="text-xs text-ink-muted leading-relaxed whitespace-pre-wrap">{clip.reason}</p>
+          <p className="text-sm text-ink-muted leading-relaxed whitespace-pre-wrap">{clip.reason}</p>
         </InspectorSection>
       )}
     </div>

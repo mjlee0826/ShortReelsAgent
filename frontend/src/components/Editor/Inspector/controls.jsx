@@ -23,14 +23,14 @@ export function InspectorSection({ title, collapsible = false, defaultOpen = tru
       <button
         type="button"
         onClick={() => collapsible && setOpen((v) => !v)}
-        className={`w-full flex items-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-ink-faint ${
+        className={`w-full flex items-center gap-2 px-5 py-3 text-sm font-bold uppercase tracking-wider text-ink-faint ${
           collapsible ? 'hover:text-ink-muted cursor-pointer' : 'cursor-default'
         }`}
       >
-        {collapsible && (isOpen ? <FaChevronDown size={10} /> : <FaChevronRight size={10} />)}
+        {collapsible && (isOpen ? <FaChevronDown size={11} /> : <FaChevronRight size={11} />)}
         {title}
       </button>
-      {isOpen && <div className="flex flex-col gap-3 px-4 pb-4">{children}</div>}
+      {isOpen && <div className="flex flex-col gap-3.5 px-5 pb-5">{children}</div>}
     </div>
   );
 }
@@ -40,10 +40,10 @@ function Row({ label, children, hint }) {
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between gap-3">
-        <label className="text-xs text-ink-muted shrink-0">{label}</label>
+        <label className="text-sm text-ink-muted shrink-0">{label}</label>
         {children}
       </div>
-      {hint && <p className="text-[11px] text-ink-faint">{hint}</p>}
+      {hint && <p className="text-xs text-ink-faint">{hint}</p>}
     </div>
   );
 }
@@ -55,7 +55,7 @@ export function SliderRow({ label, value, min, max, step, onChange, format }) {
   const display = format ? format(value) : value;
   return (
     <Row label={label}>
-      <div className="flex items-center gap-2 flex-1 max-w-[60%]">
+      <div className="flex items-center gap-2.5 flex-1 max-w-[58%]">
         <input
           type="range"
           min={min}
@@ -65,7 +65,7 @@ export function SliderRow({ label, value, min, max, step, onChange, format }) {
           onChange={(e) => onChange(parseFloat(e.target.value))}
           className="flex-1 accent-accent cursor-pointer"
         />
-        <span className="text-xs text-ink font-mono w-10 text-right shrink-0">{display}</span>
+        <span className="text-sm text-ink font-mono w-12 text-right shrink-0">{display}</span>
       </div>
     </Row>
   );
@@ -80,7 +80,7 @@ export function SelectRow({ label, value, options, onChange }) {
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="bg-surface-2 text-ink text-xs px-2.5 py-1.5 rounded-lg border border-border focus:outline-none focus:border-accent cursor-pointer max-w-[60%]"
+        className="bg-surface-2 text-ink text-sm px-3 py-2 rounded-lg border border-border focus:outline-none focus:border-accent cursor-pointer max-w-[58%]"
       >
         {options.map((opt) => (
           <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -96,16 +96,16 @@ export function SelectRow({ label, value, options, onChange }) {
 export function NumberRow({ label, value, step = 0.1, min, onChange, unit = 's' }) {
   return (
     <Row label={label}>
-      <div className="flex items-center gap-1.5 max-w-[60%]">
+      <div className="flex items-center gap-2 max-w-[58%]">
         <input
           type="number"
           value={value}
           step={step}
           min={min}
           onChange={(e) => onChange(e.target.value === '' ? 0 : parseFloat(e.target.value))}
-          className="bg-surface-2 text-ink text-xs px-2.5 py-1.5 rounded-lg border border-border focus:outline-none focus:border-accent w-20 text-right"
+          className="bg-surface-2 text-ink text-sm px-3 py-2 rounded-lg border border-border focus:outline-none focus:border-accent w-24 text-right"
         />
-        <span className="text-[11px] text-ink-faint">{unit}</span>
+        <span className="text-xs text-ink-faint">{unit}</span>
       </div>
     </Row>
   );
@@ -117,13 +117,13 @@ export function NumberRow({ label, value, step = 0.1, min, onChange, unit = 's' 
 export function TextAreaRow({ label, value, placeholder, onChange, rows = 2 }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <label className="text-xs text-ink-muted">{label}</label>
+      <label className="text-sm text-ink-muted">{label}</label>
       <textarea
         rows={rows}
         value={value || ''}
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
-        className="bg-surface-2 text-ink text-sm p-2.5 rounded-lg border border-border focus:outline-none focus:border-accent resize-none placeholder-ink-faint"
+        className="bg-surface-2 text-ink text-base p-3 rounded-lg border border-border focus:outline-none focus:border-accent resize-none placeholder-ink-faint leading-relaxed"
       />
     </div>
   );
@@ -135,8 +135,8 @@ export function TextAreaRow({ label, value, placeholder, onChange, rows = 2 }) {
 export function ReadonlyRow({ label, value, locked = false }) {
   return (
     <Row label={label}>
-      <span className="text-xs text-ink-faint font-mono flex items-center gap-1.5 max-w-[60%] truncate">
-        {locked && <FaLock size={9} className="shrink-0" />}
+      <span className="text-sm text-ink-faint font-mono flex items-center gap-1.5 max-w-[58%] truncate">
+        {locked && <FaLock size={10} className="shrink-0" />}
         <span className="truncate">{value ?? '—'}</span>
       </span>
     </Row>

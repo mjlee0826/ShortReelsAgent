@@ -109,6 +109,11 @@
 | 2 | `global_settings.fps` 每次從素材重算（`director_agent/director_facade.py:47-57`），不沿用前版 | **fps / 比例做唯讀衍生值**，不開放手動改，問題消失 |
 | 3 | 每次 refinement 都重跑 `IntentState` 重新搜尋 / 抓配樂（`director_agent/states/intent_state.py`），會默默換掉 BGM 並蓋掉手動 bgm 設定 | **M3 後端小修**：使用者沒要求改音樂時跳過重抓、沿用上一版 `bgm_track`（`GenerateRequest` 加 `previous_bgm_track` / `regenerate_music`） |
 
+**音樂編輯的三個層級**（與 §3 一致）：
+1. **音量 / 起播**：純前端就地編輯，已落地（BgmInspector → `updateBgmField`），不碰後端。
+2. **換一首 / 換策略（music-only）**：抓新檔必須碰後端，但**時間軸原封不動**——M3 新增一條 music-only 路徑，只跑配樂引擎、直接組 `bgm_track` 套回現有 timeline，**不經導演 LLM 重剪**；前端套用回傳 `bgm_track`（就地、可 Undo）。
+3. **整支重生**：改導演指令 / 字幕·濾鏡總開關等，才走 RegeneratePanel 全量重生。
+
 ---
 
 ## 7. 時間軸 ripple 模型（D8）
@@ -142,4 +147,4 @@ blueprint 僅存在於前端 in-memory store，且 `useProjectStore.selectProjec
 
 - **M1**：骨架 + 兩階段 + 檢視器即時編輯（5 組）+ 唯讀時間軸視覺化 + Undo/Redo。
 - **M2**：時間軸拖拉裁切 / 重排 + playhead 雙向同步（`@remotion/player` 的 `PlayerRef`）。
-- **M3**：後端音樂重抓修正（§6 #3）+ 配樂軌就地編輯落地。
+- **M3**：後端音樂重抓修正（§6 #3）+ 配樂軌就地編輯落地 + **music-only 換曲路徑**（§6 音樂編輯第 2 級：只換音樂、保留時間軸）。

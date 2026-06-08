@@ -70,6 +70,8 @@ const useBlueprintStore = create((set, get) => ({
   // 目前選取對象：type 為 'clip'|'bgm'|'project'|null；clipIndex 僅在 type==='clip' 時有效
   // 以「陣列索引」識別片段，因 clip_id 是素材 relpath、同一素材可重複出現於多段而不唯一
   selection: { type: null, clipIndex: null },
+  // 預覽 seek 請求：時間軸點片段時請求播放器跳轉；nonce 確保即使秒數相同也能再次觸發
+  seekRequest: { seconds: 0, nonce: 0 },
   // Undo/Redo 快照堆疊：past 為歷史版本、future 為被 undo 出去、可再 redo 的版本
   history: { past: [], future: [] },
 
@@ -88,6 +90,7 @@ const useBlueprintStore = create((set, get) => ({
     userPrompt: '',
     templateSource: '',
     selection: { type: null, clipIndex: null },
+    seekRequest: { seconds: 0, nonce: 0 },
     history: { past: [], future: [] },
   }),
 
@@ -96,6 +99,9 @@ const useBlueprintStore = create((set, get) => ({
   // 設定目前選取對象；右側檢視器依此切換顯示 Clip / Bgm / Project 面板
   select: (type, clipIndex = null) => set({ selection: { type, clipIndex } }),
   clearSelection: () => set({ selection: { ...EMPTY_SELECTION } }),
+
+  // 請求預覽播放器跳轉到指定秒數（VideoPlayer 監聽 nonce 後換算成 frame 並 seekTo）
+  seekTo: (seconds) => set((state) => ({ seekRequest: { seconds, nonce: state.seekRequest.nonce + 1 } })),
 
   // ── 編輯器：自動載入既有藍圖 ───────────────────────────────────────────────
 

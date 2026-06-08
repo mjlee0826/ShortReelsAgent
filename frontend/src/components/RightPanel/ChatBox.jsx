@@ -38,7 +38,7 @@ export default function ChatBox() {
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
       {/* 頂部狀態列 */}
-      <div className="px-5 py-3 bg-surface-2/50 border-b border-border text-sm font-medium text-ink-muted flex items-center gap-2 shrink-0">
+      <div className="px-5 py-3 bg-surface-2/50 border-b border-border text-base font-medium text-ink-muted flex items-center gap-2 shrink-0">
         <span className="animate-pulse">🟢</span> AI 導演已就緒：有什麼想修改的細節嗎？
       </div>
 
@@ -47,7 +47,7 @@ export default function ChatBox() {
         {chatHistory.map((msg, idx) => (
           <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div
-              className={`max-w-[85%] rounded-2xl p-3.5 text-sm shadow-md ${
+              className={`max-w-[85%] rounded-2xl p-4 text-base shadow-md ${
                 msg.role === 'user'
                   ? 'bg-accent text-white rounded-tr-sm'
                   : msg.role === 'error'
@@ -55,7 +55,7 @@ export default function ChatBox() {
                     : 'bg-surface-2 text-ink border border-border rounded-tl-sm'
               }`}
             >
-              <div className="flex items-center gap-2 mb-1.5 opacity-60 text-[11px] font-bold uppercase tracking-wider">
+              <div className="flex items-center gap-2 mb-1.5 opacity-60 text-xs font-bold uppercase tracking-wider">
                 {msg.role === 'user' ? <FaUser /> : msg.role === 'error' ? <FaExclamationTriangle /> : <FaRobot />}
                 {msg.role === 'user' ? 'You' : 'AI Director'}
               </div>
@@ -87,7 +87,7 @@ export default function ChatBox() {
           value={chatInput}
           onChange={(e) => setChatInput(e.target.value)}
           disabled={isProcessing}
-          className="flex-1 bg-surface-2 text-ink p-3.5 rounded-xl border border-border focus:border-accent focus:outline-none transition-colors placeholder-ink-faint disabled:opacity-50"
+          className="flex-1 bg-surface-2 text-ink text-base p-3.5 rounded-xl border border-border focus:border-accent focus:outline-none transition-colors placeholder-ink-faint disabled:opacity-50"
         />
         <button
           type="submit"

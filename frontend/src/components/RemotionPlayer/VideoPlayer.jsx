@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { Player } from '@remotion/player';
 import MainTimeline from './MainTimeline';
 import useBlueprintStore from '../../store/useBlueprintStore';
@@ -8,7 +8,10 @@ import { FaSpinner, FaRocket } from 'react-icons/fa';
 
 export default function VideoPlayer() {
   const { blueprint, assetsRootUrl } = useBlueprintStore();
+  const seekRequest = useBlueprintStore((s) => s.seekRequest);
   const [isRendering, setIsRendering] = useState(false);
+  // Remotion 播放器實例 ref：供時間軸點擊片段時 seek（playhead 雙向同步的基礎）
+  const playerRef = useRef(null);
 
   // 1. 判斷藍圖是否為空 (嚴格條件)
   const isBlueprintEmpty = !blueprint || !blueprint.timeline || blueprint.timeline.length === 0;
@@ -23,6 +26,13 @@ export default function VideoPlayer() {
     const frames = Math.round(lastClip.end_at * fps);
     return { totalFrames: frames > 0 ? frames : 150, targetFps: fps };
   }, [blueprint, isBlueprintEmpty]);
+
+  // 監聽 seek 請求（nonce 變化）：把秒數換算成 frame 並跳轉播放器。
+  // 依 nonce 觸發，故重複點同一片段（秒數相同）仍能再次 seek。
+  useEffect(() => {
+    if (seekRequest.nonce === 0 || isBlueprintEmpty || !playerRef.current) return;
+    playerRef.current.seekTo(Math.round(seekRequest.seconds * targetFps));
+  }, [seekRequest.nonce, seekRequest.seconds, targetFps, isBlueprintEmpty]);
 
   // 3. 雲端算圖下載邏輯（算圖、認證交由 apiService.renderMp4 處理，這裡只負責觸發下載）
   const handleDownloadMp4 = async () => {
@@ -112,8 +122,9 @@ export default function VideoPlayer() {
       ) : (
         <div className="relative h-full max-h-[80vh] aspect-[9/16] rounded-3xl overflow-hidden shadow-[0_0_80px_rgba(0,0,0,0.6)] ring-1 ring-white/10">
           <Player
+            ref={playerRef}
             component={MainTimeline}
-            inputProps={{ blueprint, assetsRootUrl }} 
+            inputProps={{ blueprint, assetsRootUrl }}
             durationInFrames={totalFrames}
             fps={targetFps}
             compositionWidth={1080}

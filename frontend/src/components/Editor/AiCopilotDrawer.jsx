@@ -4,7 +4,7 @@ import { IconButton } from '../ui';
 import { FaTimes, FaRobot } from 'react-icons/fa';
 
 // 抽屜寬度
-const DRAWER_WIDTH = 'w-[380px]';
+const DRAWER_WIDTH = 'w-[440px]';
 
 /**
  * AiCopilotDrawer：可收合的 AI 導演對話抽屜（copilot）。
@@ -23,7 +23,7 @@ export default function AiCopilotDrawer({ open, onClose }) {
     >
       {/* 抽屜標題列 */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-surface-2/40 shrink-0">
-        <h3 className="text-sm font-bold text-ink flex items-center gap-2">
+        <h3 className="text-base font-bold text-ink flex items-center gap-2">
           <FaRobot className="text-accent" /> AI 導演 Copilot
         </h3>
         <IconButton tone="neutral" title="收合" onClick={onClose}>
