@@ -23,6 +23,7 @@ from media_processor.pipeline.progress.observer import (
     ProgressObserver,
 )
 from media_processor.pipeline.progress.tracker import ProgressTracker
+from media_processor.pipeline.progress.stage_span import stage_span
 
 __all__ = [
     "ProgressEventType",
@@ -30,4 +31,5 @@ __all__ = [
     "ProgressObserver",
     "PrintProgressObserver",
     "ProgressTracker",
+    "stage_span",
 ]

@@ -51,6 +51,9 @@ META_KEY_AUTO_ANALYZE = "auto_analyze"
 # 進行中 Phase 1 背景 job 的 id；由 backend 側 _phase1_runner 在開跑前寫入、收尾清除。
 # 素材頁掛載時據此訂閱 /ws/progress/{job_id}，讓背景同步的分析也能像手動重分析一樣顯示即時進度。
 META_KEY_ACTIVE_PHASE1_JOB_ID = "active_phase1_job_id"
+# 進行中 blueprint 生成(Phase 2–4)背景 job 的 id；由 /generate 的 work 開跑前寫入、收尾清除。
+# 編輯頁中途離開重進時據此訂閱 /ws/progress/{job_id} 接回即時進度(比照 Phase 1,見 docs §10.9)。
+META_KEY_ACTIVE_GENERATION_JOB_ID = "active_generation_job_id"
 
 
 def _now_iso() -> str:

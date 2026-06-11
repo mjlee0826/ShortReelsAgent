@@ -14,6 +14,30 @@ const HISTORY_LIMIT = 50;
 // 無選取時的初始選取狀態
 const EMPTY_SELECTION = { type: null, clipIndex: null };
 
+// 生成 stage_name → 進度面板使用者面向文案（template 走 pipeline 各 stage + music 分支三步，
+// 兩分支事件交錯到達；未列出者退回原始 stage 名，禁 magic string 散落各處）
+const GENERATION_STAGE_LABELS = {
+  // template 分支（pipeline complex 影片 DAG）
+  decode: '解析範本影格',
+  semantic: '範本語意分析',
+  scene: '偵測鏡頭切點',
+  whisper: '範本語音聽寫',
+  audio_env: '範本環境音分析',
+  vad: '範本人聲偵測',
+  assembly: '彙整範本特徵',
+  // music 分支
+  music_download: '下載配樂',
+  music_beats: '分析配樂節拍',
+  music_lyrics: '配樂歌詞聽寫',
+};
+
+/** 由 WS 進度事件取出階段文案；無 stage_name 回 null，未知 stage 退回原始名稱。 */
+function stageLabel(event) {
+  const name = event?.stage_name;
+  if (!name) return null;
+  return GENERATION_STAGE_LABELS[name] || name;
+}
+
 /**
  * 推進一筆 Undo 快照：把舊 blueprint 推入 past（超過上限則丟最舊），並清空 future。
  * 任何「會改變 blueprint 的操作」（手動就地編輯 / AI 微調）都應呼叫，確保可被 Undo。
@@ -59,6 +83,10 @@ const useBlueprintStore = create((set, get) => ({
   blueprint: null,
   assetsRootUrl: '',
   isProcessing: false,
+  // 進行中生成的背景 job_id：EditorPage 據此訂閱 WS 看 template ∥ music 兩分支即時進度；無則 null
+  generationJobId: null,
+  // 目前生成階段標籤（由 WS STAGE_* 事件即時更新，供進度面板顯示「下載中 / 聽寫中…」）；閒置為 null
+  generationStage: null,
   // 重新進入編輯器時，向後端讀回既有藍圖的載入中旗標（避免閃過 SetupView）
   isLoadingBlueprint: false,
   errorMsg: '',
@@ -88,6 +116,8 @@ const useBlueprintStore = create((set, get) => ({
     blueprint: null,
     assetsRootUrl: '',
     isProcessing: false,
+    generationJobId: null,
+    generationStage: null,
     isLoadingBlueprint: false,
     errorMsg: '',
     redirectToAssetsProject: null,
@@ -330,7 +360,7 @@ const useBlueprintStore = create((set, get) => ({
   clearAssetsRedirect: () => set({ redirectToAssetsProject: null }),
 
   submitPrompt: async (isRefinement = false, refinementPrompt = '') => {
-    set({ isProcessing: true, errorMsg: '' });
+    set({ isProcessing: true, errorMsg: '', generationStage: null });
 
     const state = get();
 
@@ -370,21 +400,11 @@ const useBlueprintStore = create((set, get) => ({
         previous_bgm_track: isRefinement ? (state.blueprint?.bgm_track ?? null) : null,
       };
 
-      const result = await apiService.generateTimeline(payload);
-
-      // AI 微調結果也推進 Undo 快照（讓使用者能一鍵還原 AI 的改動，政策 C 安全網）；
-      // 時間軸結構可能整個改變，故清空選取避免索引錯位
-      set((prev) => ({
-        blueprint: result.blueprint,
-        assetsRootUrl: result.assets_root_url,
-        isProcessing: false,
-        history: pushHistory(prev.history, prev.blueprint),
-        selection: { ...EMPTY_SELECTION },
-        chatHistory: [
-          ...prev.chatHistory,
-          { role: 'system', content: '✅ 導演已更新劇本與時間軸！請查看左側預覽。' }
-        ]
-      }));
+      // 改 async job：POST 立即回 { job_id }，不等生成跑完。設 generationJobId 觸發 EditorPage
+      // 訂閱 WS 看 template ∥ music 兩分支即時進度；isProcessing 維持 true 直到 WS 終端事件。
+      // 後端偵測到「已在生成中」會回既有 job_id（already_running），照樣附掛即可。
+      const { job_id: jobId } = await apiService.generateTimeline(payload);
+      set({ generationJobId: jobId });
 
     } catch (error) {
       const detail = error.response?.data?.detail;
@@ -408,9 +428,80 @@ const useBlueprintStore = create((set, get) => ({
         isProcessing: false,
         chatHistory: [
           ...prev.chatHistory,
-          { role: 'error', content: `❌ 哎呀，修改失敗了：${backendError}` }
+          { role: 'error', content: `❌ 哎呀，生成失敗了：${backendError}` }
         ]
       }));
+    }
+  },
+
+  // 接回進行中生成 job（EditorPage 重整 / 換專案掛載時用）：設 job_id 觸發 WS 訂閱，並標記處理中
+  attachGeneration: (jobId) => set({ generationJobId: jobId, isProcessing: true, errorMsg: '' }),
+
+  /**
+   * WS 進度事件處理（Observer 回呼）：stage 事件更新階段文案；終端事件套用結果 / 報錯並收尾。
+   * 結果直接取自 job_finished 的 payload.result（run_workflow 回傳）；重連時 replay buffer 亦補送此事件。
+   * @param {object} event 後端 ProgressEvent（event_type / asset_id / stage_name / payload / error）
+   */
+  onGenerationEvent: (event) => {
+    const type = event?.event_type;
+    if (type === 'job_finished') {
+      const result = event?.payload?.result || {};
+      // AI 結果推進 Undo 快照（可一鍵還原，政策 C 安全網）；時間軸結構可能整個改變，故清空選取避免錯位
+      set((prev) => ({
+        blueprint: result.blueprint ?? prev.blueprint,
+        assetsRootUrl: result.assets_root_url ?? prev.assetsRootUrl,
+        isProcessing: false,
+        generationJobId: null,
+        generationStage: null,
+        history: result.blueprint ? pushHistory(prev.history, prev.blueprint) : prev.history,
+        selection: { ...EMPTY_SELECTION },
+        chatHistory: [
+          ...prev.chatHistory,
+          { role: 'system', content: '✅ 導演已更新劇本與時間軸！請查看左側預覽。' }
+        ]
+      }));
+      return;
+    }
+    if (type === 'job_error') {
+      const msg = event?.error || event?.payload?.error || '生成過程發生錯誤';
+      set((prev) => ({
+        isProcessing: false,
+        generationJobId: null,
+        generationStage: null,
+        errorMsg: `生成失敗：${msg}`,
+        chatHistory: [
+          ...prev.chatHistory,
+          { role: 'error', content: `❌ 哎呀，生成失敗了：${msg}` }
+        ]
+      }));
+      return;
+    }
+    // 非終端：以最近一個 stage 起點更新階段文案（兩分支交錯到達屬正常）
+    if (type === 'stage_start') {
+      const label = stageLabel(event);
+      if (label) set({ generationStage: label });
+    }
+  },
+
+  /**
+   * WS 在「未收到終端事件」下異常斷線（如後端重啟）：清處理中旗標，並退回讀已落地的磁碟藍圖兜結果
+   * （worker thread 不受 client 斷線影響，仍會跑完落地；見 docs §10.9）。
+   */
+  onGenerationClosed: async () => {
+    const { default: useProjectStore } = await import('./useProjectStore');
+    const folderName = useProjectStore.getState().currentProject?.name;
+    set({ isProcessing: false, generationJobId: null, generationStage: null });
+    if (!folderName) return;
+    try {
+      const data = await apiService.fetchBlueprint(folderName);
+      if (data?.blueprint) {
+        set((prev) => ({
+          blueprint: data.blueprint,
+          assetsRootUrl: data.assets_root_url ?? prev.assetsRootUrl,
+        }));
+      }
+    } catch {
+      // 尚未落地 / 404：維持現狀（SetupView），不報錯
     }
   }
 }));

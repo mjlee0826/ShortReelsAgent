@@ -30,7 +30,7 @@ export default function GenerationForm({ submitLabel = '🎬 開始生成影片'
     userPrompt, templateSource,
     enableSubtitles, enableFilters,
     musicStrategy, uploadedMusicFile, isUploadingMusic,
-    isProcessing, updateForm, submitPrompt, uploadMusic, clearUploadedMusic,
+    isProcessing, generationStage, updateForm, submitPrompt, uploadMusic, clearUploadedMusic,
   } = useBlueprintStore();
 
   const currentProject = useProjectStore((s) => s.currentProject);
@@ -156,9 +156,11 @@ export default function GenerationForm({ submitLabel = '🎬 開始生成影片'
         </button>
       </div>
 
-      {/* 6. 提交 */}
+      {/* 6. 提交（生成中顯示 WS 即時階段文案：下載配樂 / 範本語意分析 / 聽寫中…，兩分支交錯更新） */}
       <Button type="submit" size="lg" fullWidth loading={isProcessing} className="mt-1">
-        {isProcessing ? 'AI 導演思考中...' : submitLabel}
+        {isProcessing
+          ? (generationStage ? `生成中：${generationStage}…` : 'AI 導演思考中...')
+          : submitLabel}
       </Button>
     </form>
   );

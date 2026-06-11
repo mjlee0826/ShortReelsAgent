@@ -212,6 +212,13 @@ class DirectorApiService {
     return response.data;
   }
 
+  // 查詢專案進行中的 blueprint 生成 job_id（編輯頁掛載 / 重整後據此訂閱 WS 接回即時進度）
+  // 回傳 { active_job_id }；無進行中 job（或後端重啟孤兒）時為 null，呼叫端改載已落地的磁碟藍圖
+  async fetchGenerationProgress(projectName) {
+    const response = await apiClient.get(`/api/projects/${projectName}/generation-progress`);
+    return response.data;
+  }
+
   async deleteProject(projectName) {
     await apiClient.delete(`/api/projects/${projectName}`);
   }

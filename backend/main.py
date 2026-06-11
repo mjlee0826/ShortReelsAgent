@@ -1,5 +1,6 @@
 import sys
 import os
+import asyncio
 from contextlib import asynccontextmanager
 # 【新增】引入 dotenv 套件來讀取 .env 檔案
 from dotenv import load_dotenv
@@ -13,6 +14,7 @@ load_dotenv()
 
 from config.app_config import ASSETS_DIR, TEMP_TEMPLATES_DIR
 from config.ingestion_config import ENABLE_INGESTION_POLLER
+from config.pipeline_config import EAGER_MODELS
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,6 +23,7 @@ from backend.api.projects import router as projects_router
 from backend.api.assets import router as assets_router
 from backend.api.progress import router as progress_router
 from backend.api.settings import router as settings_router
+from backend.services.director_service import director_service
 from backend.services.ingestion_provider import ingestion_poller
 from backend.services.jobs.progress_hub import progress_hub
 
@@ -32,6 +35,10 @@ async def lifespan(app: FastAPI):
     # 進度事件,能即時經 call_soon_threadsafe 排回本 loop(否則首同步早於任何 WS / 手動 job 觸發時,
     # _loop 尚未捕捉,事件只進 replay buffer 失去即時性)。冪等,與後續 attach / launch 同一 loop。
     progress_hub.ensure_loop()
+    # 模型 warmup 從 import 期解耦到此(fork 之後、每 worker 各一次):便宜建構 + 兩階段啟動(見 docs §6)。
+    # 丟 thread 不阻塞 event loop,startup 期間 readiness 探針 / WS 仍可回應;warmup 事件經已捕捉的 loop 即時廣播。
+    if EAGER_MODELS:
+        await asyncio.to_thread(director_service.pipeline_runner.warm_up)
     if ENABLE_INGESTION_POLLER:
         await ingestion_poller.start()
     try:

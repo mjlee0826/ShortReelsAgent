@@ -1,5 +1,6 @@
 import os
 import json
+import time
 from datetime import datetime, timezone
 from config.app_config import ASSETS_DIR, DEFAULT_BACKEND_URL, RAW_SUBDIR, STANDARDIZED_SUBDIR, TEMP_TEMPLATES_DIR
 from config.project_artifacts import (
@@ -9,7 +10,12 @@ from config.project_artifacts import (
 )
 from media_processor.pipeline import PipelineRunner, ProgressTracker
 from media_tools.media_standardizer import MediaStandardizer
-from template_engine.template_analyzer_facade import TemplateAnalyzerFacade
+from director_agent.blueprint import (
+    BlueprintPreparer,
+    MusicDnaProducer,
+    PrepContext,
+    TemplateDnaProducer,
+)
 from director_agent.director_facade import DirectorFacade
 from backend.services.asset_repository import AssetRepository
 from backend.services.stores.project_meta_store import project_meta_store
@@ -54,7 +60,12 @@ class DirectorService:
         self.standardizer = MediaStandardizer()
         # Phase 1 感知分析的並行流水線 Facade（Week 2a 取代原序列迴圈）
         self.pipeline_runner = PipelineRunner()
-        self.template_analyzer = TemplateAnalyzerFacade()
+        # 藍圖準備:template ∥ music 兩分支 fork-join 並行協調器(取代舊序列 TemplateAnalyzerFacade
+        # + 狀態機內現抓 music)。template 分支注入共享 runner(重用已 warm 的模型,不可 new)。
+        self.blueprint_preparer = BlueprintPreparer([
+            TemplateDnaProducer(self.pipeline_runner),
+            MusicDnaProducer(),
+        ])
         self.director = DirectorFacade()
         # 素材策略 / dirty / 已分析基準的儲存庫;編輯器生成時據此沿用素材頁的逐檔策略與分析結果
         self.asset_repository = AssetRepository()
@@ -296,16 +307,47 @@ class DirectorService:
         # 原子寫:併發讀者(素材頁 list_assets)恆見完整檔,不再讀到半截 JSON 而 500
         atomic_write_json(dump_path, status_map)
 
+    def _load_analyzed_assets(self, folder_name: str, user_id: str, target_dir: str) -> list:
+        """
+        讀 Phase 1 success-only 感知快取;偵測「未處理 ∪ 策略已變更(dirty)」素材即拋 AssetsNotAnalyzedError。
+
+        單一檢查來源:供 run_workflow(完整生成)與端點 precheck_generation 共用,避免兩處檢查邏輯漂移。
+        無 user_id(CLI)無法算 pending,退而僅檢查快取是否存在且非空。
+        """
+        phase1_dump_path = os.path.join(target_dir, PHASE1_METADATA_FILENAME)
+        pending = self.asset_repository.select_pending(user_id, folder_name) if user_id else []
+        raw_assets_metadata = []
+        if os.path.exists(phase1_dump_path):
+            with open(phase1_dump_path, 'r', encoding='utf-8') as f:
+                raw_assets_metadata = json.load(f)
+        if pending or not raw_assets_metadata:
+            raise AssetsNotAnalyzedError(ASSETS_NOT_ANALYZED_MESSAGE)
+        return raw_assets_metadata
+
+    def precheck_generation(self, folder_name: str, user_id: str, is_refinement: bool) -> None:
+        """
+        生成前置檢查(供 /generate 在 launch 背景 job 之前同步呼叫)。
+
+        非微調且素材未分析時拋 AssetsNotAnalyzedError,讓端點同步回 409(沿用前端跳轉素材頁的既有契約,
+        不必等背景 job 跑起才從 WS 得知失敗)。微調走快取、無此前置條件,直接放行。
+        """
+        if is_refinement:
+            return
+        target_dir = self._require_target_dir(folder_name, user_id)
+        self._load_analyzed_assets(folder_name, user_id, target_dir)
+
     def run_workflow(self, prompt: str, folder_name: str, user_id: str = None,
                     template: str = None,
                     subtitles: bool = True, filters: bool = True, old_timeline: dict = None,
                     music_strategy: str = "search_copyright",
                     user_music_file: str = None,
                     regenerate_music: bool = True,
-                    previous_bgm_track: dict = None):
+                    previous_bgm_track: dict = None,
+                    tracker: ProgressTracker | None = None):
         """
-        執行完整生成工作流（Phase 2–4）：讀取素材頁已落地的 Phase 1 感知快取，提取範本 DNA，
-        呼叫導演大腦產生藍圖。感知分析（Phase 1）已改由素材頁專屬擁有，本方法不再代跑。
+        執行完整生成工作流（Phase 2–4）：讀取素材頁已落地的 Phase 1 感知快取,以 fork-join 並行
+        產出 Template DNA ∥ Music DNA,再呼叫導演大腦產生藍圖。感知分析（Phase 1）已改由素材頁
+        專屬擁有,本方法不再代跑。tracker 非 None 時把藍圖準備的 stage 進度帶上前端(見 docs §10)。
         """
         # 若有 user_id，素材路徑改為 assets/{user_id}/{folder_name}/，實現使用者資料隔離
         target_dir = self._require_target_dir(folder_name, user_id)
@@ -318,80 +360,82 @@ class DirectorService:
 
         raw_assets_metadata = []
         template_dna = None
-        audio_dna = None # 【新增】預設為 None
-        
+        audio_dna = None
         is_refinement = old_timeline is not None
 
-        # --- 【修改】如果是微調，連同 Phase 3 一起讀取 ---
-        if is_refinement and os.path.exists(phase1_dump_path):
-            print(f"[Service] 🎯 偵測到微調模式 (Refinement)，跳過耗時感知，載入本地素材快取...")
-            with open(phase1_dump_path, 'r', encoding='utf-8') as f:
-                raw_assets_metadata = json.load(f)
-            
-            if template and os.path.exists(phase2_dump_path):
-                print(f"[Service] 🎯 載入本地範本 DNA 快取...")
-                with open(phase2_dump_path, 'r', encoding='utf-8') as f:
-                    template_dna = json.load(f)
-                    
-            # 【新增】載入 Phase 3 的配樂 DNA
-            if os.path.exists(phase3_dump_path):
-                print(f"[Service] 🎯 載入本地配樂 DNA (Phase 3) 快取...")
-                with open(phase3_dump_path, 'r', encoding='utf-8') as f:
-                    audio_dna = json.load(f)
-        
-        # --- 否則，執行完整的新生成流程 ---
-        else:
-            # Phase 1（感知分析）已改由素材頁專屬擁有（reanalyze / 開始生成），run_workflow 不再代跑,
-            # 也不再需要與素材頁互斥的 phase1_lock。此處僅讀取素材頁已落地的 success-only 感知快取。
-            # 不信任使用者已先分析:偵測「未處理 ∪ 策略已變更(dirty)」素材,有就拋 AssetsNotAnalyzedError,
-            # 由 API 轉 409 讓前端跳轉素材頁。無 user_id(CLI)無法算 pending,退而僅檢查快取是否存在。
-            pending = self.asset_repository.select_pending(user_id, folder_name) if user_id else []
-            if os.path.exists(phase1_dump_path):
-                with open(phase1_dump_path, 'r', encoding='utf-8') as f:
-                    raw_assets_metadata = json.load(f)
-            if pending or not raw_assets_metadata:
-                raise AssetsNotAnalyzedError(ASSETS_NOT_ANALYZED_MESSAGE)
-
-            if template:
-                print(f"[Service] 正在提取範本 DNA: {template}")
-                template_dna = self.template_analyzer.extract_dna(template)
-                
-                with open(phase2_dump_path, 'w', encoding='utf-8') as f:
-                    json.dump(template_dna, f, ensure_ascii=False, indent=2)
-                    print(f"💾 [Dump] 範本 DNA 已儲存至 {phase2_dump_path}")
-
+        # 提示詞增強(字幕 / 濾鏡開關)提前算:fork-join 的 music 分支需吃它作搜尋關鍵字來源
         enhanced_prompt = prompt
         if not subtitles:
             enhanced_prompt += " (注意：本影片不需要任何字幕，請讓 overlay_text 保持為空)"
         if not filters:
             enhanced_prompt += " (注意：請不要套用任何濾鏡，filter 欄位請設為 none)"
 
-        # --- 5. Phase 4: 導演大腦 (Director Agent) ---
-        print("[Service] 正在呼叫導演大腦生成藍圖...")
-
-        # 若用戶指定了自訂音樂檔案，轉換為完整絕對路徑，供 IntentState 直接存取
-        # 音訊上傳落在 raw/(與其他原始素材同層,不經 standardize),故在 raw/ 下解析
+        # 用戶上傳的自訂音樂轉絕對路徑(music 分支用);音訊上傳落在 raw/(與其他原始素材同層,不經 standardize)
         user_music_file_path = (
             os.path.join(target_dir, RAW_SUBDIR, user_music_file) if user_music_file else None
         )
 
-        final_blueprint, new_audio_dna = self.director.generate_timeline(
+        # --- 微調模式:跳過耗時感知與配樂解析,直接載入 Phase 1–3 本地快取 ---
+        if is_refinement and os.path.exists(phase1_dump_path):
+            print(f"[Service] 🎯 偵測到微調模式 (Refinement)，跳過耗時感知，載入本地素材快取...")
+            with open(phase1_dump_path, 'r', encoding='utf-8') as f:
+                raw_assets_metadata = json.load(f)
+
+            if template and os.path.exists(phase2_dump_path):
+                print(f"[Service] 🎯 載入本地範本 DNA 快取...")
+                with open(phase2_dump_path, 'r', encoding='utf-8') as f:
+                    template_dna = json.load(f)
+
+            if os.path.exists(phase3_dump_path):
+                print(f"[Service] 🎯 載入本地配樂 DNA (Phase 3) 快取...")
+                with open(phase3_dump_path, 'r', encoding='utf-8') as f:
+                    audio_dna = json.load(f)
+
+        # --- 完整生成:template ∥ music 以 fork-join 並行產出兩塊 DNA ---
+        else:
+            # Phase 1（感知分析）已改由素材頁專屬擁有（reanalyze / 開始生成），run_workflow 不再代跑。
+            # 讀取 success-only 感知快取;偵測未分析/dirty 即拋 AssetsNotAnalyzedError(端點轉 409 引導跳素材頁)。
+            raw_assets_metadata = self._load_analyzed_assets(folder_name, user_id, target_dir)
+
+            # fork-join:兩分支無資料相依,並行重疊(GPU 各自 borrow 共用 GpuGate,不撞 VRAM)。
+            # tracker 透傳讓兩分支 stage 事件帶正確 job_id 上前端(無前端時為 None)。
+            print("[Service] 正在以 fork-join 並行準備藍圖 (Template ∥ Music)...")
+            prep_ctx = PrepContext(
+                template_url=template,
+                music_strategy=music_strategy,
+                user_music_file=user_music_file_path,
+                user_prompt=enhanced_prompt,
+                regenerate_music=regenerate_music,
+            )
+            # 量測 fork-join wall time:驗證並行紅利(理論上 ≈ max(template, music) 而非 sum);
+            # 上線前後比對此數,確認 music 分支夠長到值得重疊,否則主要收益來自 P2 去重(見 docs §9-4)。
+            prep_start = time.perf_counter()
+            dna = self.blueprint_preparer.prepare(prep_ctx, tracker)
+            print(f"[Service] ⏱ 藍圖準備 (fork-join) wall time: {time.perf_counter() - prep_start:.1f}s")
+            template_dna = dna.get("template_dna") or None
+            audio_dna = dna.get("music_dna") or None
+
+            # Phase 2 / Phase 3 DNA 落地(維持原快取行為,供微調重進時重載)
+            if template_dna:
+                with open(phase2_dump_path, 'w', encoding='utf-8') as f:
+                    json.dump(template_dna, f, ensure_ascii=False, indent=2)
+                    print(f"💾 [Dump] 範本 DNA 已儲存至 {phase2_dump_path}")
+            if audio_dna:
+                with open(phase3_dump_path, 'w', encoding='utf-8') as f:
+                    json.dump(audio_dna, f, ensure_ascii=False, indent=2)
+                    print(f"💾 [Dump] 配樂 DNA 已儲存至 {phase3_dump_path}")
+
+        # --- 5. Phase 4: 導演大腦(純 scheduling + reflection;配樂已於上游並行解析後傳入) ---
+        print("[Service] 正在呼叫導演大腦生成藍圖...")
+        final_blueprint, _ = self.director.generate_timeline(
             user_prompt=enhanced_prompt,
             raw_assets=raw_assets_metadata,
             template_dna=template_dna,
+            audio_dna=audio_dna,
             previous_timeline=old_timeline,
-            user_music_file=user_music_file_path,
-            music_strategy=music_strategy,
             regenerate_music=regenerate_music,
             previous_bgm_track=previous_bgm_track,
         )
-
-        # 【新增】如果大腦有去抓新的音樂 (new_audio_dna 有值)，就覆寫舊的並 Dump 存檔
-        if new_audio_dna:
-            audio_dna = new_audio_dna
-            with open(phase3_dump_path, 'w', encoding='utf-8') as f:
-                json.dump(audio_dna, f, ensure_ascii=False, indent=2)
-                print(f"💾 [Dump] 配樂 DNA 已更新並儲存至 {phase3_dump_path}")
 
         # --- 6. 全域快取池：把實體配樂檔轉成獨立 cache URL，套進 bgm_track ---
         audio_url = self._audio_cache_url(audio_dna)
@@ -441,7 +485,7 @@ class DirectorService:
         沿用前一版 bgm_track 的音量 / 起播（只換曲目）；策略為 none 時回 track_id=None（移除配樂）。
         回傳 { "bgm_track": {...} }，由前端就地套用到當前 blueprint。
         """
-        # 直接使用獨立的配樂決策模組（與生成流程的 IntentState 共用同一入口，不假跑狀態機）
+        # 直接使用獨立的配樂決策模組（與生成流程的 MusicDnaProducer 共用同一入口，不假跑狀態機）
         from director_agent.music_director import MusicDirector
 
         target_dir = self._require_target_dir(folder_name, user_id)

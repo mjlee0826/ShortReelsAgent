@@ -91,6 +91,9 @@ thread 即可重疊;GPU 段各自 borrow 同一 GpuGate,故並行不會 VRAM 翻
 新增套件 `director_agent/blueprint/`。三個角色:`PrepContext`(輸入值物件)、
 `DnaProducer`(分支策略抽象)、`BlueprintPreparer`(fork-join 協調器)。
 
+> 本節骨架為**單純版**(`produce` / `prepare` 只收 `ctx`);接前端進度的 **tracker 貫穿完整版見 §10**
+> ——差別僅在多透傳一個 `tracker` 參數,不影響此處的角色切分。
+
 ### 4.1 PrepContext —— 唯讀輸入(Value Object / Parameter Object)
 
 ```python
@@ -471,8 +474,220 @@ final_blueprint, _ = self.director.generate_timeline(
 2. **music 接 Tier A**:`_fetch_lyrics` 改 borrow,移除自建 singleton。
 3. **fork-join**:加 `BlueprintPreparer`,music 移出狀態機,`director_service` 接線。
 4. **量測**:比對改動前後 blueprint 生成 wall time,驗證並行紅利。
+5. **進度匯流上 WS(§10)**:先把 `/generate` 由同步請求改成 async job(產生 T1),再把 T1 一路注入
+   `BlueprintPreparer` → 兩 producer;template 透傳給 `runner.run(tracker=)`、music 在 download / beats /
+   lyrics 發 STAGE_*;前端開 WS 顯示。**依賴步驟 3**(需先有 fork-join 與兩 producer)。
 
 > 步驟 1、2 即使不做 3 也各自有價值(去重 + 根治 VRAM 撞車),3 才是並行加速。
 
-**warmup 解耦(§6)獨立於上述**:不依賴 1–4、可隨時單獨落地,且改動小(三處)。
-建議優先做,先消掉 import 副作用(W1)與 import-期 warmup 推不出進度(W4),再進 1–4。
+**warmup 解耦(§6)獨立於上述**:不依賴 1–5、可隨時單獨落地,且改動小(三處)。
+建議優先做,先消掉 import 副作用(W1)與 import-期 warmup 推不出進度(W4),再進 1–5。
+
+---
+
+## 10. 進度可觀測性:blueprint 生成上 WS 前端
+
+> 目標:讓 template ∥ music 兩分支的進度都即時顯示在前端。與 §5 互補 —— §5 只接 **Tier A 資源**
+> (GPU 池),本節接 **進度匯流**(把兩分支事件併回使用者那條 WS)。**獨立於 §4 的 fork-join,
+> 但依賴它**(要先有兩個 producer 可掛 tracker)。
+
+### 10.0 前提發現:`/generate` 目前是同步請求,沒有 job / tracker / WS
+
+盤點使用者實際走的生成路徑,進度基建並不存在於 blueprint 流程:
+
+| 事實 | 位置 |
+|---|---|
+| `/generate` 直接 `asyncio.to_thread(run_workflow)` **同步**跑完,blueprint 走 **HTTP response body** 回傳 | `backend/api/director.py:47` |
+| `run_workflow` **無 `tracker` 參數**,Phase 2–4 全程 tracker-less | `director_service.py:299` |
+| WS / job 基建(`async_job_runner` → T1)**目前只服務 Phase 1**(素材頁 reanalyze、雲端 ingestion 預跑) | `assets.py:160/222`、`ingestion_provider.py:93` |
+
+⇒ **沒有 T1、沒有 WS channel 可給 blueprint**。要前端看進度,**第一步是把 `/generate` 改成 async job**,
+才會生出 T1 可往下貫穿。這是下面一切的地基。
+
+### 10.1 三個 tracker 回顧
+
+| | 來源 | job_id | 掛的 Observer |
+|---|---|---|---|
+| **T1** | `AsyncJobRunner`(背景 job) | 對外 `job_id` | `ws_progress_observer` |
+| **T2** | `PipelineRunner.run()`(每次 run) | **注入則沿用 T1**;否則自建隨機 | `PrintProgressObserver` + `StallWatchdog` |
+| **T3** | `ModelPoolRegistry`(啟動期) | 字面 `"startup"` | `PrintProgressObserver` |
+
+前端 WS 經 `ProgressHub` **以 job_id 分流**,故事件要被使用者看到,必鬚同時:(a) 落在掛了
+`ws_progress_observer` 的 tracker,(b) 帶**使用者的 job_id**。
+
+> **關鍵澄清**:解法**不是**給 template / music「`subscribe(ws_progress_observer)`」。光 subscribe 而
+> job_id 不對,`ProgressHub` 仍分流不到使用者那條 WS。**load-bearing 的是把帶正確 job_id 的 T1 一路
+> 貫穿**;observer 已掛在 T1 上,各分支不需自行 subscribe。
+
+### 10.2 地基:`/generate` 改 async job(產生 T1)
+
+```python
+# 1) run_workflow 增 tracker 參數(對齊 run_phase1 的簽名慣例),內部往下傳給 BlueprintPreparer
+def run_workflow(self, prompt, folder_name, ..., tracker: ProgressTracker | None = None):
+    ...
+
+# 2) api/director.py:把同步 to_thread 換成 async job;前端拿 job_id 後開 WS、再取結果
+@router.post("/generate")
+async def generate_timeline(req: GenerateRequest, user_id: str = Depends(verify_token)):
+    def work(tracker: ProgressTracker) -> dict:
+        return director_service.run_workflow(..., tracker=tracker)   # T1 注入
+    job_id = async_job_runner.launch(user_id, work)
+    return {"job_id": job_id}
+```
+
+**定案:用 `launch`(純非同步),不用 `run_tracked_sync`。** POST 立即回 `{job_id}`;前端開
+`WS /ws/progress/{job_id}` 看進度,結果改走 `GET /projects/{folder}/blueprint`(讀磁碟落地藍圖)
+或 WS 的 `JOB_FINISHED` 事件。
+
+> **為何不留 `run_tracked_sync`**:它與 `launch` **唯一差別是「原始 POST 連線要不要 held 到生成跑完」**
+> —— 工作 thread、lock、磁碟落地、replay、重連需求兩者全同。`run_tracked_sync` 把結果綁在一條長連線
+> (數分鐘)上,徒增 client / 反代 idle timeout(常見 60s)砍連線回 504 的風險;而**一旦要支援「退出再
+> 進來接回」(§10.9),側通道 + 磁碟落地本就得建,`run_tracked_sync` 的「response body 直接帶結果」就成了
+> 多餘的負債**。故定案 `launch`。
+
+### 10.3 Template:注入 T1,自動繼承 ws / print / watchdog
+
+`TemplateDnaProducer` 唯一改動:把 tracker 透傳給 `runner.run`。`runner.run(tracker=T1)` 會把自己的
+`PrintObserver` + `StallWatchdog` 也加到 T1(既有行為),故 template stage 事件一次到齊三個 observer。
+
+```python
+def produce(self, ctx: PrepContext, tracker: ProgressTracker) -> dict:
+    ...
+    results = self._runner.run(
+        [video],
+        base_dir=base_dir,
+        asset_strategies={asset_id: VideoStrategy.COMPLEX.value},
+        tracker=tracker,                       # ← 注入 T1:事件帶正確 job_id 上前端
+    )
+```
+
+> 這就是「proposal 1」的正確形態:**注入 T1,而非 subscribe observer**。
+
+### 10.4 Music:給 tracker、在關鍵節點發 STAGE_*、借出改掛 T1
+
+Music 對前端可見的核心是讓使用者看到「下載中 / 分析節拍中 / 聽寫中」,故在 `MusicEngineFacade` 三個
+有感步驟發 STAGE_START/FINISH 到注入的 tracker。`MusicDirector.resolve` / facade 各加一個**可選** `tracker`
+參數透傳(不傳時退化為純 print,維持 `change_music` 等舊呼叫端不變)。
+
+```python
+# music stage 名稱常數(禁 magic string;_MUSIC_LYRICS_STAGE 已於 §5 定義)
+_MUSIC_STAGE_DOWNLOAD = "music_download"
+_MUSIC_STAGE_BEATS    = "music_beats"
+_MUSIC_ASSET_ID       = "music"            # music 無真 asset,用合成 id 供事件歸屬
+
+def fetch_and_analyze(self, query: str, tracker: ProgressTracker | None = None) -> dict:
+    ...
+    with stage_span(tracker, _MUSIC_ASSET_ID, _MUSIC_STAGE_DOWNLOAD):   # 計時 + emit start/finish
+        raw_audio_path = self.downloader.search_and_download_audio(query)
+    self.ffmpeg.extract_ai_audio(raw_audio_path, standard_wav_path)
+    with stage_span(tracker, _MUSIC_ASSET_ID, _MUSIC_STAGE_BEATS):
+        audio_beats = self.beat_extractor.get_beats(standard_wav_path)
+    lyrics_data = self._fetch_lyrics(query, standard_wav_path, tracker)   # 內部包 _MUSIC_LYRICS_STAGE
+    ...
+```
+
+`stage_span` 是個小 context manager(`tracker=None` 時 no-op,免每處手寫 try/finally)。
+
+**Whisper 借出改掛 T1(可選精修)**:§5 用 `borrow_for_batch`(→ T3 startup observer,前端看不到)。
+要讓「music 等 VRAM」也上前端,給 `borrow_for_batch` 加一個可選 `tracker`,有則改用 per-run observer:
+
+```python
+def borrow_for_batch(model_class, stage_name, fn, tracker=None, asset_id=None):
+    if not GPU_POOL_ENABLED:
+        return fn(model_class())
+    registry = ModelPoolRegistry.instance()
+    observer = (
+        registry.make_borrow_observer(tracker, asset_id, stage_name)   # → T1,前端可見
+        if tracker is not None else registry.startup_borrow_observer(stage_name)  # → T3,沿用舊行為
+    )
+    return registry.get_pool(model_class).run_with_failover(fn, observer=observer)
+```
+
+VAD(`run_vad`)維持只計 `ResourceWaitClock`(無 observer 接口),其等待仍不上前端 —— 可接受
+(純 CPU、不搶 VRAM,無觀測急迫性)。
+
+### 10.5 BlueprintPreparer / director_service 接線
+
+```python
+# prepare 多收一個 tracker,透傳給每個 producer
+def prepare(self, ctx: PrepContext, tracker: ProgressTracker) -> dict[str, dict]:
+    with ThreadPoolExecutor(max_workers=len(self._producers),
+                            thread_name_prefix=_PREP_THREAD_PREFIX) as pool:
+        futures = {pool.submit(self._safe_produce, p, ctx, tracker): p for p in self._producers}
+        return {futures[f].name: f.result() for f in as_completed(futures)}
+
+# run_workflow:把自己收到的 T1 直接傳入
+dna = self.blueprint_preparer.prepare(prep_ctx, tracker)
+```
+
+> tracker 是**活的協作者**,刻意**不放進 `PrepContext`** —— `PrepContext` 是 frozen 唯讀輸入值物件
+> (§4.1),混入 tracker 會破壞其「並行讀取期間不被竄改」的語意。故以獨立參數貫穿。
+
+### 10.6 watchdog 與 print 的處置(澄清 proposal 2)
+
+proposal 2 寫「music 也接 watchdog / PrintObserver / ws」,實作上要分辨三者本質不同:
+
+| | 怎麼讓 music 取得 | 為何不是「subscribe」 |
+|---|---|---|
+| **ws** | §10.4 對 T1 emit STAGE_* | T1 已掛 ws_observer,emit 即到;自行 subscribe 反而 job_id 不對 |
+| **PrintObserver** | **不掛** | music 本就 raw `print`,再掛會**雙重輸出** |
+| **watchdog** | 對 T1 emit STAGE_* 後,**有 watchdog 訂在 T1 即自動涵蓋** | watchdog 靠訂 STAGE_* 維護「進行中清單」,不需 music 主動接 |
+
+watchdog 生命週期注意:template 的 `runner.run` 已對 T1 起一個 watchdog,但**只活到 template run 結束**;
+若 music 比 template 晚收尾,尾段不被看顧。兩種做法:
+- **穩健**:由 `BlueprintPreparer` 在 fork-join 全程自持一個 watchdog 訂在 T1(涵蓋兩分支),並讓
+  template 的 `runner.run` 該次**不另起**(避免雙重 / 提早 stop)。
+- **最小**:接受「以 template watchdog 盡力涵蓋」,music 尾段失看顧(yt-dlp 下載 hang 另靠 download timeout 兜)。
+
+### 10.7 前端
+
+| | 現況 | 改後 |
+|---|---|---|
+| 取得進度 | 只 `await POST /generate` 的 response,**不開 WS** | 拿 `job_id` → 開 `WS /ws/progress/{job_id}`(基建已存在,Phase 1 在用)→ 收 STAGE_* |
+| 顯示 | 單一「生成中」轉圈 | render template 逐 stage(decode / semantic / whisper / scene / assembly) + music(`music_download` / `music_beats` / `music_lyrics`) |
+
+前端需:(a) 認得新 `stage_name` 並有對應文案,(b) 接受兩分支事件**交錯到達**(非線性 stage 序)。
+具體改動需看現有 progress 元件如何 render,未在本文件指定。
+
+### 10.8 風險
+
+| 項目 | 說明 | 風險 |
+|---|---|---|
+| **`/generate` 同步→async** | 回傳由「blueprint body」改「`{job_id}`」;前端取結果改走 `GET .../blueprint`(磁碟)或 WS `JOB_FINISHED` | 中 — 介面變更,需前後端一起改 |
+| **observer 重複累加** | `runner.run` 對注入的 T1 `subscribe` Print/watchdog 後**不 unsubscribe**;同一 T1 被多次 run 注入會累加 → 重複 `[Progress]` 行。generate flow 內 template 只 run 一次,暫不觸發;日後 phase1+phase2 共用同一 T1 需處理 | 中 |
+| **併發 emit** | 兩 thread 對同一 T1 `publish` | 低 — `publish` 已 thread-safe(snapshot under lock) |
+| **watchdog 涵蓋** | 見 §10.6,music 尾段可能失看顧 | 低/中 — 視採穩健或最小做法 |
+| **前端對應** | 新 `stage_name` 需顯示文案、需處理交錯事件 | 中 — 需動前端 |
+
+### 10.9 中途離開 / 重進的韌性(比照 Phase 1)
+
+`launch` 後若使用者**退出 EditorPage 再進來**,要分兩件事:**結果**(已落地、好救)與**即時進度**(需主動接回)。
+前提:生成的 worker thread **不受 client 斷線影響**,必跑完並落地(client 取消 / await 取消都中止不了
+正在跑的 Python thread)。
+
+**結果救回 —— 已具備,靠磁碟。** `run_workflow` 把最終藍圖寫入 `PHASE4_BLUEPRINT_FILENAME`
+(`director_service.py:317`);重進時 EditorPage 走 `GET /projects/{folder}/blueprint`
+(`director.py:74` → `load_blueprint`)即可載入。**此路徑與 job/WS 無關,即使超過保留期
+(`job_manager` / replay buffer 皆 in-memory、`PROGRESS_JOB_RETENTION_SEC` 後過期)仍有效。**
+
+**即時進度接回 —— 須補,generate 目前缺。** Phase 1 有 `publish_active_job` + `GET .../phase1-progress`
+回 `active_phase1_job_id`,讓重整後拿 job_id 重開 WS、`ProgressHub.attach` 補播 + 續傳;**generate 沒有對應品**
+(`publish_active_job` 只在 `assets.py`)。要補三件,全部比照 Phase 1:
+
+1. **落地 active generation job_id**:仿 `assets.py:138-161` 的 `job_id_box` 模式 —— `work` 內起點
+   `publish_active_generation_job(project_dir, job_id_box["id"])`、`finally` `clear`;`launch` 回傳後同步
+   填 box(中間無 await,work 啟動前必填妥)。再加一個查詢端點(或擴充既有 project 詳情)回 `active_generation_job_id`。
+2. **generate lock(per user+project,比照 `phase1_lock`)**:按生成前先取鎖;**重進後再按一次 → 偵測到鎖
+   已持有 → 回「生成中 + 進行中 job_id」讓前端附掛既有 job,而非 double-run**(否則兩生成併寫
+   `PHASE4_BLUEPRINT_FILENAME`,last-writer-wins + 雙倍 GPU)。鎖在 `work` 的 `finally` 釋放。
+3. **保留期對齊**:保留期內 → WS replay(`ProgressHub`)+ `GET /jobs/{id}` 皆可;超過 → 退磁碟藍圖兜結果
+   (第 1 點查詢端點此時回 `None`,前端據此改載已落地藍圖、不再嘗試 WS)。
+
+| 重進時機 | 即時進度 | 結果 |
+|---|---|---|
+| 生成已完成 | (無需) | ✅ `GET .../blueprint` 讀磁碟 |
+| 生成中、保留期內 | ✅ 查 active job → 重開 WS → replay + 續傳 | 完成後同上 |
+| 完成且超過保留期 | ✗ job/buffer 已清(可接受) | ✅ 磁碟藍圖仍在 |
+
+> 結論:**結果韌性現成(磁碟),進度韌性要補 active-job 側通道 + generate lock**。這也回頭證成 §10.2
+> 選 `launch`:既然側通道與磁碟落地非建不可,`run_tracked_sync` 的長連線就只剩 timeout 風險、無增益。

@@ -12,7 +12,6 @@ import time
 import uuid
 
 from config.pipeline_config import (
-    EAGER_MODELS,
     MAX_ASSETS_PARALLEL,
     WATCHDOG_ENABLED,
     WATCHDOG_FREEZE_DUMP_SEC,
@@ -46,16 +45,17 @@ class PipelineRunner:
         self,
         max_assets_parallel: int = MAX_ASSETS_PARALLEL,
         observers: list[ProgressObserver] | None = None,
-        eager_models: bool = EAGER_MODELS,
     ):
         """
         建好排程器與兩個 Registry,並印出資源佈局供啟動觀察。
+
+        便宜建構:只建 registry / pool 殼,**不**載權重(模型 warmup 已解耦至 :meth:`warm_up`,
+        由 lifespan 在 fork 之後顯式呼叫;見 docs/blueprint_prep_design.md §6)。
 
         Args:
             max_assets_parallel: asset 並行度(env ``MAX_ASSETS_PARALLEL`` 可覆寫)。
             observers: 進度觀察者;``None`` 時預設掛 ``PrintProgressObserver``,
                        讓開發期可肉眼看到多 asset 事件交錯。
-            eager_models: 是否在啟動期預載(warm up)模型,讓第一個 asset 不必等待載入。
         """
         # observers 需先就緒,供 ModelPoolRegistry 的 warm up / borrow 等待事件廣播
         self._observers = observers if observers is not None else [PrintProgressObserver()]
@@ -73,19 +73,25 @@ class PipelineRunner:
         self.last_run_elapsed_sec: float | None = None
 
         print(f"[PipelineRunner] {self._registry.describe()}")
-        if eager_models:
-            # 依 capacity 規劃的優先序預載熱門模型(Qwen 多卡常駐、VRAM 不足自動降 lazy),
-            # 讓第一個 asset 不再卡載入;無 CUDA 時 warm_up 自動 no-op
-            print("[PipelineRunner] EAGER_MODELS=true,啟動期依 capacity 規劃預載熱門模型...")
-            self._model_pool_registry.warm_up()
-
-        # warm up 後印啟動佈局表(GPU VRAM 放置 + 各 pool 並行度),讓使用者一眼確認資源分佈
+        # 印啟動規劃佈局表(GPU VRAM 規劃放置 + 各 pool 並行度),讓使用者一眼確認資源分佈;
+        # 實際載權重延後到 warm_up()(lifespan 於 fork 後呼叫),此處不載權重
         print(StartupReporter(
             capacity_manager=self._model_pool_registry.capacity,
             executor_registry=self._registry,
             max_assets_parallel=max_assets_parallel,
             aux_rows=self._model_pool_registry.aux_pool_rows(),
         ).render())
+
+    def warm_up(self) -> None:
+        """
+        顯式預載熱門模型(供 lifespan 在 fork 之後、每 worker 各呼叫一次)。
+
+        與 ``__init__`` 解耦:把數 GB 權重載上 GPU 的重副作用從 import 期移出,改由此方法觸發,
+        避免 import 副作用與 CUDA-fork 不相容(見 docs/blueprint_prep_design.md §6)。
+        依 capacity 規劃優先序預載(Qwen 多卡常駐、VRAM 不足自動降 lazy);無 CUDA 時自動 no-op。
+        """
+        print("[PipelineRunner] 啟動期依 capacity 規劃預載熱門模型...")
+        self._model_pool_registry.warm_up()
 
     def run(
         self,

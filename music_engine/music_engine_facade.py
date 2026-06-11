@@ -3,6 +3,16 @@ from media_tools.media_downloader import MediaDownloader
 from media_tools.ffmpeg_adapter import FFmpegAdapter
 from media_tools.audio_beat_extractor import AudioBeatExtractor
 from music_engine.lyrics_adapter import LyricsAdapter
+from media_processor.pipeline.executor.model_pool_registry import borrow_for_batch, run_vad
+from media_processor.pipeline.progress import ProgressTracker, stage_span
+from model.managers.whisper_model_manager import WhisperModelManager
+
+# 歌詞聽寫向共享 GPU 池借出 Whisper 時的 stage 名稱(供 borrow 等待事件標示,禁 magic string)
+_MUSIC_LYRICS_STAGE = "music_lyrics"
+# music 分支對前端可見的工作步驟 stage 名稱(下載 / 節拍);music 無真 asset,用合成 id 供事件歸屬
+_MUSIC_STAGE_DOWNLOAD = "music_download"
+_MUSIC_STAGE_BEATS = "music_beats"
+_MUSIC_ASSET_ID = "music"
 
 class MusicEngineFacade:
     """
@@ -19,34 +29,20 @@ class MusicEngineFacade:
         self.beat_extractor = AudioBeatExtractor()
         # LyricsAdapter 是純 HTTP client，不耗 VRAM，eager init
         self.lyrics_adapter = LyricsAdapter()
+        # AI 大腦(Whisper / VAD)不再自建 singleton:改向共享 ModelPoolRegistry borrow,
+        # 與 template 分支共用同一 GpuGate / VRAM 預算,並行不撞車(見 docs §5)。
 
-        # 延遲載入 AI 大腦，節省啟動時的 VRAM
-        self._whisper = None
-        self._vad = None
-
-    @property
-    def whisper_engine(self):
-        if self._whisper is None:
-            from model.managers.whisper_model_manager import WhisperModelManager
-            self._whisper = WhisperModelManager()
-        return self._whisper
-
-    @property
-    def vad_engine(self):
-        if self._vad is None:
-            from model.managers.vad_model_manager import VadModelManager
-            self._vad = VadModelManager()
-        return self._vad
-
-    def fetch_and_analyze(self, query: str) -> dict:
+    def fetch_and_analyze(self, query: str, tracker: ProgressTracker | None = None) -> dict:
         """
         一鍵式工作流：搜尋 -> 下載 -> 標準化 -> 節拍分析 -> 歌詞分析 -> 封裝 DNA。
         歌詞分析路徑：LRClib（query 直查歌詞 DB）→ Whisper transcribe（fallback）。
+        tracker 非 None 時於下載 / 節拍 / 聽寫三步發 STAGE_*,讓前端看到「下載中 / 分析節拍中 / 聽寫中」。
         """
         print(f"[music_engine] 開始處理音樂請求: {query}")
 
         # 1. 動態直取 (yt-dlp 搜尋與下載)
-        raw_audio_path = self.downloader.search_and_download_audio(query)
+        with stage_span(tracker, _MUSIC_ASSET_ID, _MUSIC_STAGE_DOWNLOAD):
+            raw_audio_path = self.downloader.search_and_download_audio(query)
 
         # 建立標準化的分析路徑 (16kHz, Mono WAV)
         base_name = os.path.splitext(os.path.basename(raw_audio_path))[0]
@@ -58,10 +54,11 @@ class MusicEngineFacade:
             self.ffmpeg.extract_ai_audio(raw_audio_path, standard_wav_path)
 
             # 3. 物理特徵萃取 (DSP: BPM, Beats, Onsets)
-            audio_beats = self.beat_extractor.get_beats(standard_wav_path)
+            with stage_span(tracker, _MUSIC_ASSET_ID, _MUSIC_STAGE_BEATS):
+                audio_beats = self.beat_extractor.get_beats(standard_wav_path)
 
             # 4. 語意層（NLP: Lyrics with Timestamps）：先試歌詞 DB，失敗才走 Whisper
-            lyrics_data = self._fetch_lyrics(query, standard_wav_path)
+            lyrics_data = self._fetch_lyrics(query, standard_wav_path, tracker)
 
             # 5. 封裝 Audio DNA
             # 此結構將直接餵給 Phase 4 的 Director LLM 進行剪輯決策
@@ -92,10 +89,10 @@ class MusicEngineFacade:
             print(f"[music_engine Error] 流程中斷: {e}")
             return {"status": "error", "message": str(e)}
 
-    def use_local_audio(self, file_path: str) -> dict:
+    def use_local_audio(self, file_path: str, tracker: ProgressTracker | None = None) -> dict:
         """
         直接使用本地音訊檔（用戶上傳），跳過下載步驟。
-        後續流程與 fetch_and_analyze() 相同：標準化 → beats → lyrics。
+        後續流程與 fetch_and_analyze() 相同：標準化 → beats → lyrics（tracker 非 None 時發節拍 / 聽寫 STAGE_*）。
         """
         print(f"[music_engine] 使用本地音訊: {file_path}")
 
@@ -107,11 +104,12 @@ class MusicEngineFacade:
 
         try:
             self.ffmpeg.extract_ai_audio(file_path, standard_wav_path)
-            audio_beats = self.beat_extractor.get_beats(standard_wav_path)
+            with stage_span(tracker, _MUSIC_ASSET_ID, _MUSIC_STAGE_BEATS):
+                audio_beats = self.beat_extractor.get_beats(standard_wav_path)
 
             # 以檔名作為歌詞查詢提示（鼓勵用戶命名為「歌手 歌名」格式）
             query_hint = os.path.splitext(os.path.basename(file_path))[0]
-            lyrics_data = self._fetch_lyrics(query_hint, standard_wav_path)
+            lyrics_data = self._fetch_lyrics(query_hint, standard_wav_path, tracker)
 
             print(f"[music_engine] 本地音訊處理完成！(BPM: {audio_beats.get('bpm')})")
             return {
@@ -132,10 +130,11 @@ class MusicEngineFacade:
             print(f"[music_engine Error] 本地音訊處理失敗: {e}")
             return {"status": "error", "message": str(e)}
 
-    def fetch_free_music(self, query: str) -> dict:
+    def fetch_free_music(self, query: str, tracker: ProgressTracker | None = None) -> dict:
         """
         取得無版權音樂（情境3）。
         Chain of Responsibility：優先走 JamendoAdapter，失敗時 fallback 至 yt-dlp 無版權搜尋。
+        tracker 非 None 時於下載 / 節拍 / 聽寫三步發 STAGE_*（Jamendo→yt-dlp 的回退屬同一下載 stage 內）。
         """
         print(f"[music_engine] 開始搜尋免費音樂: {query}")
 
@@ -143,23 +142,26 @@ class MusicEngineFacade:
         os.makedirs(music_dir, exist_ok=True)
 
         source_tag = "jamendo"
-        try:
-            from music_engine.jamendo_adapter import JamendoAdapter
-            raw_audio_path = JamendoAdapter().search_and_download(query, music_dir)
-        except Exception as e:
-            print(f"[music_engine] Jamendo 失敗 ({e})，回退至 yt-dlp 無版權搜尋")
-            raw_audio_path = self.downloader.search_and_download_audio(
-                f"{query} no copyright free music"
-            )
-            source_tag = "yt_free"
+        # Jamendo→yt-dlp 的回退視為同一個「下載」stage:整段成功才 FINISH,皆失敗才 ERROR
+        with stage_span(tracker, _MUSIC_ASSET_ID, _MUSIC_STAGE_DOWNLOAD):
+            try:
+                from music_engine.jamendo_adapter import JamendoAdapter
+                raw_audio_path = JamendoAdapter().search_and_download(query, music_dir)
+            except Exception as e:
+                print(f"[music_engine] Jamendo 失敗 ({e})，回退至 yt-dlp 無版權搜尋")
+                raw_audio_path = self.downloader.search_and_download_audio(
+                    f"{query} no copyright free music"
+                )
+                source_tag = "yt_free"
 
         base_name = os.path.splitext(os.path.basename(raw_audio_path))[0]
         standard_wav_path = os.path.join(os.path.dirname(raw_audio_path), f"{base_name}_std.wav")
 
         try:
             self.ffmpeg.extract_ai_audio(raw_audio_path, standard_wav_path)
-            audio_beats = self.beat_extractor.get_beats(standard_wav_path)
-            lyrics_data = self._fetch_lyrics(query, standard_wav_path)
+            with stage_span(tracker, _MUSIC_ASSET_ID, _MUSIC_STAGE_BEATS):
+                audio_beats = self.beat_extractor.get_beats(standard_wav_path)
+            lyrics_data = self._fetch_lyrics(query, standard_wav_path, tracker)
 
             audio_dna = {
                 "status": "success",
@@ -185,28 +187,36 @@ class MusicEngineFacade:
             print(f"[music_engine Error] 免費音樂處理失敗: {e}")
             return {"status": "error", "message": str(e)}
 
-    def _fetch_lyrics(self, query: str, fallback_audio_path: str) -> dict:
+    def _fetch_lyrics(self, query: str, fallback_audio_path: str,
+                      tracker: ProgressTracker | None = None) -> dict:
         """
         Chain of Responsibility：依序嘗試多個歌詞來源，第一個成功即停止。
           路 1：LRClib（query 直查歌詞 DB，含時間戳）
           路 2：VAD 把關 + Whisper transcribe（純人聲偵測過後再轉錄）
         路 1 命中即停止，路 2 才會耗 GPU；查無人聲時連 Whisper 都不啟動。
+        整段以 ``music_lyrics`` stage 包覆(tracker 非 None 時),前端看到「聽寫中」。
         """
-        # 路 1：LRClib 歌詞 DB（無 GPU 成本）
-        lyrics_from_db = self.lyrics_adapter.fetch_synced_lyrics(query)
-        if lyrics_from_db:
-            return lyrics_from_db
+        with stage_span(tracker, _MUSIC_ASSET_ID, _MUSIC_LYRICS_STAGE):
+            # 路 1：LRClib 歌詞 DB（無 GPU 成本）
+            lyrics_from_db = self.lyrics_adapter.fetch_synced_lyrics(query)
+            if lyrics_from_db:
+                return lyrics_from_db
 
-        # 路 2：VAD 防衛 → Whisper 聽寫
-        print(f"[music_engine] LRClib 無命中，回退至 Whisper transcribe...")
-        if not self.vad_engine.has_speech(fallback_audio_path):
-            print(f"[music_engine] 判定為純配樂/環境音，跳過聽寫流程。")
-            return {"chunks": [], "text": "", "source": "vad_silent"}
+            # 路 2：VAD 防衛(改 borrow 共享 CPU 池,與 pipeline VAD 同池,不再各開 singleton)
+            print(f"[music_engine] LRClib 無命中，回退至 Whisper transcribe...")
+            if not run_vad(lambda v: v.has_speech(fallback_audio_path)):
+                print(f"[music_engine] 判定為純配樂/環境音，跳過聽寫流程。")
+                return {"chunks": [], "text": "", "source": "vad_silent"}
 
-        print(f"[music_engine] 偵測到人聲內容，啟動 Whisper 聽寫...")
-        whisper_result = self.whisper_engine.transcribe(fallback_audio_path)
-        return {
-            "chunks": whisper_result.get("chunks", []),
-            "text": whisper_result.get("text", ""),
-            "source": "whisper",
-        }
+            # Whisper 改 borrow 共享 GPU 池(與 template 分支共用 GpuGate / VRAM 預算)
+            print(f"[music_engine] 偵測到人聲內容，啟動 Whisper 聽寫...")
+            whisper_result = borrow_for_batch(
+                WhisperModelManager,
+                _MUSIC_LYRICS_STAGE,
+                lambda m: m.transcribe(fallback_audio_path),
+            )
+            return {
+                "chunks": whisper_result.get("chunks", []),
+                "text": whisper_result.get("text", ""),
+                "source": "whisper",
+            }

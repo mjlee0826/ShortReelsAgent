@@ -7,6 +7,14 @@ from pydantic import BaseModel
 from typing import Optional, Dict
 from backend.services.director_service import director_service, AssetsNotAnalyzedError
 from backend.services.render_service import RenderService
+from backend.services.jobs.async_job_runner import async_job_runner
+from backend.services.jobs.generation_lock import generation_lock
+from backend.services.jobs.generation_progress_meta import (
+    clear_active_generation_job,
+    publish_active_generation_job,
+    read_active_generation_job,
+)
+from backend.services.jobs.job_manager import job_manager
 from backend.auth.logto_jwt_verifier import verify_token
 from config.app_config import ASSETS_DIR, RAW_SUBDIR
 from config.media_formats import AUDIO_EXTENSIONS
@@ -43,32 +51,76 @@ class GenerateRequest(BaseModel):
 
 @router.post("/generate")
 async def generate_timeline(req: GenerateRequest, user_id: str = Depends(verify_token)):
+    """
+    啟動 blueprint 生成背景 job,立即回 ``{job_id}``(不等跑完)。
+
+    前端據此開 ``WS /ws/progress/{job_id}`` 看 template ∥ music 兩分支即時進度,完成後走
+    ``GET /projects/{folder}/blueprint`` 取落地藍圖(或 WS ``JOB_FINISHED`` 事件)。素材尚未分析
+    時(非微調)**同步**回 409(沿用前端跳轉素材頁的既有契約,不必等 job 跑起);中途離開重進再按,
+    偵測生成鎖已持有 → 回既有 job_id 讓前端附掛,而非 double-run(見 docs §10)。
+    """
+    is_refinement = req.previous_timeline is not None
+    project_dir = os.path.join(_ASSETS_BASE_PATH, user_id, req.asset_folder_name)
+
+    # 1. 素材就緒預檢(同步):非微調且素材未分析即回 409,讓前端跳素材頁(與舊同步版契約一致)
     try:
-        result = await asyncio.to_thread(
-            director_service.run_workflow,
-            prompt=req.user_prompt,
-            folder_name=req.asset_folder_name,
-            user_id=user_id,
-            template=req.template_source,
-            subtitles=req.enable_subtitles,
-            filters=req.enable_filters,
-            old_timeline=req.previous_timeline,
-            music_strategy=req.music_strategy,
-            user_music_file=req.user_music_file,
-            regenerate_music=req.regenerate_music,
-            previous_bgm_track=req.previous_bgm_track,
+        await asyncio.to_thread(
+            director_service.precheck_generation, req.asset_folder_name, user_id, is_refinement
         )
-        return result
     except AssetsNotAnalyzedError as e:
-        # 素材尚未分析:回 409 + 機器可讀 code,讓前端只在此情境跳轉素材頁(與一般 500 區分)
         raise HTTPException(
             status_code=409,
             detail={"code": ASSETS_NOT_ANALYZED_CODE, "message": str(e)},
         )
-    except Exception as e:
-        print("\n❌ [後端發生錯誤] 詳細報錯資訊如下：")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+    except ValueError as e:
+        # _require_target_dir 找不到素材資料夾
+        raise HTTPException(status_code=404, detail=str(e))
+
+    # 2. 取生成鎖:搶不到代表已在生成中 → 回既有有效 job_id 讓前端附掛(避免 double-run 併寫藍圖 + 雙倍 GPU)
+    if not generation_lock.acquire(user_id, req.asset_folder_name):
+        active = await asyncio.to_thread(read_active_generation_job, project_dir)
+        if active is not None and job_manager.get(active) is not None:
+            return {"job_id": active, "already_running": True}
+        # 鎖被持有但查無有效 job(極少數競態 / 孤兒):回 409 提示稍候,不強行另起
+        raise HTTPException(status_code=409, detail="生成進行中，請稍候")
+
+    # 3. 啟動背景 job;work 內落地進行中 job_id(供重進接回),收尾務必清 meta 並釋放鎖
+    job_id_box: dict[str, str] = {}
+
+    def work(tracker) -> dict:
+        """背景執行緒內跑完整生成工作流(Phase 2–4),tracker 帶 job_id 把兩分支進度串到 WS。"""
+        try:
+            # 落地進行中 job_id:編輯頁重整後查 generation-progress 即可重新訂閱 WS 接回即時進度
+            publish_active_generation_job(project_dir, job_id_box["id"])
+            return director_service.run_workflow(
+                prompt=req.user_prompt,
+                folder_name=req.asset_folder_name,
+                user_id=user_id,
+                template=req.template_source,
+                subtitles=req.enable_subtitles,
+                filters=req.enable_filters,
+                old_timeline=req.previous_timeline,
+                music_strategy=req.music_strategy,
+                user_music_file=req.user_music_file,
+                regenerate_music=req.regenerate_music,
+                previous_bgm_track=req.previous_bgm_track,
+                tracker=tracker,
+            )
+        finally:
+            # 先清 active job_id 再釋放鎖;即使清除的原子寫失敗也務必釋放鎖,避免該專案永久卡 409
+            try:
+                clear_active_generation_job(project_dir)
+            finally:
+                generation_lock.release(user_id, req.asset_folder_name)
+
+    try:
+        job_id = async_job_runner.launch(user_id, work)
+        job_id_box["id"] = job_id  # launch 與此行間無 await,work 啟動前必已填妥
+    except BaseException:
+        # launch 失敗(極少)時釋放已取得的鎖,避免洩漏使該專案永久卡 409
+        generation_lock.release(user_id, req.asset_folder_name)
+        raise
+    return {"job_id": job_id}
 
 
 @router.get("/projects/{folder_name}/blueprint")
