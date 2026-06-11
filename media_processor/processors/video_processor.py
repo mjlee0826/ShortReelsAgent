@@ -8,7 +8,7 @@ class VideoProcessor(AbstractVideoProcessor):
     """
     具體策略 (Concrete Strategy)：一般影片的感知處理器。
     適用於不需要精細動作時間軸對齊的影片（如 B-roll、景色、短片段）。
-    直接將整段影片送入本地端 Qwen 進行全局理解（GLOBAL_ANALYSIS），
+    直接將整段影片送入本地端 Qwen 進行全局理解（BASIC_MEDIA_ANALYSIS），
     並以聯集 bbox 策略（頭/中/尾三幀）確保 9:16 裁切不截斷主體。
     tech_engine / aes_engine / mediapipe_engine 繼承自 AbstractVideoProcessor 的 lazy property。
     """
@@ -61,7 +61,7 @@ class VideoProcessor(AbstractVideoProcessor):
         vlm_result = self.vision_engine.analyze_media(
             media_input=raw_file_path,
             media_type="video",
-            mode=TaskMode.GLOBAL_ANALYSIS,
+            mode=TaskMode.BASIC_MEDIA_ANALYSIS,
         )
 
         return {

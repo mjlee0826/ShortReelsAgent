@@ -35,6 +35,19 @@ from media_processor.pipeline.utils.startup_report import StartupReporter
 from media_processor.video_strategy import DEFAULT_VIDEO_STRATEGY, VideoStrategy
 
 
+def _resolve_video_strategy(strategy_value: str | None) -> VideoStrategy:
+    """
+    把逐檔策略字串容錯轉成 ``VideoStrategy``(支援 simple / complex / template)。
+
+    取代原本寫死的 ``== "complex"`` 二元判斷,讓 template 分支(``VideoStrategy.TEMPLATE.value``)也能
+    被正確分派;未知值 / None(未覆寫)一律退回全域預設 ``DEFAULT_VIDEO_STRATEGY``(SIMPLE),維持原相容行為。
+    """
+    try:
+        return VideoStrategy(strategy_value)
+    except ValueError:
+        return DEFAULT_VIDEO_STRATEGY
+
+
 class PipelineRunner:
     """
     Phase 1 Pipeline 的 Facade。一次建構、跨多個 generate 請求重複使用
@@ -210,14 +223,15 @@ class PipelineRunner:
                 continue
             # 素材身分 = 相對 project root 的 relpath(正斜線);與 collect_asset_files / 策略 meta 鍵一致
             asset_id = os.path.relpath(file_path, base_dir).replace(os.sep, "/")
-            # 逐檔覆寫是否選 COMPLEX(以列舉值字串比對,避免散落的 magic string)
-            wants_complex = overrides.get(asset_id) == ImageStrategy.COMPLEX.value
+            # 逐檔策略字串(image 只認 complex;video 容錯解析 simple/complex/template)
+            strategy_value = overrides.get(asset_id)
             if media_kind == MediaKind.IMAGE:
+                wants_complex = strategy_value == ImageStrategy.COMPLEX.value
                 image_strategy = ImageStrategy.COMPLEX if wants_complex else ImageStrategy.SIMPLE
                 video_strategy = DEFAULT_VIDEO_STRATEGY  # 圖片不會用到,僅佔位
             else:
                 image_strategy = ImageStrategy.SIMPLE  # 影片不會用到,僅佔位
-                video_strategy = VideoStrategy.COMPLEX if wants_complex else DEFAULT_VIDEO_STRATEGY
+                video_strategy = _resolve_video_strategy(strategy_value)
             contexts.append(
                 AssetContext(
                     asset_id=asset_id,

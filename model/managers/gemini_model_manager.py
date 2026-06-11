@@ -59,7 +59,7 @@ class GeminiModelManager(BaseModelManager):
         self.prompt_manager = prompt_manager
 
     @synchronized_inference
-    def analyze_media(self, media_input: str, media_type: str = "video", mode: TaskMode = TaskMode.TIMECODED_ACTION_INDEX) -> dict:
+    def analyze_media(self, media_input: str, media_type: str = "video", mode: TaskMode = TaskMode.VIDEO_EVENT_INDEX) -> dict:
         """
         上傳媒體至 Gemini API，輪詢等待後台處理完成，並回傳語意推論 JSON 結果。
 

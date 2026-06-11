@@ -5,6 +5,7 @@ from media_processor.media_strategy import MediaStrategy
 from media_processor.models import (
     ComplexVideoMetadata,
     ProcessorResult,
+    TemplateVideoMetadata,
     VideoMetadata,
 )
 from media_processor.pipeline.context import AssetContext, STATUS_SUCCESS
@@ -46,7 +47,9 @@ class AssemblyVideoStage(Stage):
         """依 strategy 組 metadata → 寫入成功 result 並標記狀態。"""
         work = get_video_work(context)
         vlm = work.vlm_result
-        if context.video_strategy == VideoStrategy.COMPLEX:
+        if context.video_strategy == VideoStrategy.TEMPLATE:
+            metadata = self._build_template(work, vlm)
+        elif context.video_strategy == VideoStrategy.COMPLEX:
             metadata = self._build_complex(work, vlm)
         else:
             metadata = self._build_simple(work, vlm)
@@ -121,6 +124,32 @@ class AssemblyVideoStage(Stage):
             event["subject_bbox"] = best.model_dump()
             event["subject_candidates"] = [candidate.model_dump() for candidate in candidates]
         return events
+
+    @staticmethod
+    def _build_template(work: VideoWork, vlm: dict) -> TemplateVideoMetadata:
+        """
+        組範本 metadata(TEMPLATE 策略):風格 / 節奏 / 配樂偵測,無品質分 / 主體框 / 臉部(template DNA 不消費)。
+
+        音訊轉錄直接取自 ``vlm_result``(template 不建音訊鏈,故 work 的音訊欄位恆為空);逐 event 不做主體框
+        正規化(範本只當風格參考、不需逐段裁切框),``multimodal_event_index`` 原樣帶出。
+        """
+        return TemplateVideoMetadata(
+            width=work.width,
+            height=work.height,
+            aspect_ratio=work.aspect_ratio,
+            duration=work.duration,
+            fps=work.fps,
+            creation_time=work.creation_time,
+            location_gps=work.location_gps,
+            audio_transcript=vlm.get("audio_transcript") or {},
+            cinematic_critique=vlm.get("cinematic_critique", ""),
+            mood=vlm.get("mood", ""),
+            scene_tags=vlm.get("scene_tags", []),
+            action_tags=vlm.get("action_tags", []),
+            music_analysis=vlm.get("music_analysis") or {},
+            scene_cuts=work.scene_cuts,
+            multimodal_event_index=vlm.get(_EVENT_INDEX_KEY, []),
+        )
 
     @staticmethod
     def _build_complex(work: VideoWork, vlm: dict) -> ComplexVideoMetadata:

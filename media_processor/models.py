@@ -122,6 +122,36 @@ class ComplexVideoMetadata(BaseModel):
     multimodal_event_index: list[dict[str, Any]] = []
 
 
+class TemplateVideoMetadata(BaseModel):
+    """
+    範本影片的感知元數據（TEMPLATE 策略深分輸出，供 BlueprintBuilder 組 template_dna）。
+
+    刻意與 ``ComplexVideoMetadata`` 分家：範本只需「風格 / 節奏 / 配樂偵測」參考，不需逐幀品質分、
+    主體框、臉部等欄位，故砍掉那些 stage 後此 model 也不帶那些欄位（單一職責、可讀性更高）。
+    多了 ``music_analysis``（Gemini 對範本配樂的曲風 / 情緒 / 歌名猜測），是 Complex 沒有的範本專屬訊號。
+    """
+    width: int
+    height: int
+    aspect_ratio: float = 0.0
+    duration: float
+    fps: float
+    creation_time: str = ""
+    location_gps: str = ""
+    # ── 音訊分析（Gemini TEMPLATE_ANALYSIS 輸出；供 is_audio_essential 與導演人聲保留參考）──
+    audio_transcript: dict[str, Any] = {}
+    # ── 語意分析（LLM，全局）──
+    cinematic_critique: str = ""
+    mood: str = ""
+    scene_tags: list[str] = []
+    action_tags: list[str] = []
+    # ── 配樂偵測（範本專屬；music_style / genre / mood / has_vocals / song_guess）──
+    music_analysis: dict[str, Any] = {}
+    # ── 影片結構 ──
+    is_dense_indexed: bool = True
+    scene_cuts: list[float] = []
+    multimodal_event_index: list[dict[str, Any]] = []
+
+
 class ProcessorResult(BaseModel):
     """
     媒體處理器的統一回傳包裝（Strategy 模式的統一輸出介面）。
@@ -134,7 +164,7 @@ class ProcessorResult(BaseModel):
     status: str
     type: Optional[str] = None   # "image" | "video"
     file: str
-    metadata: Optional[ImageMetadata | VideoMetadata | ComplexVideoMetadata] = None
+    metadata: Optional[ImageMetadata | VideoMetadata | ComplexVideoMetadata | TemplateVideoMetadata] = None
     reason: Optional[str] = None
     message: Optional[str] = None
 

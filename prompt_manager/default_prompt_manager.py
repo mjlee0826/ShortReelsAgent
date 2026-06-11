@@ -8,7 +8,8 @@ class DefaultPromptManager(BasePromptManager):
     針對不同任務提供專門的指令，並嚴格限制 JSON 格式輸出。
     """
     
-    def get_media_analysis_prompt(self) -> str:
+    def get_basic_media_analysis_prompt(self) -> str:
+        """基本媒體分析（圖片 / 簡單短影片的全局描述與語意標籤；Qwen 本地）。"""
         return (
             "請扮演一位專業的電影攝影指導 (DP)。\n"
             "1. 請先客觀地詳細描述這份素材(圖片或影片)的主要內容與動作。\n"
@@ -38,13 +39,23 @@ class DefaultPromptManager(BasePromptManager):
             "}"
         )
 
-    def get_complex_image_analysis_prompt(self) -> str:
+    def get_deep_image_analysis_prompt(self) -> str:
+        """深度圖片分析（靜態圖片的進階語意分析；Gemini 雲端）。輸出為基本分析的超集（多了更深的描述）。"""
         return (
             "你是一位頂尖的電影攝影指導（DP）與視覺分析師。\n"
             "請對這張圖片進行深度語意分析，輸出比標準分析更豐富、更精確的描述。\n"
             "1. 客觀描述圖片的主要內容、人物、物件與場景細節。\n"
             "2. 主觀評析構圖、光影、色調、情緒氛圍等電影語言。\n"
             "3. 精確判斷以下所有語意屬性。\n"
+            f"4. 請找出畫面中『最重要的前 {SUBJECT_CANDIDATE_TOP_N} 名主體』(最可能成為剪輯焦點的人或物)，"
+            "依重要程度由高到低列為 subject_candidates：\n"
+            "   - 每個候選含三個欄位：bbox / label / confidence。\n"
+            "   - bbox 格式為 [x1, y1, x2, y2]，數值是相對影像寬高、正規化到 0–1000 的整數(x1,y1 為左上角；x2,y2 為右下角)，"
+            "請只框『該單一主體』，切勿把整個畫面或多個物體一起框進去。\n"
+            "   - label 為該主體的簡短中文描述(如「紅衣女子」「衝浪板」)。\n"
+            "   - confidence 為 0~1 的小數，代表你判斷『它是畫面最主要主體』的把握程度，最重要者最高。\n"
+            "   - 最多列 " + str(SUBJECT_CANDIDATE_TOP_N) + " 個；畫面只有單一明確主體時列 1 個即可；"
+            "若完全沒有明確主體(如純風景、抽象畫面)，請將 subject_candidates 設為空陣列 []。\n"
             "【嚴格格式要求】直接輸出 JSON，不要包含 markdown 標記。\n"
             "{\n"
             "  \"caption\": \"詳細的客觀描述\",\n"
@@ -53,11 +64,15 @@ class DefaultPromptManager(BasePromptManager):
             "  \"scene_tags\": [\"場景標籤列表，可多選：outdoor, indoor, nature, urban, portrait, crowd, food, animal, vehicle, sport, night\"],\n"
             "  \"camera_angle\": \"鏡頭視角，從以下選一：close-up, medium, wide, aerial, POV, unknown\",\n"
             "  \"action_tags\": [\"動作標籤列表，可多選：dancing, talking, running, cooking, driving, playing, working, walking, performing, sitting\"],\n"
-            "  \"time_of_day\": \"時段，從以下選一：golden_hour, day, dusk, night, indoor, unknown\"\n"
+            "  \"time_of_day\": \"時段，從以下選一：golden_hour, day, dusk, night, indoor, unknown\",\n"
+            "  \"subject_candidates\": [\n"
+            "    {\"bbox\": [x1, y1, x2, y2], \"label\": \"主體描述\", \"confidence\": 0.9}\n"
+            "  ]\n"
             "}"
         )
 
-    def get_timecoded_action_index_prompt(self) -> str:
+    def get_video_event_index_prompt(self) -> str:
+        """影片事件索引（複雜影片的逐時間段多模態事件 + 音訊轉錄；Gemini）。"""
         return (
             "你現在是專業的『AI 影片剪輯大腦』與視聽分析師。\n\n"
             "【你的任務】\n"
@@ -73,7 +88,9 @@ class DefaultPromptManager(BasePromptManager):
             "請只框『該單一主體』，切勿框住整個畫面或多個物體。\n"
             "   - label 為該主體的簡短中文描述；confidence 為 0~1 的小數，代表它是該區段最主要主體的把握程度。\n"
             "   - 最多列 " + str(SUBJECT_CANDIDATE_TOP_N) + " 個；若該區段無明確主體，請填空陣列 []。\n"
-            "7. 同時給出整支影片的『全局語意屬性』與『全局攝影評論』。\n\n"
+            "7. 同時給出整支影片的『全局語意屬性』與『全局攝影評論』。\n"
+            "8. 【音訊結構化】請『聆聽』全片：逐句轉錄人聲並附時間戳 (audio_transcript.chunks，timestamp 為 [起, 訖] 秒)，"
+            "給出整體 has_speech 與 spoken_language，並列出主要環境音 environmental_sounds。無人聲時 has_speech=false、transcript 留空。\n\n"
             "【嚴格格式要求】請直接輸出 JSON，不要包含 markdown 標記。時間請使用小數 (float)。\n"
             "{\n"
             "  \"cinematic_critique\": \"整支影片的運鏡與情緒氛圍評論\",\n"
@@ -82,6 +99,15 @@ class DefaultPromptManager(BasePromptManager):
             "  \"camera_angle\": \"主要鏡頭視角，從以下選一：close-up, medium, wide, aerial, POV, unknown\",\n"
             "  \"action_tags\": [\"全局動作標籤，可多選：dancing, talking, running, cooking, driving, playing, working, walking, performing, sitting\"],\n"
             "  \"time_of_day\": \"時段，從以下選一：golden_hour, day, dusk, night, indoor, unknown\",\n"
+            # ── 音訊欄位(COMPLEX_AUDIO_VIA_GEMINI 開啟時由 Gemini 取代 VAD/Whisper/AudioEnv;與 TEMPLATE_ANALYSIS 保持一致)──
+            "  \"has_speech\": true,\n"
+            "  \"spoken_language\": \"語言代碼，如 en / zh；無人聲填空字串\",\n"
+            "  \"audio_transcript\": {\n"
+            "    \"text\": \"完整逐字稿；無人聲填空字串\",\n"
+            "    \"language\": \"語言代碼；無人聲填空字串\",\n"
+            "    \"chunks\": [ {\"text\": \"這一句話\", \"timestamp\": [0.5, 2.3]} ]\n"
+            "  },\n"
+            "  \"environmental_sounds\": [ {\"label\": \"環境音標籤，如 music / speech / applause / wind\", \"score\": 0.85} ],\n"
             "  \"multimodal_event_index\": [\n"
             "    {\n"
             "      \"start_time\": 0.0,\n"
@@ -98,8 +124,55 @@ class DefaultPromptManager(BasePromptManager):
             "  ]\n"
             "}"
         )
-    
-    def get_director_prompt(self, user_prompt, assets, audio_dna, template_dna=None, previous_timeline=None, error_prompt=""):
+
+    def get_template_analysis_prompt(self) -> str:
+        """範本分析（事件索引 + 音訊轉錄 + 配樂偵測；Gemini）。"""
+        return (
+            "你現在是專業的『AI 影片架構與配樂分析師』，正在解析一支『範本影片』，目的是萃取它的風格與節奏供後續剪輯參考。\n\n"
+            "【你的任務】\n"
+            "1. 全局觀看並『聆聽』這支範本，理解它的敘事節奏、情緒氛圍與配樂風格。\n"
+            "2. 依影片實際時間軸(秒)，拆解為數個『連續的多模態事件區塊』；每塊含 visual_layer 與 audio_layer 描述，並挑一個 key_timestamp。\n"
+            "3. 逐句轉錄人聲並附時間戳 (audio_transcript.chunks，timestamp 為 [起, 訖] 秒)；無人聲時 transcript 各欄留空。\n"
+            "4. 給出整支影片的『全局攝影評論』與『全局情緒 / 場景 / 動作標籤』。\n"
+            "5. 【配樂偵測 music_analysis】分析範本使用的配樂：music_style(自由描述編制 / 風格)、genre(從清單擇一)、"
+            "音樂情緒 mood、是否有歌聲 has_vocals；並『盡力猜測』歌名 song_guess(title / artist) 並附 confidence(0~1)。\n"
+            "   ⚠️ song_guess 為『最佳猜測、可能有誤』：不確定的欄位請留空、confidence 給低分，切勿杜撰歌名。\n\n"
+            "【嚴格格式要求】請直接輸出 JSON，不要包含 markdown 標記。時間請使用小數 (float)。\n"
+            "{\n"
+            "  \"cinematic_critique\": \"整支範本的運鏡與情緒氛圍評論\",\n"
+            "  \"mood\": \"整體情緒，從以下選一：energetic, calm, romantic, dramatic, humorous, melancholic, inspirational, tense\",\n"
+            "  \"scene_tags\": [\"場景標籤，可多選：outdoor, indoor, nature, urban, portrait, crowd, food, animal, vehicle, sport, night\"],\n"
+            "  \"action_tags\": [\"全局動作標籤，可多選：dancing, talking, running, cooking, driving, playing, working, walking, performing, sitting\"],\n"
+            # ── 音訊轉錄(與 VIDEO_EVENT_INDEX 的 audio_transcript 結構保持一致)──
+            "  \"audio_transcript\": {\n"
+            "    \"text\": \"完整逐字稿；無人聲填空字串\",\n"
+            "    \"language\": \"語言代碼，如 en / zh；無人聲填空字串\",\n"
+            "    \"chunks\": [ {\"text\": \"這一句話\", \"timestamp\": [0.5, 2.3]} ]\n"
+            "  },\n"
+            # ── 配樂偵測(範本專屬;歌名為最佳猜測,務必附 confidence)──
+            "  \"music_analysis\": {\n"
+            "    \"music_style\": \"自由描述曲風 / 編制，如 'lo-fi chill hip-hop, mellow piano'\",\n"
+            "    \"genre\": \"從以下擇一：pop, rock, hiphop, electronic, jazz, classical, ambient, folk, cinematic, other\",\n"
+            "    \"mood\": \"音樂情緒，從以下選一：energetic, calm, romantic, dramatic, humorous, melancholic, inspirational, tense\",\n"
+            "    \"has_vocals\": true,\n"
+            "    \"song_guess\": {\"title\": \"猜測歌名(不確定留空)\", \"artist\": \"猜測歌手(不確定留空)\", \"confidence\": 0.0}\n"
+            "  },\n"
+            "  \"multimodal_event_index\": [\n"
+            "    {\n"
+            "      \"start_time\": 0.0,\n"
+            "      \"end_time\": 4.5,\n"
+            "      \"visual_layer\": \"畫面動作描述\",\n"
+            "      \"audio_layer\": \"配樂 / 人聲 / 環境音的起伏描述\",\n"
+            "      \"key_timestamp\": 3.2,\n"
+            "      \"mood\": \"此區段情緒\",\n"
+            "      \"action_tags\": [\"此區段動作標籤\"]\n"
+            "    }\n"
+            "  ]\n"
+            "}"
+        )
+
+    def get_director_blueprint_prompt(self, user_prompt, assets, audio_dna, template_dna=None, previous_timeline=None, error_prompt=""):
+        """導演剪輯藍圖（把素材庫編排成 Remotion 可渲染的 JSON 剪輯藍圖）。"""
         # 1. 定義角色與目標
         instruction = (
             "# ROLE\n"
@@ -148,9 +221,11 @@ class DefaultPromptManager(BasePromptManager):
         # 【新增】配樂與混音專屬守則
         instruction += (
             "# AUDIO & BGM GUIDELINES (配樂與原音混音守則)\n"
-            "1. 全局配樂 (bgm_track)：請從【配樂 DNA】或【範本 DNA】中挑選合適的音樂檔案作為全局 BGM，並設定其起始時間。\n"
-            "2. 智慧人聲保留邏輯：檢視素材的 `audio.vocal` (講話內容) 或 `events.audio_layer` (聲音事件)。\n"
+            "1. 全局配樂 (bgm_track)：實際 BGM 檔案一律來自【配樂 DNA】，請據此設定 track_id 與起始時間。"
+            "（【範本 DNA】的配樂僅供風格參考，不是可播放的音檔，切勿拿來當 BGM。）\n"
+            "2. 智慧人聲保留邏輯：檢視素材的 `audio.transcript` (逐字稿，含 `text` 與帶時間戳的 `chunks`) 或 `events.audio_layer` (聲音事件)。\n"
             "   - 若有人聲對話或重要口白：必須保留原音 (`clip_volume`: 1.0)，並將該片段的配樂降低以避讓 (`bgm_volume`: 0.2)。\n"
+            "   - 善用 `audio.transcript.chunks` 的 `timestamp` ([起, 訖] 秒)：把 `overlay_text` 字幕與 `bgm_volume` ducking 精準對齊到實際講話的時間點，而非整段一刀切。\n"
             "   - 若只有無意義環境音或純風景：請靜音原片 (`clip_volume`: 0.0)，讓配樂成為主體 (`bgm_volume`: 1.0)。\n\n"
         )
 
@@ -164,7 +239,9 @@ class DefaultPromptManager(BasePromptManager):
         if template_dna:
             instruction += (
                 "# TEMPLATE REFERENCE MODE (範本風格參考)\n"
-                "參考範本的視覺氛圍與節奏步調。不需要強硬對齊範本的每一秒物理切點，請以當前素材的流暢度與你身為導演的專業判斷為主。\n\n"
+                "參考範本的視覺氛圍與節奏步調。不需要強硬對齊範本的每一秒物理切點，請以當前素材的流暢度與你身為導演的專業判斷為主。\n"
+                "若【範本 DNA】含 `music_dna` (配樂偵測：music_style / genre / 情緒)，請用它校準整體情緒弧線與卡點節奏感；"
+                "但實際 BGM 仍以【配樂 DNA】為準，範本配樂只是風格定錨、不是可播放的音檔。\n\n"
             )
 
         # 5. 輸出 Schema (Remotion Ready JSON)
@@ -227,7 +304,8 @@ class DefaultPromptManager(BasePromptManager):
 
         return prompt
     
-    def get_intent_translation_prompt(self, user_prompt: str) -> str:
+    def get_music_search_query_prompt(self, user_prompt: str) -> str:
+        """音樂搜尋關鍵字（把使用者需求轉成精準的配樂搜尋詞）。"""
         return (
             "# ROLE\n"
             "你是一個專業的電影配樂總監。\n\n"

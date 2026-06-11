@@ -27,5 +27,5 @@ class ComplexImageProcessor(AbstractImageProcessor):
     ) -> dict:
         """以 Gemini API 執行圖片深度語意分析，回傳含 caption / mood 等欄位的 dict。"""
         return self.vision_engine.analyze_media(
-            pil_image, media_type="image", mode=TaskMode.COMPLEX_IMAGE_ANALYSIS
+            pil_image, media_type="image", mode=TaskMode.DEEP_IMAGE_ANALYSIS
         )

@@ -7,11 +7,14 @@ class VideoStrategy(Enum):
     """
     策略模式 (Strategy) 列舉：決定影片使用哪種感知引擎。
 
-    SIMPLE  → 本地 Qwen 全局分析（快速，無時間碼燒錄）
-    COMPLEX → Gemini API 精確索引（慢但準確，需燒錄視覺時間碼）
+    SIMPLE   → 本地 Qwen 全局分析（快速，無時間碼燒錄）
+    COMPLEX  → Gemini API 精確索引（慢但準確，需燒錄視覺時間碼）
+    TEMPLATE → 範本專屬深分：精簡 DAG（decode + scene + Gemini 範本語意），砍掉音訊鏈與品質/臉部評分，
+               語意走 TEMPLATE_ANALYSIS（含音樂偵測），供 BlueprintPreparer 的 template 分支使用。
     """
     SIMPLE = "simple"
     COMPLEX = "complex"
+    TEMPLATE = "template"
 
 
 # 全域影片預設策略：未被 asset_strategies 逐檔覆寫的影片一律走 SIMPLE（本地 Qwen）。

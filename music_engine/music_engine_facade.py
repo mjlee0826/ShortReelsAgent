@@ -2,7 +2,6 @@ import os
 from media_tools.media_downloader import MediaDownloader
 from media_tools.ffmpeg_adapter import FFmpegAdapter
 from media_tools.audio_beat_extractor import AudioBeatExtractor
-from music_engine.lyrics_adapter import LyricsAdapter
 from media_processor.pipeline.executor.model_pool_registry import borrow_for_batch, run_vad
 from media_processor.pipeline.progress import ProgressTracker, stage_span
 from model.managers.whisper_model_manager import WhisperModelManager
@@ -21,14 +20,12 @@ class MusicEngineFacade:
       - fetch_and_analyze()：yt-dlp 搜尋下載（情境1，含版權）
       - fetch_free_music()：JamendoAdapter 搜尋（情境3，無版權）
       - use_local_audio()：直接使用用戶上傳的本地檔案（情境2 方案1）
-    歌詞走 Chain of Responsibility：LRClib → VAD + Whisper。
+    歌詞一律走 VAD + Whisper（直接轉錄手上音檔，時間戳與音訊天然對齊）。
     """
     def __init__(self):
         self.downloader = MediaDownloader()
         self.ffmpeg = FFmpegAdapter()
         self.beat_extractor = AudioBeatExtractor()
-        # LyricsAdapter 是純 HTTP client，不耗 VRAM，eager init
-        self.lyrics_adapter = LyricsAdapter()
         # AI 大腦(Whisper / VAD)不再自建 singleton:改向共享 ModelPoolRegistry borrow,
         # 與 template 分支共用同一 GpuGate / VRAM 預算,並行不撞車(見 docs §5)。
 
@@ -190,25 +187,20 @@ class MusicEngineFacade:
     def _fetch_lyrics(self, query: str, fallback_audio_path: str,
                       tracker: ProgressTracker | None = None) -> dict:
         """
-        Chain of Responsibility：依序嘗試多個歌詞來源，第一個成功即停止。
-          路 1：LRClib（query 直查歌詞 DB，含時間戳）
-          路 2：VAD 把關 + Whisper transcribe（純人聲偵測過後再轉錄）
-        路 1 命中即停止，路 2 才會耗 GPU；查無人聲時連 Whisper 都不啟動。
-        整段以 ``music_lyrics`` stage 包覆(tracker 非 None 時),前端看到「聽寫中」。
+        歌詞解析：VAD 把關 + Whisper transcribe（直接轉錄手上音檔）。
+
+        原 LRClib 歌詞 DB 路徑已移除：眾包同步歌詞對的是另一個版本，時間戳常與我們實際播放的
+        音檔系統性偏移；改為一律以 Whisper 轉錄實體音檔，時間戳本質上與音訊對齊、不會錯。
+        ``query`` 保留於簽章供呼叫端相容（歌名提示），目前不再用於 DB 查詢。查無人聲時連 Whisper
+        都不啟動（回 ``vad_silent``）。整段以 ``music_lyrics`` stage 包覆，前端看到「聽寫中」。
         """
         with stage_span(tracker, _MUSIC_ASSET_ID, _MUSIC_LYRICS_STAGE):
-            # 路 1：LRClib 歌詞 DB（無 GPU 成本）
-            lyrics_from_db = self.lyrics_adapter.fetch_synced_lyrics(query)
-            if lyrics_from_db:
-                return lyrics_from_db
-
-            # 路 2：VAD 防衛(改 borrow 共享 CPU 池,與 pipeline VAD 同池,不再各開 singleton)
-            print(f"[music_engine] LRClib 無命中，回退至 Whisper transcribe...")
+            # VAD 防衛(borrow 共享 CPU 池,與 pipeline VAD 同池):純配樂 / 環境音直接跳過,省 GPU
             if not run_vad(lambda v: v.has_speech(fallback_audio_path)):
                 print(f"[music_engine] 判定為純配樂/環境音，跳過聽寫流程。")
                 return {"chunks": [], "text": "", "source": "vad_silent"}
 
-            # Whisper 改 borrow 共享 GPU 池(與 template 分支共用 GpuGate / VRAM 預算)
+            # 偵測到人聲：borrow 共享 GPU 池做 Whisper 聽寫(與 template 分支共用 GpuGate / VRAM 預算)
             print(f"[music_engine] 偵測到人聲內容，啟動 Whisper 聽寫...")
             whisper_result = borrow_for_batch(
                 WhisperModelManager,

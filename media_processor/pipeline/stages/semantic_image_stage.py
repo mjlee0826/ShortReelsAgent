@@ -27,8 +27,8 @@ class SemanticImageStage(Stage):
     語意只需 ``pil_image``(原版收的 exif 參數未被使用),故與其他 G3 stage 無依賴、可同群並行。
     resource_type 依策略決定:SIMPLE→GPU(Qwen)、COMPLEX→API(Gemini),供 ExecutorRegistry 路由。
 
-    現狀 ``PipelineRunner`` 不傳 image_strategy(恆 SIMPLE)→ 走 Qwen,與 Legacy 逐欄一致;
-    COMPLEX 分支已接好,待前端傳 per-asset 策略時即生效。
+    ``PipelineRunner._build_contexts`` 依素材頁的逐檔策略傳入 image_strategy:設為 "complex" 的圖片走
+    Gemini 深度分析(``DEEP_IMAGE_ANALYSIS``),其餘走本地 Qwen(``BASIC_MEDIA_ANALYSIS``)。
     """
 
     def __init__(self, image_strategy: ImageStrategy = ImageStrategy.SIMPLE):
@@ -60,7 +60,7 @@ class SemanticImageStage(Stage):
         work = get_image_work(context)
         if self._image_strategy == ImageStrategy.COMPLEX:
             work.vlm_result = self._gemini_engine().analyze_media(
-                work.frame.pil_image, media_type=_MEDIA_TYPE_IMAGE, mode=TaskMode.COMPLEX_IMAGE_ANALYSIS
+                work.frame.pil_image, media_type=_MEDIA_TYPE_IMAGE, mode=TaskMode.DEEP_IMAGE_ANALYSIS
             )
         else:
             work.vlm_result = self._analyze_with_qwen(work.frame.pil_image, context)
@@ -72,7 +72,7 @@ class SemanticImageStage(Stage):
         """
         if not GPU_POOL_ENABLED:
             return self._qwen_engine().analyze_media(
-                pil_image, media_type=_MEDIA_TYPE_IMAGE, mode=TaskMode.GLOBAL_ANALYSIS
+                pil_image, media_type=_MEDIA_TYPE_IMAGE, mode=TaskMode.BASIC_MEDIA_ANALYSIS
             )
         # lazy import 避免模組載入期耦合(與既有 _qwen_engine 的 lazy 風格一致)
         from model.managers.qwen_model_manager import QwenModelManager
@@ -84,7 +84,7 @@ class SemanticImageStage(Stage):
         # run_with_failover:單卡持續 OOM(鄰居佔 VRAM)時自動換到別張卡重試,而非死守同卡
         return ModelPoolRegistry.instance().get_pool(QwenModelManager).run_with_failover(
             lambda qwen: qwen.analyze_media(
-                pil_image, media_type=_MEDIA_TYPE_IMAGE, mode=TaskMode.GLOBAL_ANALYSIS
+                pil_image, media_type=_MEDIA_TYPE_IMAGE, mode=TaskMode.BASIC_MEDIA_ANALYSIS
             ),
             observer=observer,
         )

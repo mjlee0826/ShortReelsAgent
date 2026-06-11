@@ -14,7 +14,7 @@ class SchedulingState(BaseState):
         
         # 透過 PromptFactory 請求 Prompt
         full_prompt = PromptFactory.create_prompt(
-            mode=TaskMode.DIRECTOR_SCHEDULING,
+            mode=TaskMode.DIRECTOR_BLUEPRINT,
             manager=gemini.prompt_manager,
             user_prompt=context.get("user_prompt", ""),
             assets=context.get("assets", []),

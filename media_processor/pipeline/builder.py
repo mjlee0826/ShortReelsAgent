@@ -10,6 +10,7 @@ PipelineBuilder:依 asset 類型與策略組裝 Pipeline 依賴圖 (Builder Patt
 from __future__ import annotations
 
 from config.pipeline_config import (
+    COMPLEX_AUDIO_VIA_GEMINI,
     USE_LEGACY_IMAGE_PIPELINE,
     USE_LEGACY_VIDEO_PIPELINE,
 )
@@ -96,6 +97,8 @@ class PipelineBuilder:
             return Pipeline([StageNode(LegacyVideoPipelineStage())], name=_VIDEO_PIPELINE_NAME)
         if context.video_strategy == VideoStrategy.COMPLEX:
             return self._build_complex_video_pipeline(context)
+        if context.video_strategy == VideoStrategy.TEMPLATE:
+            return self._build_template_video_pipeline(context)
         return self._build_simple_video_pipeline(context)
 
     def _build_simple_video_pipeline(self, context: AssetContext) -> Pipeline:
@@ -143,19 +146,16 @@ class PipelineBuilder:
         """
         Complex 影片依賴圖(所有工作 decode 後全並行;Gemini 直接讀原始影片)。
 
-        ``decode → {tech, aes, audio_extract→audio_infer, semantic(Gemini), scene, cv, face} → assembly``。
-        tech / aes 對代表幀(中間幀)算畫質 / 美學分,與 Simple/Image 同一條 Stage(只算分、不 gate,故
-        Complex 無 reject 短路)。已移除 TimecodeStage(燒碼重編碼):Gemini 改用原生時間戳,semantic 不再
-        等最耗時的燒碼、decode 後即可上傳,與音訊鏈 / 場景 / 視覺特徵 / 評分自然重疊。逐 event 主體框的
-        正規化已併入 AssemblyVideoStage(原 EventBboxStage 簡化為純資料整形後不再獨立成 Stage)。
+        ``decode → {tech, aes, semantic(Gemini), scene, cv, face} → assembly``;音訊來源由
+        ``COMPLEX_AUDIO_VIA_GEMINI`` 旗標決定:
+          - 開啟(預設):**不建** audio_extract/vad/whisper/audio_env,音訊欄位改由 semantic(Gemini)
+            一併輸出並寫回 VideoWork(省 GPU、消除與 Gemini「聆聽」的重複勞動)。
+          - 關閉(回退):重建 ``audio_extract→vad→whisper`` + ``audio_env``,音訊由 Whisper/AudioEnv 產出。
+        tech / aes 對代表幀算畫質 / 美學分(與 Simple/Image 同一條 Stage,只算分、不 gate)。逐 event
+        主體框的正規化已併入 AssemblyVideoStage。
         """
         decode = DecodeVideoStage()
-        audio_extract = AudioExtractionStage()
-        # 音訊鏈全拆:vad → whisper 為語音鏈;audio_env 獨立並行(皆只依賴 audio_extract)
-        vad = VadStage()
-        whisper = WhisperStage()
-        audio_env = AudioEnvStage()
-        # 代表幀畫質 / 美學評分(與 Simple/Image 共用 Stage,只依賴代表幀)
+        # 代表幀畫質 / 美學評分 + 場景 / 視覺特徵 / 臉部(與音訊來源無關,恆建)
         tech = TechScoreStage()
         aes = AesScoreStage()
         scene = SceneCutStage()
@@ -166,29 +166,53 @@ class PipelineBuilder:
         decode_name = decode.meta.name
         nodes = [
             StageNode(decode),
-            StageNode(audio_extract, (decode_name,)),
-            StageNode(vad, (audio_extract.meta.name,)),
-            StageNode(whisper, (vad.meta.name,)),
-            StageNode(audio_env, (audio_extract.meta.name,)),
             StageNode(tech, (decode_name,)),
             StageNode(aes, (decode_name,)),
             StageNode(scene, (decode_name,)),
             StageNode(cv, (decode_name,)),
             StageNode(face, (decode_name,)),
             StageNode(semantic, (decode_name,)),              # Gemini 直接讀原始影片,decode 後即可上傳
-            StageNode(
-                AssemblyVideoStage(),
-                # semantic(vlm_result,含逐 event 主體框)+ tech/aes/whisper/audio_env/scene/cv/face 湊齊所有 metadata 來源
-                (
-                    tech.meta.name,
-                    aes.meta.name,
-                    whisper.meta.name,
-                    audio_env.meta.name,
-                    scene.meta.name,
-                    cv.meta.name,
-                    face.meta.name,
-                    semantic.meta.name,
-                ),
-            ),
+        ]
+        # Assembly 依賴:視覺 / 語意群恆含;音訊鏈(whisper/audio_env)只在旗標關閉時納入
+        assembly_deps = [
+            tech.meta.name, aes.meta.name, scene.meta.name,
+            cv.meta.name, face.meta.name, semantic.meta.name,
+        ]
+        if not COMPLEX_AUDIO_VIA_GEMINI:
+            # 回退路徑:重建原 Whisper 音訊鏈(全拆:vad→whisper 語音鏈;audio_env 獨立並行)
+            audio_extract = AudioExtractionStage()
+            vad = VadStage()
+            whisper = WhisperStage()
+            audio_env = AudioEnvStage()
+            nodes += [
+                StageNode(audio_extract, (decode_name,)),
+                StageNode(vad, (audio_extract.meta.name,)),
+                StageNode(whisper, (vad.meta.name,)),
+                StageNode(audio_env, (audio_extract.meta.name,)),
+            ]
+            assembly_deps += [whisper.meta.name, audio_env.meta.name]
+
+        nodes.append(StageNode(AssemblyVideoStage(), tuple(assembly_deps)))
+        return Pipeline(nodes, name=_VIDEO_PIPELINE_NAME)
+
+    def _build_template_video_pipeline(self, context: AssetContext) -> Pipeline:
+        """
+        Template 專屬精簡依賴圖:``decode → {scene, semantic(Gemini TEMPLATE_ANALYSIS)} → assembly``。
+
+        範本只需風格 / 節奏 / 配樂偵測參考,故砍掉整條音訊鏈(VAD/Whisper/AudioEnv)與品質 / 美學 /
+        色彩 / 臉部 / 動態評分(template DNA 都不消費),只重用便宜的 decode(metadata + 代表幀)與
+        scene(PySceneDetect 物理切點)。語意走 ``TEMPLATE_ANALYSIS``(含 audio_transcript 與 music_analysis),
+        assembly 以 ``_build_template`` 組 ``TemplateVideoMetadata``。
+        """
+        decode = DecodeVideoStage()
+        scene = SceneCutStage()
+        semantic = SemanticVideoStage(context.video_strategy)  # TEMPLATE → Gemini(API)
+
+        decode_name = decode.meta.name
+        nodes = [
+            StageNode(decode),
+            StageNode(scene, (decode_name,)),
+            StageNode(semantic, (decode_name,)),
+            StageNode(AssemblyVideoStage(), (scene.meta.name, semantic.meta.name)),
         ]
         return Pipeline(nodes, name=_VIDEO_PIPELINE_NAME)

@@ -19,11 +19,12 @@ _NO_VIDEO_ONLY = ""
 
 
 class TemplateDnaProducer(DnaProducer):
-    """Template 分支:素材深度感知委派共享 ``PipelineRunner``(走既有 complex 影片 DAG),
+    """Template 分支:素材深度感知委派共享 ``PipelineRunner`` 的 TEMPLATE 精簡 DAG,
     再補物理節奏(beats)與 DNA 組裝(Builder)。
 
-    重點:不自己造 DAG —— complex 影片分析的 DAG 已存在於 pipeline,本生產者只是它的
-    consumer + 後處理。``scene_cuts`` 直接取 pipeline metadata,不再重跑場景偵測(解 P2)。
+    重點:不自己造 DAG —— TEMPLATE 策略的精簡 DAG(decode + scene + Gemini 範本語意)已存在於
+    pipeline,本生產者只是它的 consumer + 後處理。``scene_cuts`` 直接取 pipeline metadata,
+    不再重跑場景偵測(解 P2)。範本配樂偵測(music_dna)由 TEMPLATE_ANALYSIS 產出後由 Builder 收進 DNA。
     """
 
     name = "template_dna"
@@ -46,17 +47,18 @@ class TemplateDnaProducer(DnaProducer):
         base_dir = os.path.dirname(video)
         asset_id = os.path.basename(video)
 
-        # 2. 深度感知:走共享 pipeline(stage 並行、內部自動 borrow 模型);強制逐檔 COMPLEX 策略。
+        # 2. 深度感知:走共享 pipeline 的 TEMPLATE 精簡 DAG(decode + scene + Gemini 範本語意);
+        #    砍掉音訊鏈與品質 / 臉部評分,語意走 TEMPLATE_ANALYSIS(含 audio_transcript 與 music_analysis)。
         #    tracker 透傳讓 stage 事件帶正確 job_id 上前端(無前端時為 None,退化純 print)。
         results = self._runner.run(
             [video],
             base_dir=base_dir,
-            asset_strategies={asset_id: VideoStrategy.COMPLEX.value},
+            asset_strategies={asset_id: VideoStrategy.TEMPLATE.value},
             tracker=tracker,
         )
         if not results:
             raise RuntimeError("Template 深度分析失敗(pipeline 無 success 結果)")
-        complex_meta = results[0]["metadata"]
+        template_meta = results[0]["metadata"]
 
         # 3. 物理節奏:beats 是 template 專屬、librosa 純 CPU,留在本分支(不入 pipeline)。
         a_only = os.path.join(base_dir, f"{os.path.splitext(asset_id)[0]}{_AUDIO_ONLY_SUFFIX}")
@@ -68,8 +70,8 @@ class TemplateDnaProducer(DnaProducer):
             BlueprintBuilder()
             .set_info(media_info["music_metadata"], media_info["original_url"])
             .set_local_assets(original_video=video, video_only=_NO_VIDEO_ONLY, audio_only=a_only)
-            .set_physical_cuts(complex_meta.get("scene_cuts", []))
+            .set_physical_cuts(template_meta.get("scene_cuts", []))
             .set_audio_features(beats)
-            .ingest_complex_metadata(complex_meta)
+            .ingest_template_metadata(template_meta)
             .build()
         )

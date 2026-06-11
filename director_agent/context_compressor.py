@@ -46,7 +46,11 @@ class ContextCompressor:
                 "type": asset.get("type"),
                 "res": {"w": metadata.get("width"), "h": metadata.get("height")},
                 "aes": metadata.get("aesthetic_score", _DEFAULT_AES_SCORE),
+                # 技術畫質分（供導演自行取捨；過濾閘只剔雙低，分數仍完整給導演）
+                "tech": metadata.get("technical_score"),
                 "cap": metadata.get("caption", ""),
+                # 攝影評論（鏡頭語言 / 情緒氛圍的深度描述）
+                "critique": metadata.get("cinematic_critique", ""),
                 # bbox：導演計算 object_position 的依據（系統自動選定的最佳主體框）
                 "bbox": raw_bbox,
                 "crop": metadata.get("crop_feasibility", "full"),
@@ -58,19 +62,21 @@ class ContextCompressor:
                 "tod": metadata.get("time_of_day", ""),
                 # 視覺特徵
                 "bright": metadata.get("brightness", 0.0),
+                "color_temp": metadata.get("color_temperature", ""),  # warm / cool / neutral
                 "colors": metadata.get("dominant_colors", []),
                 # 拍攝時間與地點（圖片來自 EXIF、影片來自容器標籤）
                 "time": metadata.get("creation_time", ""),
                 "geo": metadata.get("location_gps", ""),
             }
 
-            # 候選主體清單（多於一個時才補充，省 token；單一主體時 bbox 已足夠）
-            if len(subjects) > 1:
+            # 候選主體清單（≥1 個就帶：保留主體的 label / 信心，連單一主體的語意標籤也不丟）
+            if subjects:
                 base_info["subjects"] = subjects
 
-            # 臉部資訊（有臉時補充）
+            # 臉部資訊（有臉時補充數量與最大臉佔比，後者暗示特寫程度）
             if faces.get("has_faces"):
                 base_info["face_count"] = faces.get("face_count", 0)
+                base_info["face_ratio"] = faces.get("largest_face_ratio", 0.0)
 
             # 根據素材類型補強影片特有資訊
             if asset.get("type") == "video":
@@ -81,14 +87,14 @@ class ContextCompressor:
                 base_info["lang"] = metadata.get("spoken_language", "")
                 base_info["cuts"] = metadata.get("scene_cuts", [])
 
-                # 若為一般影片，濃縮聲音描述
-                if not metadata.get("is_dense_indexed"):
-                    base_info["audio"] = {
-                        "vocal": metadata.get("audio_transcript", {}).get("text", ""),
-                        "env": metadata.get("environmental_sounds", "")
-                    }
-                # 若為 Complex 影片，僅保留事件索引
-                else:
+                # 完整逐字稿(text + 帶時間戳 chunks + language)一律給導演（simple/complex 皆送），
+                # 讓導演用 chunks 的 timestamp 精準卡 overlay_text 字幕與 bgm_volume ducking
+                base_info["audio"] = {
+                    "transcript": metadata.get("audio_transcript", {}),
+                    "env": metadata.get("environmental_sounds", []),
+                }
+                # Complex 影片額外保留逐段視聽事件索引
+                if metadata.get("is_dense_indexed"):
                     base_info["is_complex"] = True
                     base_info["events"] = metadata.get("multimodal_event_index", [])
 

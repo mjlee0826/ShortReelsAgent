@@ -13,7 +13,7 @@ pillow_heif.register_heif_opener()
 class ImageProcessor(AbstractImageProcessor):
     """
     具體策略 (Concrete Strategy)：靜態圖片的標準感知處理器（免費方案）。
-    以本地端 Qwen3-VL 進行全局語意描述（GLOBAL_ANALYSIS），
+    以本地端 Qwen3-VL 進行全局語意描述（BASIC_MEDIA_ANALYSIS），
     適用於不需要付費 API 的一般圖片素材。
     流水線繼承自 AbstractImageProcessor，此類只注入差異化的視覺語意引擎。
     """
@@ -28,5 +28,5 @@ class ImageProcessor(AbstractImageProcessor):
     ) -> dict:
         """以 Qwen3-VL 執行圖片全局語意分析，回傳含 caption / mood 等欄位的 dict。"""
         return self.vision_engine.analyze_media(
-            pil_image, media_type="image", mode=TaskMode.GLOBAL_ANALYSIS
+            pil_image, media_type="image", mode=TaskMode.BASIC_MEDIA_ANALYSIS
         )

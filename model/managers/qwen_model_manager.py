@@ -169,7 +169,7 @@ class QwenModelManager(BaseModelManager):
 
     @oom_resilient
     @synchronized_inference
-    def analyze_media(self, media_input, media_type: str = "image", mode: TaskMode = TaskMode.GLOBAL_ANALYSIS) -> dict:
+    def analyze_media(self, media_input, media_type: str = "image", mode: TaskMode = TaskMode.BASIC_MEDIA_ANALYSIS) -> dict:
         """輸入圖片或影片路徑，回傳模型推論的 JSON 結果。"""
         prompt_text = PromptFactory.create_prompt(mode, self.prompt_manager)
 
@@ -179,7 +179,7 @@ class QwenModelManager(BaseModelManager):
                 {"type": "text", "text": prompt_text}
             ]
         else:
-            target_fps = QWEN_FPS_TIMECODED if mode == TaskMode.TIMECODED_ACTION_INDEX else QWEN_FPS_DEFAULT
+            target_fps = QWEN_FPS_TIMECODED if mode == TaskMode.VIDEO_EVENT_INDEX else QWEN_FPS_DEFAULT
             content = [
                 {"type": "video", "video": media_input, "max_pixels": QWEN_MAX_PIXELS, "fps": target_fps},
                 {"type": "text", "text": prompt_text}

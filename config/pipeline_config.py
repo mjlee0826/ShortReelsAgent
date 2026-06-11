@@ -101,6 +101,15 @@ USE_LEGACY_VIDEO_PIPELINE = _read_bool_env(
     "USE_LEGACY_VIDEO_PIPELINE", USE_LEGACY_VIDEO_PIPELINE_DEFAULT
 )
 
+# ── Complex 影片音訊來源切換 ──────────────────────────────────────────
+# True(預設,實驗中):Complex 影片不建 VAD/Whisper/AudioEnv 音訊鏈,改由 Gemini 在 semantic
+#   一併輸出 has_speech / spoken_language / audio_transcript / environmental_sounds(省 GPU、
+#   消除與 Gemini「聆聽」的重複勞動)。semantic stage 會把 vlm_result 內的音訊欄位寫回 VideoWork,
+#   故 AssemblyVideoStage 來源透明、不需改。
+# False:緊急回退 —— 重建原 Whisper 音訊鏈,音訊欄位改回由 VAD/Whisper/AudioEnv 產出。
+# 僅作用於 COMPLEX(使用者素材);TEMPLATE 深分一律不建音訊鏈、不受此旗標影響。
+COMPLEX_AUDIO_VIA_GEMINI = _read_bool_env("COMPLEX_AUDIO_VIA_GEMINI", True)
+
 # ── Dynamic Batching 逐模型開關 ──────────────────────────────────────
 # 控制各 Stage 是否走 BatchCollector 合批;False 時該 Stage 回退原單張呼叫(對 driver 透明)。
 # 與 USE_LEGACY_* 同屬操作開關,供逐欄一致 A/B 與緊急 rollback:

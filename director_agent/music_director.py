@@ -76,7 +76,7 @@ class MusicDirector:
         gemini = GeminiModelManager()
 
         analysis_prompt = PromptFactory.create_prompt(
-            mode=TaskMode.INTENT_TRANSLATION,
+            mode=TaskMode.MUSIC_SEARCH_QUERY,
             manager=gemini.prompt_manager,
             user_prompt=user_prompt
         )

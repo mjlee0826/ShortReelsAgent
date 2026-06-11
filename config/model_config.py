@@ -141,7 +141,7 @@ QWEN_MODEL_ID       = QWEN_BASE_MODEL_ID
 # 三者都直接決定 GPU 佔用時間。共用卡序列化時，Qwen 拖多久、其餘 stage 就被卡多久，故這裡把
 # 三個旋鈕都下修並開放 env 覆寫（品質回歸時用 env 調回 512 / 100352 / 1.0 比對）。
 #
-# 輸出 token 上限：512→384。GLOBAL_ANALYSIS 產的是結構化 JSON 描述，384 步通常已足夠，
+# 輸出 token 上限：512→384。BASIC_MEDIA_ANALYSIS 產的是結構化 JSON 描述，384 步通常已足夠，
 # 但 autoregressive 每 token 一次 forward，省 25% 步數直接省 25% decode 時間（影響最大、品質風險最低）。
 QWEN_MAX_NEW_TOKENS = _read_int_env("QWEN_MAX_NEW_TOKENS", 384)
 # 每格影像 pixel 數上限：100352→81920（≈320×256）。對「多影格的影片」是 prefill token 的主要來源，

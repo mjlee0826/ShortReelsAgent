@@ -36,7 +36,7 @@ class ComplexVideoProcessor(AbstractVideoProcessor):
         vlm_result = self.vision_engine.analyze_media(
             media_input=tc_file_path,
             media_type="video",
-            mode=TaskMode.TIMECODED_ACTION_INDEX,
+            mode=TaskMode.VIDEO_EVENT_INDEX,
         )
 
         # 後處理：為每個多模態事件計算最佳畫面 bbox
