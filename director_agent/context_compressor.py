@@ -2,6 +2,7 @@ from config.media_processor_config import (
     AESTHETIC_SCORE_REJECT_THRESHOLD,
     TECHNICAL_SCORE_REJECT_THRESHOLD,
 )
+from prompt_manager.schemas import CastingCard
 
 # 缺臉資訊時的空 dict 預設(避免 None.get)
 _EMPTY_FACES: dict = {}
@@ -101,6 +102,53 @@ class ContextCompressor:
             compressed_list.append(base_info)
 
         return compressed_list
+
+    def to_casting_cards(self, compressed_assets: list) -> list:
+        """
+        把完整 dossier 清單投影成第一段 Casting 用的精簡卡片（:class:`CastingCard`）。
+
+        只保留支撐『選材 / 排序 / 粗略時長』的欄位；逐句時間戳 chunks、完整事件索引、bbox、主體
+        候選、攝影評論、色彩 / 亮度等「精修才需要」的重料一律不投影（第二段再按 id 取完整 dossier），
+        這正是兩階段縮小 context 的關鍵。影片才有的 dur/motion/has_speech/transcript_text/event_digest
+        缺值留 None，卡片經 ``model_dump(exclude_none=True)`` 後自動精簡。
+        """
+        cards = []
+        for dossier in compressed_assets:
+            asset_id = dossier.get("id")
+            if not asset_id:
+                continue  # 無身分的素材無法被選回，跳過
+
+            card = CastingCard(
+                id=asset_id,
+                type=dossier.get("type", ""),
+                aes=dossier.get("aes", 0.0),
+                tech=dossier.get("tech"),
+                cap=dossier.get("cap", ""),
+                mood=dossier.get("mood", ""),
+                scene_tags=dossier.get("scene_tags", []),
+                actions=dossier.get("actions", []),
+                crop=dossier.get("crop", "full"),
+                time=dossier.get("time", ""),
+                geo=dossier.get("geo", ""),
+            )
+
+            # 影片專屬：時長 / 動態 / 語音旗標 + 逐字稿全文（無時間戳）+ 事件視覺摘要
+            if dossier.get("type") == "video":
+                card.dur = dossier.get("dur")
+                card.motion = dossier.get("motion")
+                card.has_speech = dossier.get("has_speech")
+                # 逐字稿只取純文字 text，帶時間戳的 chunks 留待第二段精修對齊字幕 / ducking
+                transcript = (dossier.get("audio") or {}).get("transcript") or {}
+                if transcript.get("text"):
+                    card.transcript_text = transcript["text"]
+                # 事件索引只抽各段 visual_layer（畫面動作摘要），丟棄時間戳 / audio_layer / 主體框
+                events = dossier.get("events") or []
+                digest = [e.get("visual_layer", "") for e in events if e.get("visual_layer")]
+                if digest:
+                    card.event_digest = digest
+
+            cards.append(card)
+        return cards
 
     @staticmethod
     def _compress_subjects(candidates: list) -> list:

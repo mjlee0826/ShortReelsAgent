@@ -1,4 +1,6 @@
+from config.director_config import DIRECTOR_TWO_STAGE_MIN_ASSETS
 from director_agent.context_compressor import ContextCompressor
+from director_agent.states.casting_state import CastingState
 from director_agent.states.scheduling_state import SchedulingState
 
 class DirectorFacade:
@@ -27,11 +29,16 @@ class DirectorFacade:
 
         # 1. 預處理：資料降維 (排除 technical_score < 40 的素材)
         compressed_assets = self.compressor.compress(raw_assets)
+        # id → 完整 dossier 反查表:兩階段第二段按 shortlist 取選中素材的完整 metadata
+        asset_index = {
+            asset["id"]: asset for asset in compressed_assets if asset.get("id")
+        }
 
         # 2. 初始化 context;audio_dna 由上游並行解析後直接注入(取代原 IntentState 現抓)
         context = {
             "user_prompt": user_prompt,
             "assets": compressed_assets,
+            "asset_index": asset_index,             # 兩階段第二段取選中 dossier 用
             "template_dna": template_dna,           # 範本資訊
             "previous_timeline": previous_timeline,  # 歷史藍圖
             "regenerate_music": regenerate_music,     # False 時沿用 previous_bgm_track
@@ -41,8 +48,16 @@ class DirectorFacade:
             "final_timeline": None
         }
 
-        # 3. 狀態機啟動(入口改 SchedulingState;配樂節點 IntentState 已退場)
-        state = SchedulingState()
+        # 3. 選入口狀態:素材夠多且為全新生成 → 先 Casting 選角縮小 context(兩階段);
+        #    微調(有 previous_timeline)或素材不多 → 維持單階段 SchedulingState(零回歸)。
+        if len(compressed_assets) > DIRECTOR_TWO_STAGE_MIN_ASSETS and not previous_timeline:
+            print(
+                f"🎯 [Director Agent] 素材 {len(compressed_assets)} 個 > "
+                f"{DIRECTOR_TWO_STAGE_MIN_ASSETS},啟用兩階段(Casting → Scheduling)。"
+            )
+            state = CastingState()
+        else:
+            state = SchedulingState()
         while state is not None:
             state = state.run(context)
 

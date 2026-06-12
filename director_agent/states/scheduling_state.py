@@ -8,7 +8,16 @@ from prompt_manager.task_mode import TaskMode
 class SchedulingState(BaseState):
     
     def run(self, context: dict):
-        print("\n[Agent State] 正在呼叫高強度導演模型生成藍圖...")
+        # 兩階段模式：CastingState 已選好 shortlist → 第二段只把『選中素材的完整 dossier』餵進精修，
+        # 排序 / 時間軸 / 剪輯全由本階段自由決定；單階段（無 shortlist）維持原本傳全部素材（零回歸）。
+        assets = context.get("assets", [])
+        shortlist_ids = context.get("shortlist_ids")
+        if shortlist_ids:
+            asset_index = context.get("asset_index", {})
+            assets = [asset_index[clip_id] for clip_id in shortlist_ids if clip_id in asset_index]
+            print(f"\n[Agent State] 導演精修生成藍圖（兩階段第二段；{len(assets)} 個選中素材）...")
+        else:
+            print("\n[Agent State] 正在呼叫高強度導演模型生成藍圖...")
         
         gemini = GeminiModelManager()
         
@@ -17,11 +26,11 @@ class SchedulingState(BaseState):
             mode=TaskMode.DIRECTOR_BLUEPRINT,
             manager=gemini.prompt_manager,
             user_prompt=context.get("user_prompt", ""),
-            assets=context.get("assets", []),
+            assets=assets,
             template_dna=context.get("template_dna"),
             previous_timeline=context.get("previous_timeline"),
             audio_dna=context.get("audio_dna", {}),
-            error_prompt=context.get("error_prompt", "")
+            error_prompt=context.get("error_prompt", ""),
         )
 
         # 呼叫後端：把 schema 交給 response_schema，由 Gemini 保證輸出結構合法

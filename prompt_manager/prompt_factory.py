@@ -15,6 +15,7 @@ class PromptFactory:
             TaskMode.VIDEO_EVENT_INDEX: manager.get_video_event_index_prompt,
             TaskMode.TEMPLATE_ANALYSIS: manager.get_template_analysis_prompt,       # 範本分析（含音樂偵測）
             TaskMode.DIRECTOR_BLUEPRINT: manager.get_director_blueprint_prompt,
+            TaskMode.DIRECTOR_CASTING: manager.get_director_casting_prompt,         # 兩階段第一段選角
             TaskMode.MUSIC_SEARCH_QUERY: manager.get_music_search_query_prompt,
         }
 

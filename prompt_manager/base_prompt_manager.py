@@ -50,5 +50,10 @@ class BasePromptManager(ABC):
         """導演剪輯藍圖：將素材庫編排成 Remotion 可渲染的 JSON 剪輯藍圖"""
 
     @abstractmethod
+    def get_director_casting_prompt(self, user_prompt: str, casting_cards: list, audio_dna: dict,
+                                    template_dna: dict = None) -> PromptSpec:
+        """導演選角（兩階段第一段）：從精簡卡片選材，只輸出要用的素材 id（不決定排序 / 時間軸）"""
+
+    @abstractmethod
     def get_music_search_query_prompt(self, user_prompt: str, asset_mood_summary: str = "") -> PromptSpec:
         """音樂搜尋關鍵字：把使用者需求轉成配樂搜尋詞；asset_mood_summary 提供素材整體氛圍供推測"""

@@ -238,6 +238,25 @@ class GeminiModelManager(BaseModelManager):
         self._record(response, model, TaskMode.DIRECTOR_BLUEPRINT)
         return response.text
 
+    @synchronized_inference
+    def generate_casting_plan(self, prompt: str, schema: type[BaseModel] | None = None) -> str:
+        """
+        導演選角生成（兩階段第一段）：one-shot ``generate_content`` + ``response_schema`` 結構化輸出。
+
+        對稱於 :meth:`generate_director_plan`，但走 ``DIRECTOR_CASTING`` 的 per-task 模型（預設較輕的
+        Flash）：本階段只做選材、吃精簡卡片、只輸出要用的素材 id，用不到 Pro 等級推理。``schema``
+        交給 ``response_schema`` 保證輸出為合法 ``CastingSelection``。
+        """
+        model = self._model_for(TaskMode.DIRECTOR_CASTING)
+        response = self.client.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=self._build_config(schema),
+        )
+        # 記錄 token 用量(Phase 4;與 scheduling 同階段累加)
+        self._record(response, model, TaskMode.DIRECTOR_CASTING)
+        return response.text
+
     def generate_text(self, mode: TaskMode, prompt: str, schema: type[BaseModel] | None = None) -> str:
         """
         純文字 / 結構化生成（供 music 配樂關鍵字萃取等輕量任務）：依 ``mode`` 選模型、記錄用量、回傳文字。

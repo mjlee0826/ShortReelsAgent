@@ -4,6 +4,7 @@ from config.media_processor_config import SUBJECT_CANDIDATE_TOP_N
 from prompt_manager.base_prompt_manager import BasePromptManager, PromptSpec
 from prompt_manager.schemas import (
     BasicMediaSemantics,
+    CastingSelection,
     DirectorBlueprint,
     MusicSearchQuery,
     TemplateAnalysisSemantics,
@@ -204,6 +205,59 @@ class DefaultPromptManager(BasePromptManager):
             )
 
         return PromptSpec(text=prompt, schema=DirectorBlueprint)
+
+    def get_director_casting_prompt(self, user_prompt, casting_cards, audio_dna,
+                                    template_dna=None) -> PromptSpec:
+        """導演選角（兩階段第一段）：從精簡卡片做選材，只輸出要用的素材 id 清單。"""
+        # 1. 角色與職責邊界（只做選材：挑出要用的 id，精準排序 / 時長 / 剪輯 / 混音全留給第二段）
+        instruction = (
+            "# 角色\n"
+            "你是 AI 電影導演的『選角』大腦。面對一整櫃素材，你只負責一件事：挑出『真正要用』的素材，\n"
+            "輸出它們的 id。精準的排序、時長、剪輯點、裁切、變速、字幕、混音，全部交給後續精修階段在\n"
+            "你選出的這幾支素材上自由發揮——你不需要排順序，也不需要決定時間。\n\n"
+            "# 最高指導原則\n"
+            "【User Overrides Everything】使用者指令是絕對最高準則：要求的風格 / 主題 / 節奏，必須蓋過\n"
+            "素材或音樂原本的氛圍來滿足。\n\n"
+        )
+        # 2. 選材心法（顧的是『這組素材湊不湊得出一支好片』，不是排順序）
+        instruction += (
+            "# 選材心法\n"
+            "1. 品質：優先採用 aes（美學）與 tech（技術畫質）分數高的素材；分數低的捨棄；crop 為\n"
+            "   'not_recommended' 的素材慎用（9:16 直式難裁）。\n"
+            "2. 切題：依使用者指令，對照素材的 cap / transcript_text / event_digest 判斷相關性，只選真正貼題的。\n"
+            "3. 湊得出好片：確保『選出的這組素材』撐得起一支短片——有夠強的開場素材、情緒能用 mood 鋪出\n"
+            "   起落、場景與動作（scene_tags / actions）夠多樣。這些是『選材時要顧到』的條件，不是要你排順序。\n"
+            "4. 數量適中：依【配樂 DNA】的整體長度，選出『大致夠用』的素材量——寧精勿濫，別塞太多也別太少。\n"
+            "5. 複雜影片：event_digest 列出該片內部的多個畫面 beat；只要其中有可用的高潮就選這支素材，\n"
+            "   精準切哪一段由第二段決定。\n\n"
+        )
+        # 3. 卡片欄位字典（卡片為精簡縮寫，對齊 ContextCompressor.to_casting_cards 輸出）
+        instruction += (
+            "# 素材卡片欄位說明（assets 為精簡縮寫）\n"
+            "id=素材ID（輸出 selected_ids 時務必原樣照抄，含 raw/ 或 standardized/ 前綴與 _std 後綴）/ "
+            "type=image|video / aes,tech=美學,技術畫質分 / cap=客觀描述 / mood=情緒 / scene_tags=場景 / "
+            "actions=動作 / crop=9:16可裁性 / time=拍攝時間 / geo=地點。\n"
+            "影片專屬：dur=時長(秒) / motion=動態強度 / has_speech=是否有人聲 / "
+            "transcript_text=完整逐字稿 / event_digest=片內各事件的畫面動作摘要。\n\n"
+        )
+        # 4. 範本風格參考（選填）
+        if template_dna:
+            instruction += (
+                "# 範本風格參考\n"
+                "參考範本的視覺氛圍與節奏步調來決定選材傾向；若含 music_dna，用它校準整體情緒。\n\n"
+            )
+        # 5. 注入實際資料
+        prompt = (
+            f"{instruction}"
+            "# 輸入資料\n"
+            "- 🎬 目標平台: Instagram Reels / TikTok (9:16)\n"
+            f"- 👤 使用者最新指令: {user_prompt}\n"
+            f"- 📦 素材卡片庫: {json.dumps(casting_cards, ensure_ascii=False)}\n"
+            f"- 🎵 配樂 DNA: {json.dumps(audio_dna, ensure_ascii=False)}\n"
+        )
+        if template_dna:
+            prompt += f"- 🧬 範本 DNA: {json.dumps(template_dna, ensure_ascii=False)}\n"
+        return PromptSpec(text=prompt, schema=CastingSelection)
 
     def get_music_search_query_prompt(self, user_prompt: str, asset_mood_summary: str = "") -> PromptSpec:
         """音樂搜尋關鍵字（把使用者需求轉成精準的配樂搜尋詞；未指定時依素材氛圍推測）。"""

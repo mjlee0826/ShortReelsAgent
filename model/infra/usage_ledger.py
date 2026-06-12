@@ -51,6 +51,7 @@ TASKMODE_TO_PHASE: dict[TaskMode, Phase] = {
     TaskMode.TEMPLATE_ANALYSIS: Phase.PHASE2,
     TaskMode.MUSIC_SEARCH_QUERY: Phase.PHASE3,
     TaskMode.DIRECTOR_BLUEPRINT: Phase.PHASE4,
+    TaskMode.DIRECTOR_CASTING: Phase.PHASE4,    # 兩階段第一段選角，成本同歸 Phase 4
 }
 
 

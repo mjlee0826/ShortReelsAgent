@@ -7,4 +7,5 @@ class TaskMode(Enum):
     VIDEO_EVENT_INDEX = "video_event_index"         # 複雜影片的逐時間段多模態事件 + 音訊轉錄（Gemini）
     TEMPLATE_ANALYSIS = "template_analysis"         # 範本分析：事件索引 + 音訊轉錄 + 配樂偵測（Gemini）
     DIRECTOR_BLUEPRINT = "director_blueprint"       # 導演剪輯藍圖（Remotion 可渲染 JSON）
+    DIRECTOR_CASTING = "director_casting"           # 導演選角：兩階段第一段（選材 + 排序 + beat sheet）
     MUSIC_SEARCH_QUERY = "music_search_query"       # 把使用者需求轉成配樂搜尋關鍵字

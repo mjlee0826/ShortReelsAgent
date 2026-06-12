@@ -332,6 +332,51 @@ class DirectorBlueprint(BaseModel):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# ⑤-0 導演選角（兩階段 Plan-then-Fill 的第一段：選材，只輸出要用的素材 id）
+# ──────────────────────────────────────────────────────────────────────────────
+class CastingCard(BaseModel):
+    """
+    第一段 Casting 看的「精簡素材卡片」（由 ``ContextCompressor`` 從完整 dossier 投影而來）。
+
+    刻意只帶支撐『選材 / 排序 / 粗略時長』的欄位：逐句時間戳 chunks、完整事件索引、bbox、
+    主體候選、攝影評論等「精修才需要」的重料一律不入卡片（留待第二段按 id 取完整 dossier），
+    這正是兩階段縮小 context 的關鍵。影片專屬欄位以 ``Optional`` 表示，圖片卡片經
+    ``model_dump(exclude_none=True)`` 後自動精簡。本模型是『注入 prompt 的資料結構』，
+    非 Gemini ``response_schema``。
+    """
+    id: str = Field(default="", description="素材 ID（即 clip_id；選回時須原樣照抄）")
+    type: str = Field(default="", description="image / video")
+    aes: float = Field(default=0.0, description="美學分（選材優先取高分）")
+    tech: Optional[float] = Field(default=None, description="技術畫質分")
+    cap: str = Field(default="", description="客觀內容描述（全文）")
+    mood: str = Field(default="", description="情緒")
+    scene_tags: list[str] = Field(default_factory=list, description="場景標籤")
+    actions: list[str] = Field(default_factory=list, description="動作標籤")
+    crop: str = Field(default="full", description="9:16 可裁性")
+    time: str = Field(default="", description="拍攝時間")
+    geo: str = Field(default="", description="拍攝地點 GPS")
+    # 影片專屬（圖片為 None，dump 時排除）
+    dur: Optional[float] = Field(default=None, description="影片時長（秒）")
+    motion: Optional[str] = Field(default=None, description="動態強度")
+    has_speech: Optional[bool] = Field(default=None, description="是否有人聲")
+    transcript_text: Optional[str] = Field(default=None, description="完整逐字稿（無時間戳；帶時間戳 chunks 留第二段）")
+    event_digest: Optional[list[str]] = Field(default=None, description="複雜影片各事件的畫面動作摘要（visual_layer，無時間戳）")
+
+
+class CastingSelection(BaseModel):
+    """
+    導演選角結果（第一段 Casting 的結構化輸出）：從素材庫挑出『要用的素材 id』。
+
+    ``rationale`` 刻意置首（同 :class:`Clip` 的手法）：藉結構化輸出的隱含 property ordering 逼模型
+    『先想清楚故事走向、情緒弧線與所需素材，再列出 id』，把 think-first 轉成選材品質。
+    刻意只輸出 id：精準排序 / 時長 / 裁切 / 混音全部交給第二段在『選中的少數素材』上自由發揮，
+    不讓較弱的選角模型框死較強的精修模型。
+    """
+    rationale: str = Field(default="", description="整體選材思路：先想清楚故事走向、情緒弧線與所需素材，再列出 id")
+    selected_ids: list[str] = Field(default_factory=list, description="選用的素材 id 清單（一字不差照抄素材庫 id，含 raw/ 或 standardized/ 前綴與 _std 後綴；順序不必精確，精準排序由第二段決定）")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # 文字化 helper：把 schema 序列化成文字，供無 structured-output 的模型（Qwen）使用
 # ──────────────────────────────────────────────────────────────────────────────
 # 基本型別 → 中文型別名（供文字化；禁 magic string 散落）

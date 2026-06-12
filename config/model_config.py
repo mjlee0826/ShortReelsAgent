@@ -122,6 +122,8 @@ GEMINI_TASK_MODEL: dict[str, str] = {
     "music_search_query":  os.getenv("GEMINI_MODEL_MUSIC_QUERY", "gemini-2.5-flash"),
     # 4 導演藍圖(純文字推理;結構化 + agentic 推理) → 3.1 Pro(實測 3.5 Flash 未更好)
     "director_blueprint":  os.getenv("GEMINI_MODEL_DIRECTOR", "gemini-3.1-pro-preview"),
+    # 4-0 導演選角(兩階段第一段:選材/排序,任務較輕、吃精簡卡片) → 2.5 Flash(足夠且省)
+    "director_casting":    os.getenv("GEMINI_MODEL_CASTING", "gemini-2.5-flash"),
 }
 
 # ── Qwen3-VL ─────────────────────────────────────────────────────────────────
