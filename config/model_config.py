@@ -17,6 +17,15 @@ from config.media_processor_config import (
 GEMINI_POLL_MAX_COUNT   = 150
 GEMINI_POLL_INTERVAL_SEC = 2
 
+# ── Gemini inline vs File API 分流 ────────────────────────────────────────────
+# Gemini 規定:單次請求總大小 < 100MB 才能用 inline data 直接帶入 contents,
+# 否則必須改走 File API（upload→輪詢→delete）。門檻取 90MB（非 100MB），預留
+# ~10MB 給 prompt 文字與序列化 overhead,避免逼近上限被拒。圖片永遠 inline、
+# 影片則依檔案大小於 GeminiModelManager 內分流。
+GEMINI_INLINE_MAX_BYTES = 90 * 1024 * 1024
+# 影片無法由副檔名推斷 MIME 時的後備值（Gemini inline part 需明確 mime_type）
+GEMINI_VIDEO_DEFAULT_MIME = "video/mp4"
+
 # ── Whisper 幻覺防跳針 ────────────────────────────────────────────────────────
 # 連續「停滯型重複」達到此次數，判定為 attention 鎖死並截斷後續輸出
 WHISPER_HALLUCINATION_THRESHOLD = 3
@@ -26,6 +35,8 @@ __all__ = [
     # re-exports
     "GEMINI_POLL_MAX_COUNT",
     "GEMINI_POLL_INTERVAL_SEC",
+    "GEMINI_INLINE_MAX_BYTES",
+    "GEMINI_VIDEO_DEFAULT_MIME",
     "WHISPER_HALLUCINATION_THRESHOLD",
     "MUSIQ_MAX_SHORT_SIDE",
     # Gemini
