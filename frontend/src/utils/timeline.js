@@ -10,6 +10,9 @@
 const TIME_DECIMALS = 3;
 // 片段最短顯示秒數：裁切時的下限，避免出現 0 長度片段
 export const MIN_CLIP_DURATION = 0.1;
+// 影片規格的安全預設：藍圖為空 / 算出 0 幀時的回退值，避免 Remotion 底層崩潰
+const DEFAULT_FPS = 30;
+const FALLBACK_DURATION_FRAMES = 150;
 
 /**
  * 將秒數修整到固定小數位，消除浮點累積誤差。
@@ -19,6 +22,29 @@ export const MIN_CLIP_DURATION = 0.1;
 function roundTime(seconds) {
   const factor = 10 ** TIME_DECIMALS;
   return Math.round(seconds * factor) / factor;
+}
+
+/**
+ * 影片整體規格（總幀數 / 幀率）的單一真實來源（Single Source of Truth）。
+ * 即時預覽播放器與後端 SSR 算圖入口都呼叫此函式，避免兩邊各自計算而發散
+ * （曾因 SSR 端硬編 150 幀 / 30fps，導致下載成品被鎖死在 5 秒並截斷畫面）。
+ * @param {object|null} blueprint 影片藍圖
+ * @returns {{durationInFrames:number, fps:number}} Remotion Composition 規格
+ */
+export function computeVideoMetadata(blueprint) {
+  const timeline = blueprint?.timeline;
+  // 藍圖尚未生成或無片段：回退安全預設，讓 Player / 算圖都不至於拿到 0 幀
+  if (!timeline || timeline.length === 0) {
+    return { durationInFrames: FALLBACK_DURATION_FRAMES, fps: DEFAULT_FPS };
+  }
+  const fps = blueprint.global_settings?.fps || DEFAULT_FPS;
+  // 總長以最後一段的結束秒數為準（時間軸已 repack 為首尾相接、無空隙）
+  const lastClip = timeline[timeline.length - 1];
+  const frames = Math.round((lastClip.end_at ?? 0) * fps);
+  return {
+    durationInFrames: frames > 0 ? frames : FALLBACK_DURATION_FRAMES,
+    fps,
+  };
 }
 
 /**

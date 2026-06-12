@@ -3,6 +3,7 @@ import { Player } from '@remotion/player';
 import MainTimeline from './MainTimeline';
 import useBlueprintStore from '../../store/useBlueprintStore';
 import { apiService } from '../../services/api.service';
+import { computeVideoMetadata } from '../../utils/timeline';
 // 【新增】引入科技感圖示 (包含 FaRocket 增加動態感)
 import { FaSpinner, FaRocket } from 'react-icons/fa';
 
@@ -19,15 +20,10 @@ export default function VideoPlayer() {
   // 1. 判斷藍圖是否為空 (嚴格條件)
   const isBlueprintEmpty = !blueprint || !blueprint.timeline || blueprint.timeline.length === 0;
 
-  // 2. 【修正】單純計算總幀數與 FPS，不可在這裡回傳 HTML/JSX！
+  // 2. 計算總幀數與 FPS：與 SSR 算圖入口共用同一 computeVideoMetadata，確保預覽與下載成品一致
   const { totalFrames, targetFps } = useMemo(() => {
-    if (isBlueprintEmpty) {
-      return { totalFrames: 150, targetFps: 30 }; // 給予安全預設值，避免底層崩潰
-    }
-    const fps = blueprint.global_settings?.fps || 30;
-    const lastClip = blueprint.timeline[blueprint.timeline.length - 1];
-    const frames = Math.round(lastClip.end_at * fps);
-    return { totalFrames: frames > 0 ? frames : 150, targetFps: fps };
+    const { durationInFrames, fps } = computeVideoMetadata(isBlueprintEmpty ? null : blueprint);
+    return { totalFrames: durationInFrames, targetFps: fps };
   }, [blueprint, isBlueprintEmpty]);
 
   // 穩定 inputProps 參考：僅在 blueprint / assetsRootUrl 真正變動時更新，避免 Remotion 無謂重繪
