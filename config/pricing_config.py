@@ -49,8 +49,12 @@ MODEL_PRICING: dict[str, ModelPricing] = {
     # input/output 已查證；音訊是否另計、快取折扣 ⚠️ 待確認(先視同文字、無快取)
     "gemini-3.1-flash-lite-preview": ModelPricing(input_text=0.25, output=1.50),
 
-    # 4 導演藍圖（純文字推理；premium Flash）
+    # 曾 A/B 的 premium Flash（純文字推理）——目前未採用（實測未優於 3.1 Pro）
     "gemini-3.5-flash": ModelPricing(input_text=1.50, output=9.00, cached_input=0.15),
+
+    # 4 導演藍圖（現行）。⚠️ >200k token 有階梯價（$4/$18），本表只記基礎級（$2/$12），
+    #    大 prompt 會低估；階梯價屬 Level 3，未建模（見 docs §3.7）。
+    "gemini-3.1-pro-preview": ModelPricing(input_text=2.00, output=12.00),
 
     # fallback（舊 default；2.5 Flash 音訊歷史上另計，保守先視同文字 ⚠️ 待確認）
     "gemini-2.5-flash": ModelPricing(input_text=0.30, output=2.50),

@@ -110,16 +110,18 @@ GEMINI_STRONG_MODEL  = 'gemini-3.1-pro-preview'
 GEMINI_FALLBACK_MODEL = GEMINI_DEFAULT_MODEL  # 查無對應 task 時的後備模型
 
 GEMINI_TASK_MODEL: dict[str, str] = {
-    # 1b 深度圖片分析(靜態圖,較易) → 最便宜的 Lite
-    "deep_image_analysis": os.getenv("GEMINI_MODEL_DEEP_IMAGE", "gemini-2.5-flash-lite"),
-    # 1c 影片事件索引(影音 + 時間定位 + 轉錄;最大成本中心) → 3.1 Flash-Lite(更便宜 + 更快 + ASR 更佳)
-    "video_event_index":   os.getenv("GEMINI_MODEL_VIDEO_INDEX", "gemini-3.1-flash-lite-preview"),
+    # 註:曾 A/B 過 3.x 新型號(1c/2 試 3.1 Flash-Lite、4 試 3.5 Flash),實測品質**未優於**原型號,
+    # 故 2026-06-12 全數改回 2.5 Flash / 3.1 Pro;env 覆寫保留供日後再試,勿再貿然換回 3.x。
+    # 1b 深度圖片分析
+    "deep_image_analysis": os.getenv("GEMINI_MODEL_DEEP_IMAGE", "gemini-2.5-flash"),
+    # 1c 影片事件索引(影音 + 時間定位 + 轉錄)
+    "video_event_index":   os.getenv("GEMINI_MODEL_VIDEO_INDEX", "gemini-2.5-flash"),
     # 2 範本分析(同 1c 再加配樂偵測)
-    "template_analysis":   os.getenv("GEMINI_MODEL_TEMPLATE", "gemini-3.1-flash-lite-preview"),
-    # 3 配樂關鍵字(任務極簡) → 最便宜的 Lite
-    "music_search_query":  os.getenv("GEMINI_MODEL_MUSIC_QUERY", "gemini-2.5-flash-lite"),
-    # 4 導演藍圖(純文字推理;結構化 + agentic) → 3.5 Flash(取代延遲高的 3.1 Pro)
-    "director_blueprint":  os.getenv("GEMINI_MODEL_DIRECTOR", "gemini-3.5-flash"),
+    "template_analysis":   os.getenv("GEMINI_MODEL_TEMPLATE", "gemini-2.5-flash"),
+    # 3 配樂關鍵字(任務極簡)
+    "music_search_query":  os.getenv("GEMINI_MODEL_MUSIC_QUERY", "gemini-2.5-flash"),
+    # 4 導演藍圖(純文字推理;結構化 + agentic 推理) → 3.1 Pro(實測 3.5 Flash 未更好)
+    "director_blueprint":  os.getenv("GEMINI_MODEL_DIRECTOR", "gemini-3.1-pro-preview"),
 }
 
 # ── Qwen3-VL ─────────────────────────────────────────────────────────────────

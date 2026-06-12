@@ -263,6 +263,9 @@ def _record_usage(self, response, model: str) -> None:
 
 ### 4.1 目標模型對照表
 
+> ⚠️ **2026-06-12 更新**：下表的 3.x 新型號經實測**品質未優於原型號**，已全數改回
+> （1b/1c/2/3 → `gemini-2.5-flash`、4 → `gemini-3.1-pro-preview`）；保留下表為當初選型分析記錄。
+
 | 任務 | TaskMode | 現況 | **目標模型** | 理由 |
 |---|---|---|---|---|
 | 1a SIMPLE | `BASIC_MEDIA_ANALYSIS` | 本地 Qwen | 本地 Qwen（不動，$0） | — |
