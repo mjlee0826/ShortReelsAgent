@@ -10,6 +10,7 @@ ResourceExecutor:四種資源 Worker Pool 的薄封裝 (Adapter Pattern)。
 """
 from __future__ import annotations
 
+import contextvars
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Callable
 
@@ -37,8 +38,13 @@ class ResourceExecutor:
         )
 
     def submit(self, fn: Callable, *args, **kwargs) -> Future:
-        """提交一個工作到本資源池,回傳 Future。"""
-        return self._pool.submit(fn, *args, **kwargs)
+        """提交一個工作到本資源池,回傳 Future。
+
+        以 ``copy_context`` 捕捉提交當下父緒的 contextvars(含成本帳本),讓 worker 緒讀得到
+        同一本帳;每次提交各自複製,重用的 worker 緒之間不互相污染(成本歸戶的跨緒關鍵)。
+        """
+        ctx = contextvars.copy_context()
+        return self._pool.submit(ctx.run, fn, *args, **kwargs)
 
     def shutdown(self, wait: bool = True) -> None:
         """關閉底層執行緒池,釋放執行緒資源。"""

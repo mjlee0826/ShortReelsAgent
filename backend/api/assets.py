@@ -143,12 +143,14 @@ async def reanalyze_assets(
             # 落地進行中 job_id:素材頁重整後查 phase1-progress 即可重新訂閱 WS 接回即時進度
             publish_active_job(project_dir, job_id_box["id"])
             strategies = asset_repository.get_asset_strategies(user_id, project_name)
+            cost_sink: dict = {}  # 收 Phase 1 分階段成本,併入 job 結果供前端 / GET /api/jobs 取得
             success = director_service.run_phase1(
                 project_name, user_id=user_id, tracker=tracker,
                 asset_filenames=asset_ids, asset_strategies=strategies, require_success=False,
+                cost_sink=cost_sink,
             )
             asset_repository.clear_dirty(user_id, project_name, asset_ids, used_strategies=strategies)
-            return {"success_count": len(success)}
+            return {"success_count": len(success), "costs": cost_sink}
         finally:
             # 先清 active job_id 再釋放鎖;即使清除的原子寫失敗也務必釋放鎖,避免該專案永久卡 409
             try:
@@ -205,12 +207,14 @@ async def generate_assets(
             publish_active_job(project_dir, job_id_box["id"])
             pending = asset_repository.select_pending(user_id, project_name)
             strategies = asset_repository.get_asset_strategies(user_id, project_name)
+            cost_sink: dict = {}  # 收 Phase 1 分階段成本,併入 job 結果供前端 / GET /api/jobs 取得
             success = director_service.run_phase1(
                 project_name, user_id=user_id, tracker=tracker,
                 asset_filenames=pending, asset_strategies=strategies, require_success=False,
+                cost_sink=cost_sink,
             )
             asset_repository.clear_dirty(user_id, project_name, pending, used_strategies=strategies)
-            return {"processed_count": len(pending), "success_count": len(success)}
+            return {"processed_count": len(pending), "success_count": len(success), "costs": cost_sink}
         finally:
             # 先清 active job_id 再釋放鎖;即使清除的原子寫失敗也務必釋放鎖,避免該專案永久卡 409
             try:

@@ -82,11 +82,9 @@ class MusicDirector:
         )
 
         try:
-            response = gemini.client.models.generate_content(
-                model=gemini.default_model,
-                contents=analysis_prompt
-            )
-            match = re.search(r'\{.*\}', response.text, re.DOTALL)
+            # 走 manager 的 generate_text(統一記錄成本;不加 synchronized,維持與 template 分支並行)
+            raw_text = gemini.generate_text(TaskMode.MUSIC_SEARCH_QUERY, analysis_prompt)
+            match = re.search(r'\{.*\}', raw_text, re.DOTALL)
             if match:
                 data = json.loads(match.group(0))
                 query = data.get("search_query", "").strip()

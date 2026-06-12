@@ -1,6 +1,7 @@
 """藍圖準備階段的 fork-join 協調器(縮小版 HybridScheduler)。"""
 from __future__ import annotations
 
+import contextvars
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from media_processor.pipeline.progress import ProgressTracker
@@ -33,8 +34,10 @@ class BlueprintPreparer:
             max_workers=len(self._producers),
             thread_name_prefix=_PREP_THREAD_PREFIX,
         ) as pool:
+            # copy_context:把 run_workflow 的成本帳本帶進每個 producer 緒,
+            # 否則 Phase 2/3 的 Gemini 呼叫在 producer 緒上讀不到帳本 → 金額記不到
             futures = {
-                pool.submit(self._safe_produce, p, ctx, tracker): p
+                pool.submit(contextvars.copy_context().run, self._safe_produce, p, ctx, tracker): p
                 for p in self._producers
             }
             return {futures[f].name: f.result() for f in as_completed(futures)}

@@ -42,6 +42,8 @@ __all__ = [
     # Gemini
     "GEMINI_DEFAULT_MODEL",
     "GEMINI_STRONG_MODEL",
+    "GEMINI_TASK_MODEL",
+    "GEMINI_FALLBACK_MODEL",
     # Qwen
     "QWEN_MODEL_ID",
     "QWEN_PROCESSOR_ID",
@@ -96,8 +98,29 @@ __all__ = [
 MODEL_WEIGHTS_DIR = os.environ.get("MODEL_WEIGHTS_DIR", "/data1/cache/mjlee/models")
 
 # ── Gemini ────────────────────────────────────────────────────────────────────
+# 保留作後備:GEMINI_DEFAULT_MODEL 即 GEMINI_FALLBACK_MODEL;舊 STRONG 已被 per-task 表取代。
 GEMINI_DEFAULT_MODEL = 'gemini-2.5-flash'
 GEMINI_STRONG_MODEL  = 'gemini-3.1-pro-preview'
+
+# ── Gemini per-task 模型對照 (Configuration Object) ───────────────────────────
+# 依任務難度分別指定模型(取代「default / strong 兩槽」)。鍵為 TaskMode.value(刻意用字串
+# 字面值,避免 config → prompt_manager 反向 import;呼叫端以 mode.value 查表)。每個值可由
+# 環境變數覆寫,方便不改碼做 A/B(換型號 / 切回舊模型)。
+# ⚠️ preview id 與單價見 docs/cost_timing_model_design.md;單價見 config/pricing_config.py。
+GEMINI_FALLBACK_MODEL = GEMINI_DEFAULT_MODEL  # 查無對應 task 時的後備模型
+
+GEMINI_TASK_MODEL: dict[str, str] = {
+    # 1b 深度圖片分析(靜態圖,較易) → 最便宜的 Lite
+    "deep_image_analysis": os.getenv("GEMINI_MODEL_DEEP_IMAGE", "gemini-2.5-flash-lite"),
+    # 1c 影片事件索引(影音 + 時間定位 + 轉錄;最大成本中心) → 3.1 Flash-Lite(更便宜 + 更快 + ASR 更佳)
+    "video_event_index":   os.getenv("GEMINI_MODEL_VIDEO_INDEX", "gemini-3.1-flash-lite-preview"),
+    # 2 範本分析(同 1c 再加配樂偵測)
+    "template_analysis":   os.getenv("GEMINI_MODEL_TEMPLATE", "gemini-3.1-flash-lite-preview"),
+    # 3 配樂關鍵字(任務極簡) → 最便宜的 Lite
+    "music_search_query":  os.getenv("GEMINI_MODEL_MUSIC_QUERY", "gemini-2.5-flash-lite"),
+    # 4 導演藍圖(純文字推理;結構化 + agentic) → 3.5 Flash(取代延遲高的 3.1 Pro)
+    "director_blueprint":  os.getenv("GEMINI_MODEL_DIRECTOR", "gemini-3.5-flash"),
+}
 
 # ── Qwen3-VL ─────────────────────────────────────────────────────────────────
 # 改用 4B-Instruct：semantic_stage 的 Qwen 只負責 SIMPLE / 全局分析（COMPLEX 與時間碼走 Gemini），

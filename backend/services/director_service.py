@@ -20,6 +20,7 @@ from director_agent.director_facade import DirectorFacade
 from backend.services.asset_repository import AssetRepository
 from backend.services.stores.project_meta_store import project_meta_store
 from backend.services.stores.snapshot_store import snapshot_store
+from model.infra.usage_ledger import cost_session
 from backend.utils.asset_discovery import (
     PHASE1_METADATA_FILENAME,
     PHASE1_STATUS_FILENAME,
@@ -156,6 +157,30 @@ class DirectorService:
         )
 
     def run_phase1(self, folder_name: str, user_id: str = None,
+                   tracker: ProgressTracker = None,
+                   asset_filenames: list[str] = None,
+                   asset_strategies: dict = None,
+                   require_success: bool = True,
+                   cost_sink: dict = None) -> list[dict]:
+        """
+        Phase 1 公開入口:開 job 級成本帳本後委派 ``_run_phase1_inner``,收尾輸出分階段花費。
+
+        ``cost_sink`` 為選填 out-param(鏡像 ``status_sink`` 慣例):非 None 時把成本 summary 寫入,
+        供呼叫端(如素材頁 job)併入回傳結果;一律 print 一行 Phase 1 成本。其餘參數原樣透傳。
+        pipeline worker 緒經 copy_context 共用此帳,Gemini 呼叫(1b/1c)自動歸入 Phase 1。
+        """
+        with cost_session() as ledger:
+            result = self._run_phase1_inner(
+                folder_name, user_id=user_id, tracker=tracker,
+                asset_filenames=asset_filenames, asset_strategies=asset_strategies,
+                require_success=require_success,
+            )
+            print(ledger.format_summary("Phase 1"))
+            if cost_sink is not None:
+                cost_sink.update(ledger.summary())
+            return result
+
+    def _run_phase1_inner(self, folder_name: str, user_id: str = None,
                    tracker: ProgressTracker = None,
                    asset_filenames: list[str] = None,
                    asset_strategies: dict = None,
@@ -345,6 +370,32 @@ class DirectorService:
                     previous_bgm_track: dict = None,
                     tracker: ProgressTracker | None = None):
         """
+        完整生成(Phase 2–4)公開入口:開 job 級成本帳本 → 委派 ``_run_workflow_inner`` → 併入分階段成本。
+
+        在 inner 回傳的 {blueprint, audio_dna, assets_root_url, timings} 之上再加 ``costs``
+        (逐 Phase 推估花費),一併經 async job 的 result 上 WS / REST 供前端取得。
+        """
+        with cost_session() as ledger:
+            result = self._run_workflow_inner(
+                prompt, folder_name, user_id=user_id, template=template,
+                subtitles=subtitles, filters=filters, old_timeline=old_timeline,
+                music_strategy=music_strategy, user_music_file=user_music_file,
+                regenerate_music=regenerate_music, previous_bgm_track=previous_bgm_track,
+                tracker=tracker,
+            )
+            print(ledger.format_summary("Phase 2-4"))
+            result["costs"] = ledger.summary()
+            return result
+
+    def _run_workflow_inner(self, prompt: str, folder_name: str, user_id: str = None,
+                    template: str = None,
+                    subtitles: bool = True, filters: bool = True, old_timeline: dict = None,
+                    music_strategy: str = "search_copyright",
+                    user_music_file: str = None,
+                    regenerate_music: bool = True,
+                    previous_bgm_track: dict = None,
+                    tracker: ProgressTracker | None = None):
+        """
         執行完整生成工作流（Phase 2–4）：讀取素材頁已落地的 Phase 1 感知快取,以 fork-join 並行
         產出 Template DNA ∥ Music DNA,再呼叫導演大腦產生藍圖。感知分析（Phase 1）已改由素材頁
         專屬擁有,本方法不再代跑。tracker 非 None 時把藍圖準備的 stage 進度帶上前端(見 docs §10)。
@@ -374,6 +425,9 @@ class DirectorService:
         user_music_file_path = (
             os.path.join(target_dir, RAW_SUBDIR, user_music_file) if user_music_file else None
         )
+
+        # 量測 Phase 2+3+4 整體耗時(gen_start → generate_timeline 結束);2、3 並行,故為真實經過時間
+        gen_start = time.perf_counter()
 
         # --- 微調模式:跳過耗時感知與配樂解析,直接載入 Phase 1–3 本地快取 ---
         if is_refinement and os.path.exists(phase1_dump_path):
@@ -427,6 +481,7 @@ class DirectorService:
 
         # --- 5. Phase 4: 導演大腦(純 scheduling + reflection;配樂已於上游並行解析後傳入) ---
         print("[Service] 正在呼叫導演大腦生成藍圖...")
+        p4_start = time.perf_counter()
         final_blueprint, _ = self.director.generate_timeline(
             user_prompt=enhanced_prompt,
             raw_assets=raw_assets_metadata,
@@ -436,6 +491,16 @@ class DirectorService:
             regenerate_music=regenerate_music,
             previous_bgm_track=previous_bgm_track,
         )
+        # Phase 4 生成腳本耗時、與 Phase 2+3+4 整體耗時(後者含上游 prepare / 快取載入)
+        _now = time.perf_counter()
+        phase4_sec = _now - p4_start
+        phase234_sec = _now - gen_start
+        timings = {
+            "phase4_sec": round(phase4_sec, 2),
+            "phase234_sec": round(phase234_sec, 2),
+            "prep_sec": round(phase234_sec - phase4_sec, 2),  # Phase 2∥3 並行段(=234−4)
+        }
+        print(f"[Service] ⏱ Phase 4 生成腳本: {phase4_sec:.1f}s | Phase 2+3+4: {phase234_sec:.1f}s")
 
         # --- 6. 全域快取池：把實體配樂檔轉成獨立 cache URL，套進 bgm_track ---
         audio_url = self._audio_cache_url(audio_dna)
@@ -454,6 +519,7 @@ class DirectorService:
             "blueprint": final_blueprint,
             "audio_dna": audio_dna,
             "assets_root_url": self._assets_root_url(folder_name, user_id),
+            "timings": timings,
         }
 
     def load_blueprint(self, folder_name: str, user_id: str = None) -> dict:
