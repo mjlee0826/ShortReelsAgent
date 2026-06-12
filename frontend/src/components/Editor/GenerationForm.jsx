@@ -28,7 +28,7 @@ const PROMPT_ROWS = 5;
 export default function GenerationForm({ submitLabel = '🎬 開始生成影片', showProject = true, onSubmitted }) {
   const {
     userPrompt, templateSource,
-    enableSubtitles, enableFilters,
+    enableSubtitles, enableFilters, enableMotion,
     musicStrategy, uploadedMusicFile, isUploadingMusic,
     isProcessing, generationStage, updateForm, submitPrompt, uploadMusic, clearUploadedMusic,
   } = useBlueprintStore();
@@ -139,7 +139,7 @@ export default function GenerationForm({ submitLabel = '🎬 開始生成影片'
       </div>
 
       {/* 5. 功能勾選 */}
-      <div className="flex gap-6 bg-surface-2/50 p-3 rounded-xl border border-border">
+      <div className="flex flex-wrap gap-x-6 gap-y-2 bg-surface-2/50 p-3 rounded-xl border border-border">
         <button
           type="button"
           onClick={() => updateForm('enableSubtitles', !enableSubtitles)}
@@ -153,6 +153,13 @@ export default function GenerationForm({ submitLabel = '🎬 開始生成影片'
           className="flex items-center gap-2 text-sm font-medium text-ink-muted hover:text-ink transition-colors"
         >
           {enableFilters ? <FaCheckSquare className="text-accent text-lg" /> : <FaRegSquare className="text-lg" />} 啟用濾鏡
+        </button>
+        <button
+          type="button"
+          onClick={() => updateForm('enableMotion', !enableMotion)}
+          className="flex items-center gap-2 text-sm font-medium text-ink-muted hover:text-ink transition-colors"
+        >
+          {enableMotion ? <FaCheckSquare className="text-accent text-lg" /> : <FaRegSquare className="text-lg" />} 啟用自動運鏡
         </button>
       </div>
 

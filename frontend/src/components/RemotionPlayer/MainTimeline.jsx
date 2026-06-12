@@ -32,6 +32,14 @@ export default function MainTimeline({ blueprint, assetsRootUrl }) {
     return `${assetsRootUrl}${trackId.split('/').pop()}`;
   };
 
+  // 【自動運鏡】總開關（舊藍圖無此欄位 → 視為關閉，不改變既有專案行為）+ 節拍時間映射（一次算好）。
+  // 音檔 beat 秒 → 影片時間軸秒：影片時間 = bgm 起播秒 +（beat 秒 − 擷取起點秒）。
+  const autoMotion = blueprint.global_settings?.auto_motion ?? false;
+  const bgm = blueprint.bgm_track;
+  const beatVideoTimes = (autoMotion && Array.isArray(bgm?.beats))
+    ? bgm.beats.map((t) => (bgm.start_at || 0) + (t - (bgm.source_start || 0)))
+    : [];
+
   return (
     <AbsoluteFill style={{ backgroundColor: 'black' }}>
       
@@ -53,6 +61,11 @@ export default function MainTimeline({ blueprint, assetsRootUrl }) {
         const toFrame = Math.round(clip.end_at * fps);
         const durationInFrames = toFrame - fromFrame;
 
+        // 落在此片段內的重拍 → 換算成相對片段起點的幀，供卡點 punch（無節拍則為空陣列、自動退化）
+        const beatsInClipFrames = beatVideoTimes
+          .filter((vt) => vt >= clip.start_at && vt < clip.end_at)
+          .map((vt) => Math.round((vt - clip.start_at) * fps));
+
         const nextClip = index < blueprint.timeline.length - 1 ? blueprint.timeline[index + 1] : null;
         // 只在相鄰片段（間距小於門檻）且下一段有轉場時才延伸，讓交叉淡入有重疊；非相鄰不延伸以免殘影
         const isAdjacent = nextClip && Math.abs((nextClip.start_at ?? 0) - (clip.end_at ?? 0)) < ADJACENCY_THRESHOLD_SECONDS;
@@ -63,7 +76,14 @@ export default function MainTimeline({ blueprint, assetsRootUrl }) {
 
         return (
           <Sequence key={`${clip.clip_id}-${index}`} from={fromFrame} durationInFrames={renderDuration}>
-            <ClipComponent clipData={clip} assetsRootUrl={assetsRootUrl} />
+            <ClipComponent
+              clipData={clip}
+              assetsRootUrl={assetsRootUrl}
+              autoMotion={autoMotion}
+              clipIndex={index}
+              beatsInClipFrames={beatsInClipFrames}
+              durationInFrames={durationInFrames}
+            />
             
             {clip.overlay_text && (
               <AbsoluteFill className="flex items-center justify-center pointer-events-none z-50">

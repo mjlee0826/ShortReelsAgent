@@ -318,6 +318,7 @@ class Clip(BaseModel):
     scale: float = Field(default=1.0, description="縮放比例（1.0 不縮放、1.2 放大20%）")
     filter: ClipFilter = Field(default=ClipFilter.NONE, description="CSS 濾鏡")
     transition_in: TransitionType = Field(default=TransitionType.NONE, description="進場轉場")
+    motion: str = Field(default="auto", description="自動運鏡模式；請一律保持 'auto'，實際運鏡由前端依素材與配樂節拍自動套用（前端可選 auto/none/push_in/pull_out/pan/punch）")
     clip_volume: float = Field(default=1.0, description="原音音量（0.0 靜音、1.0 最大）")
     bgm_volume: float = Field(default=1.0, description="播到此片段時全局 BGM 的動態音量權重（Audio Ducking）")
     overlay_text: str = Field(default="", description="畫面上要疊加的字幕 / 花字；無則留空")

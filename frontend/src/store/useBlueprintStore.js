@@ -71,6 +71,8 @@ const useBlueprintStore = create((set, get) => ({
   templateSource: '',
   enableSubtitles: true,
   enableFilters: true,
+  // 是否啟用自動運鏡（Ken Burns + 卡點）：送 enable_motion，後端寫進 global_settings.auto_motion
+  enableMotion: true,
   musicStrategy: 'search_copyright',
 
   // --- 音訊上傳狀態 ---
@@ -392,6 +394,7 @@ const useBlueprintStore = create((set, get) => ({
         template_source: state.templateSource || null,
         enable_subtitles: state.enableSubtitles,
         enable_filters: state.enableFilters,
+        enable_motion: state.enableMotion,
         previous_timeline: isRefinement && state.blueprint ? state.blueprint : null,
         music_strategy: state.musicStrategy,
         user_music_file: state.uploadedMusicFile || null,

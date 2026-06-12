@@ -19,6 +19,16 @@ const TRANSITION_OPTIONS = [
   { value: 'fade', label: '淡入' },
   { value: 'slide', label: '滑入' },
 ];
+// 運鏡選項（對應 utils/motion.js 的 preset；auto＝交給系統依素材 / 節拍自動決定）
+// 僅在「啟用自動運鏡」總開關開啟時生效（關閉時整支無運鏡）
+const MOTION_OPTIONS = [
+  { value: 'auto', label: '自動' },
+  { value: 'none', label: '無' },
+  { value: 'push_in', label: '推近' },
+  { value: 'pull_out', label: '拉遠' },
+  { value: 'pan', label: '平移' },
+  { value: 'punch', label: '卡點' },
+];
 
 // 控制項數值範圍（具名常數，禁 magic number）
 const SCALE_MIN = 1.0;
@@ -116,6 +126,7 @@ export default function ClipInspector() {
         <ReadonlyRow label="定位" value={clip.object_position || '50% 50%'} locked />
         <SelectRow label="濾鏡" value={clip.filter || 'none'} options={FILTER_OPTIONS} onChange={(v) => set('filter', v)} />
         <SelectRow label="轉場" value={clip.transition_in || 'none'} options={TRANSITION_OPTIONS} onChange={(v) => set('transition_in', v)} />
+        <SelectRow label="運鏡" value={clip.motion || 'auto'} options={MOTION_OPTIONS} onChange={(v) => set('motion', v)} />
       </InspectorSection>
 
       {/* 字幕 */}

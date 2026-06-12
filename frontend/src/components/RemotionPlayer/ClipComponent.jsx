@@ -1,8 +1,16 @@
 import React from 'react';
 import { Video, OffthreadVideo, Img, useVideoConfig, useCurrentFrame, interpolate, getRemotionEnvironment } from 'remotion';
 import { TRANSITION_FRAMES } from './constants';
+import { resolveClipMotion, computeMotionStyle } from '../../utils/motion';
 
-export default function ClipComponent({ clipData, assetsRootUrl }) {
+export default function ClipComponent({
+  clipData,
+  assetsRootUrl,
+  autoMotion = false,        // 全域自動運鏡開關（來自 blueprint.global_settings.auto_motion）
+  clipIndex = 0,             // 片段索引：auto 模式下用於輪替不同向運鏡（避免幻燈片感）
+  beatsInClipFrames = [],    // 落在此片段內的重拍幀（相對片段起點），驅動卡點 punch
+  durationInFrames = 0,      // 片段顯示總幀數：決定 base 運鏡進度
+}) {
   const { fps } = useVideoConfig();
   const frame = useCurrentFrame();
 
@@ -30,12 +38,28 @@ export default function ClipComponent({ clipData, assetsRootUrl }) {
   };
   const cssFilter = FILTER_MAP[clipData.filter] ?? 'none';
 
-  // 基礎樣式 (包含變焦 scale 與濾鏡)
+  // 【自動運鏡】開啟時依 preset + 節拍算逐幀 transform（縮放支點＝主體定位，故推近往主體靠）；
+  // 關閉時退回原本的靜態縮放，行為與改動前完全一致（純回歸）。
+  const objectPosition = clipData.object_position || '50% 50%';
+  const baseScale = clipData.scale || 1.0;
+  let transform = `scale(${baseScale})`;
+  let transformOrigin = '50% 50%';
+  if (autoMotion) {
+    const presetName = resolveClipMotion(clipData, clipIndex, isImage);
+    const motionStyle = computeMotionStyle({
+      presetName, frame, durationInFrames, beatsInClipFrames, baseScale, objectPosition,
+    });
+    transform = motionStyle.transform;
+    transformOrigin = motionStyle.transformOrigin;
+  }
+
+  // 基礎樣式 (包含變焦 / 運鏡 與濾鏡)
   const dynamicStyle = {
     width: '100%', height: '100%',
     objectFit: 'cover',
-    objectPosition: clipData.object_position || '50% 50%',
-    transform: `scale(${clipData.scale || 1.0})`,
+    objectPosition,
+    transform,
+    transformOrigin,
     filter: cssFilter,
     opacity: opacity,
   };
