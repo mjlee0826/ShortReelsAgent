@@ -12,8 +12,12 @@ from media_tools.ffmpeg_adapter import FFmpegAdapter
 # 一律轉檔的視訊容器副檔名（非 .mp4：含 iPhone .mov HEVC 與其他非網頁友善容器）／HEIC 圖片副檔名
 # 改由 config.media_formats 提供單一來源（asset_repository 顯示層隱藏未標準化原始檔時共用同一份）
 _TRANSCODE_ALWAYS_VIDEO_EXT = TRANSCODE_VIDEO_EXTENSIONS
-# 需閘控的視訊副檔名（.mp4 已是網頁友善，僅在超過解析度上限時才轉，避免重編碼已合規檔案）
+# 需閘控的視訊副檔名（.mp4 已是網頁友善，僅在超過解析度上限或實際編碼非 H.264 時才轉）
 _GATED_VIDEO_EXT = ".mp4"
+# 網頁友善 + Remotion 相容的視訊編碼集合：副檔名雖為 .mp4，若實際編碼不在此集合（如 iPhone HEVC，
+# 常見於名為 IMG_xxxx.MOV.mp4 的檔）瀏覽器無法播放，需轉 H.264。與 _convert_to_h264 一律輸出 libx264
+# 對齊：只認 h264，其餘（hevc/h265/prores/vp9/av1…）皆轉。看『實際內容』而非副檔名，與圖片端 PIL 嗅探同理。
+_WEB_SAFE_VIDEO_CODECS = frozenset({"h264"})
 # HEIC/HEIF 圖片副檔名（瀏覽器不支援，需轉 JPG）
 _HEIC_IMAGE_EXT = HEIC_IMAGE_EXTENSIONS
 # 標準化輸出檔名的中綴標記：原始檔 stem 後接「STANDARDIZED_MARKER + .」（已含此標記者跳過，避免 _std_std）
@@ -111,18 +115,27 @@ class MediaStandardizer:
 
     def _needs_video_standardize(self, ext: str, filename: str, file_path: str) -> bool:
         """
-        判斷影片是否需要標準化轉檔（Strategy：依容器與解析度決定）。
+        判斷影片是否需要標準化轉檔（Strategy：依容器、解析度與『實際編碼』決定）。
 
         - 非 .mp4 容器（.mov/.avi/.mkv/.webm）：一律轉（HEVC/HDR/容器正規化，網頁與 Remotion 相容）。
-        - .mp4：僅在長邊超過 STANDARDIZE_MAX_LONG_SIDE（4K 等）時才轉，避免重編碼已合規的 1080p
-          造成世代品質損失與上傳延遲；解析度由 ffprobe 讀取，讀不到（回 0）時視為不需轉。
+        - .mp4：以下任一情況才轉，否則保留（避免重編碼已合規檔造成世代品質損失與上傳延遲）：
+          1. 長邊超過 STANDARDIZE_MAX_LONG_SIDE（4K 等）；解析度讀不到（回 0）視為不超標。
+          2. **實際視訊編碼非 H.264**（如 iPhone HEVC）。副檔名雖為 .mp4、內容卻是瀏覽器無法解的
+             HEVC，常見於名為 ``IMG_xxxx.MOV.mp4`` 的檔——其 ``.MOV`` 被 ``.mp4`` 後綴蓋過而鑽過
+             「非 .mp4 一律轉」的規則。改看『實際內容(codec)』而非副檔名（與圖片端 PIL 嗅探同
+             philosophy）；codec 讀不到（回空字串）時不誤判，僅依解析度決定。
         - 已是 _std 標準化版本：跳過（避免 _std_std）。
         """
         if ext in _TRANSCODE_ALWAYS_VIDEO_EXT:
             return True
         if ext == _GATED_VIDEO_EXT and _STD_MARKER not in filename:
             width, height = self.ffmpeg.probe_dimensions(file_path)
-            return max(width, height) > STANDARDIZE_MAX_LONG_SIDE
+            if max(width, height) > STANDARDIZE_MAX_LONG_SIDE:
+                return True
+            # .mp4 但實際編碼非 H.264（HEVC 等）→ 瀏覽器播不出，即使未超解析度也要轉成 H.264；
+            # 讀不到 codec（回空）時保守不轉（僅依上面的解析度判斷），不因偶發 ffprobe 失敗而誤轉
+            codec = self.ffmpeg.probe_codec(file_path)
+            return bool(codec) and codec not in _WEB_SAFE_VIDEO_CODECS
         return False
 
     def _convert_to_h264(self, input_path: str, output_path: str) -> bool:

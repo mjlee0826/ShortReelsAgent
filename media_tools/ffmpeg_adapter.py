@@ -119,6 +119,37 @@ class FFmpegAdapter:
         except (json.JSONDecodeError, OSError, KeyError, ValueError):
             return (0, 0)
 
+    def probe_codec(self, input_path: str) -> str:
+        """
+        以 ffprobe 讀取第一條視訊串流的『實際編碼名稱』（小寫，如 'h264'、'hevc'）。
+
+        供 MediaStandardizer 判斷「副檔名雖為 .mp4、實際卻是非網頁友善編碼（如 iPhone HEVC，
+        常見於名為 IMG_xxxx.MOV.mp4 的檔）」：這類檔的 .MOV 被 .mp4 後綴蓋過而鑽過「.mov 一律轉」
+        的規則，需改看『實際內容(codec)』而非副檔名（與圖片端 PIL 內容嗅探同 philosophy）。
+        讀取失敗（無 ffprobe／無視訊串流／檔案損壞）時回空字串，由呼叫端視為『不確定』安全降級
+        （不因偶發讀取失敗而誤判成需轉檔）。
+        """
+        try:
+            result = subprocess.run(
+                [
+                    "ffprobe", "-v", "quiet",
+                    "-select_streams", "v:0",
+                    "-show_entries", "stream=codec_name",
+                    "-print_format", "json",
+                    input_path,
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+            if result.returncode != 0:
+                return ""
+            streams = json.loads(result.stdout).get("streams", [])
+            if not streams:
+                return ""
+            return str(streams[0].get("codec_name", "")).lower()
+        except (json.JSONDecodeError, OSError, KeyError):
+            return ""
+
     def strip_audio_fast(self, input_path: str, output_path: str) -> None:
         """無損快速剝離音軌，僅保留影像（Stream Copy，速度極快）。"""
         print(f"[FFmpeg] 正在執行無損畫面剝離: {os.path.basename(output_path)}")
