@@ -314,6 +314,10 @@ class DirectorService:
             merged = kept + success_assets
         else:
             merged = success_assets
+        # 汰除「已不存在於當前素材清單」的孤兒身分(如被 _std 取代而隱藏的 raw、或已刪檔),
+        # 讓 metadata 與 collect_asset_files 一致 → Phase 4 / 封面挑選不會誤用被取代的 raw。
+        valid_ids = set(collect_asset_files(target_dir))
+        merged = [e for e in merged if e.get("file", "") in valid_ids]
         # 原子寫(唯一 temp + os.replace):併發讀者恆見完整檔;讀-改-寫已由 Phase 1 執行鎖序列化
         atomic_write_json(dump_path, merged)
         print(f"💾 [Dump] 素材特徵已儲存至 {dump_path}")
@@ -329,6 +333,9 @@ class DirectorService:
         status_map: dict = read_json_tolerant(dump_path, {}) if merge else {}
         for entry in status_entries:
             status_map[entry["asset_id"]] = entry
+        # 同 metadata:汰除已不存在於當前素材清單的孤兒身分,避免素材頁顯示被 _std 取代的幽靈 raw
+        valid_ids = set(collect_asset_files(target_dir))
+        status_map = {k: v for k, v in status_map.items() if k in valid_ids}
         # 原子寫:併發讀者(素材頁 list_assets)恆見完整檔,不再讀到半截 JSON 而 500
         atomic_write_json(dump_path, status_map)
 
@@ -345,6 +352,11 @@ class DirectorService:
         if os.path.exists(phase1_dump_path):
             with open(phase1_dump_path, 'r', encoding='utf-8') as f:
                 raw_assets_metadata = json.load(f)
+        # 只認「當前仍存在的素材身分」:素材經標準化後 raw 身分會被 standardized/_std 取代(raw 被隱藏);
+        # 舊 raw 條目若殘留(早期在 _std 出現前就分析、或增量 merge 未清孤兒),會讓 Phase 4 誤用不可播的
+        # raw(如 HEVC)。以 collect_asset_files 為唯一真相過濾,杜絕 Phase 4 看到已被取代 / 刪除的身分。
+        valid_ids = set(collect_asset_files(target_dir))
+        raw_assets_metadata = [e for e in raw_assets_metadata if e.get("file", "") in valid_ids]
         if pending or not raw_assets_metadata:
             raise AssetsNotAnalyzedError(ASSETS_NOT_ANALYZED_MESSAGE)
         return raw_assets_metadata
