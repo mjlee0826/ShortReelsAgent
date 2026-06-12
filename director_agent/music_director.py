@@ -36,12 +36,14 @@ class MusicDirector:
 
     def resolve(self, music_strategy: str = MUSIC_STRATEGY_SEARCH_COPYRIGHT,
                 user_music_file: str = None, user_prompt: str = "",
+                asset_mood_summary: str = "",
                 tracker: ProgressTracker | None = None) -> dict:
         """
         依配樂意圖解析出 audio_dna；無配樂 / 取得失敗一律回空 dict（呼叫端據此視為「無配樂」）。
         :param music_strategy: 配樂策略 (search_copyright | search_free | none)
         :param user_music_file: 用戶上傳的本地音訊絕對路徑（有值時最優先）
         :param user_prompt: 供 Gemini 萃取搜尋關鍵字的指令 / 風格描述
+        :param asset_mood_summary: (選填) 素材整體氛圍摘要；使用者未指定配樂時供 Gemini 推測搜尋詞
         :param tracker: (選填) 進度 tracker;非 None 時把下載 / 節拍 / 聽寫 STAGE_* 帶上前端
         """
         # 最高優先：用戶已上傳自訂音樂，直接使用本地檔案，跳過所有搜尋邏輯
@@ -54,8 +56,8 @@ class MusicDirector:
             print("[MusicDirector] ⏩ 策略: 不加配樂")
             return {}
 
-        # 搜尋配樂：先請 Gemini 萃取關鍵字，再依策略選擇下載來源
-        search_query = self._extract_search_query(user_prompt)
+        # 搜尋配樂：先請 Gemini 萃取關鍵字（未指定偏好時參考素材氛圍），再依策略選擇下載來源
+        search_query = self._extract_search_query(user_prompt, asset_mood_summary)
 
         if music_strategy == MUSIC_STRATEGY_SEARCH_FREE:
             print(f"[MusicDirector] 🆓 策略: 免費配樂 (Jamendo)，關鍵字: '{search_query}'")
@@ -68,22 +70,23 @@ class MusicDirector:
             print(f"[MusicDirector] 🎵 策略: 搜尋配樂（含版權），關鍵字: '{search_query}'")
         return self._safe_fetch_music(search_query, tracker=tracker)
 
-    def _extract_search_query(self, user_prompt: str) -> str:
+    def _extract_search_query(self, user_prompt: str, asset_mood_summary: str = "") -> str:
         """
         呼叫 Gemini 從 user_prompt 萃取音樂搜尋關鍵字（僅萃取、不做路由）。
-        失敗時退回原始 user_prompt 作為搜尋詞。
+        使用者未提配樂偏好時，附素材整體氛圍摘要供其推測。失敗時退回原始 user_prompt 作為搜尋詞。
         """
         gemini = GeminiModelManager()
 
-        analysis_prompt = PromptFactory.create_prompt(
+        spec = PromptFactory.create_prompt(
             mode=TaskMode.MUSIC_SEARCH_QUERY,
             manager=gemini.prompt_manager,
-            user_prompt=user_prompt
+            user_prompt=user_prompt,
+            asset_mood_summary=asset_mood_summary,
         )
 
         try:
             # 走 manager 的 generate_text(統一記錄成本;不加 synchronized,維持與 template 分支並行)
-            raw_text = gemini.generate_text(TaskMode.MUSIC_SEARCH_QUERY, analysis_prompt)
+            raw_text = gemini.generate_text(TaskMode.MUSIC_SEARCH_QUERY, spec.text, schema=spec.schema)
             match = re.search(r'\{.*\}', raw_text, re.DOTALL)
             if match:
                 data = json.loads(match.group(0))

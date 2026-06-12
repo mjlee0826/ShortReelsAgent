@@ -19,3 +19,5 @@ class PrepContext:
     user_music_file: str | None      # 已解析為絕對路徑
     user_prompt: str
     regenerate_music: bool
+    # 素材整體氛圍摘要(主要情緒 + 常見場景);music 分支在使用者未指定配樂時據此推測搜尋詞
+    asset_mood_summary: str = ""

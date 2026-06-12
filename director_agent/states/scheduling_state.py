@@ -12,20 +12,20 @@ class SchedulingState(BaseState):
         
         gemini = GeminiModelManager()
         
-        # 透過 PromptFactory 請求 Prompt
-        full_prompt = PromptFactory.create_prompt(
+        # 透過 PromptFactory 請求 PromptSpec(文字 + 結構化輸出 schema)
+        spec = PromptFactory.create_prompt(
             mode=TaskMode.DIRECTOR_BLUEPRINT,
             manager=gemini.prompt_manager,
             user_prompt=context.get("user_prompt", ""),
             assets=context.get("assets", []),
-            template_dna=context.get("template_dna"),        
-            previous_timeline=context.get("previous_timeline"), 
+            template_dna=context.get("template_dna"),
+            previous_timeline=context.get("previous_timeline"),
             audio_dna=context.get("audio_dna", {}),
             error_prompt=context.get("error_prompt", "")
         )
 
-        # 呼叫後端
-        raw_response = gemini.generate_director_plan(prompt=full_prompt)
+        # 呼叫後端：把 schema 交給 response_schema，由 Gemini 保證輸出結構合法
+        raw_response = gemini.generate_director_plan(prompt=spec.text, schema=spec.schema)
         
         # 【修改點 1】呼叫新的解析器
         parsed_data = self._parse_json_response(raw_response)
@@ -45,21 +45,23 @@ class SchedulingState(BaseState):
         from director_agent.states.reflection_state import ReflectionState
         return ReflectionState()
 
-    # 【修改點 3】升級正則表達式，優先抓取大括號 {} Object
     def _parse_json_response(self, text: str):
-        """強健的 JSON 解析器 (支援 Object 與 Array)"""
+        """
+        解析導演藍圖 JSON。
+
+        response_schema 已保證輸出為合法 JSON object(DirectorBlueprint 結構)，故優先直接
+        ``json.loads``；僅在極端情況(schema 未生效 / 被 markdown 包裹)才退回寬鬆的大括號抓取，
+        維持容錯不致整批失敗。
+        """
         try:
-            # 先嘗試抓取 JSON Object
-            match_obj = re.search(r'\{.*\}', text, re.DOTALL)
-            if match_obj:
-                return json.loads(match_obj.group(0))
-            
-            # 若抓不到，退回嘗試抓取 JSON Array
-            match_arr = re.search(r'\[.*\]', text, re.DOTALL)
-            if match_arr:
-                return json.loads(match_arr.group(0))
-                
-            return {}
+            return json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            pass
+        # fallback：schema 未生效時，寬鬆抓取第一個 JSON object
+        try:
+            match = re.search(r'\{.*\}', text, re.DOTALL)
+            if match:
+                return json.loads(match.group(0))
         except Exception as e:
             print(f"[JSON Parse Error] 草稿解析失敗: {e}")
-            return {}
+        return {}

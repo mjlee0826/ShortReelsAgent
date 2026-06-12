@@ -171,7 +171,9 @@ class QwenModelManager(BaseModelManager):
     @synchronized_inference
     def analyze_media(self, media_input, media_type: str = "image", mode: TaskMode = TaskMode.BASIC_MEDIA_ANALYSIS) -> dict:
         """輸入圖片或影片路徑，回傳模型推論的 JSON 結果。"""
-        prompt_text = PromptFactory.create_prompt(mode, self.prompt_manager)
+        # Qwen 無 response_schema 能力：取 spec.text(格式約束已由 schema_to_text 序列化進文字,schema 恆 None)
+        spec = PromptFactory.create_prompt(mode, self.prompt_manager)
+        prompt_text = spec.text
 
         if media_type == "image":
             content = [

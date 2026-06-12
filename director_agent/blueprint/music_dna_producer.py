@@ -29,5 +29,6 @@ class MusicDnaProducer(DnaProducer):
             music_strategy=ctx.music_strategy,
             user_music_file=ctx.user_music_file,
             user_prompt=ctx.user_prompt,
+            asset_mood_summary=ctx.asset_mood_summary,
             tracker=tracker,
         )

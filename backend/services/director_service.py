@@ -1,6 +1,7 @@
 import os
 import json
 import time
+from collections import Counter
 from datetime import datetime, timezone
 from config.app_config import ASSETS_DIR, DEFAULT_BACKEND_URL, RAW_SUBDIR, STANDARDIZED_SUBDIR, TEMP_TEMPLATES_DIR
 from config.project_artifacts import (
@@ -41,6 +42,10 @@ from ingestion_engine.models import (
 ASSETS_NOT_ANALYZED_MESSAGE = (
     "素材尚未分析完成（有未處理或策略已變更的素材），請先到素材頁完成分析再生成。"
 )
+
+# 配樂搜尋的素材氛圍摘要：取最常見的前幾項情緒 / 場景(供使用者未指定配樂時推測搜尋詞;避免 magic number)
+_MOOD_SUMMARY_TOP_N = 2
+_SCENE_SUMMARY_TOP_N = 3
 
 
 class AssetsNotAnalyzedError(Exception):
@@ -129,6 +134,33 @@ class DirectorService:
         if user_id:
             return f"{self.backend_url}/static/{user_id}/{folder_name}/"
         return f"{self.backend_url}/static/{folder_name}/"
+
+    def _summarize_asset_mood(self, raw_assets_metadata: list) -> str:
+        """
+        從素材感知 metadata 萃取整體氛圍摘要(主要情緒 + 常見場景)。
+
+        供 music 分支在『使用者未指定配樂偏好』時推測搜尋詞——否則 LLM 看不到任何素材資訊、
+        無從推測。對各素材 metadata 的 mood / scene_tags 做多數決，取最常見的前幾項；
+        全無語意標籤時回空字串(呼叫端視為無摘要)。
+        """
+        mood_counter: Counter = Counter()
+        scene_counter: Counter = Counter()
+        for entry in raw_assets_metadata:
+            metadata = entry.get("metadata", {}) or {}
+            mood = metadata.get("mood")
+            if mood:
+                mood_counter[mood] += 1
+            for tag in metadata.get("scene_tags", []) or []:
+                scene_counter[tag] += 1
+
+        parts = []
+        if mood_counter:
+            top_moods = ", ".join(m for m, _ in mood_counter.most_common(_MOOD_SUMMARY_TOP_N))
+            parts.append(f"主要情緒: {top_moods}")
+        if scene_counter:
+            top_scenes = ", ".join(s for s, _ in scene_counter.most_common(_SCENE_SUMMARY_TOP_N))
+            parts.append(f"常見場景: {top_scenes}")
+        return "；".join(parts)
 
     def _audio_cache_url(self, audio_dna: dict) -> str:
         """把配樂 audio_dna 的實體標準檔轉成全域快取池 cache URL；無有效檔回 None（生成與換曲共用）。"""
@@ -472,6 +504,8 @@ class DirectorService:
                 user_music_file=user_music_file_path,
                 user_prompt=enhanced_prompt,
                 regenerate_music=regenerate_music,
+                # 素材整體氛圍：使用者未指定配樂時，讓 music 分支據此推測搜尋詞
+                asset_mood_summary=self._summarize_asset_mood(raw_assets_metadata),
             )
             # 量測 fork-join wall time:驗證並行紅利(理論上 ≈ max(template, music) 而非 sum);
             # 上線前後比對此數,確認 music 分支夠長到值得重疊,否則主要收益來自 P2 去重(見 docs §9-4)。

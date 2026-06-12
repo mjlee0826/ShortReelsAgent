@@ -28,6 +28,7 @@ import os
 import time
 from google import genai
 from google.genai import types
+from pydantic import BaseModel
 from prompt_manager.base_prompt_manager import BasePromptManager
 from prompt_manager.default_prompt_manager import DefaultPromptManager
 from prompt_manager.task_mode import TaskMode
@@ -97,6 +98,22 @@ class GeminiModelManager(BaseModelManager):
         if phase is not None:
             record_usage(response, model, phase)
 
+    @staticmethod
+    def _build_config(schema: type[BaseModel] | None):
+        """
+        依 PromptSpec.schema 決定生成設定：
+
+        schema 非 None → 啟用結構化輸出(``response_mime_type=application/json`` + ``response_schema``)，
+        由 Gemini 保證輸出結構與 enum 合法、免去手寫 JSON 與 regex 抓取的脆弱;schema 為 None
+        (理論上 Gemini 路徑各 task 皆有 schema)回 None,退化為純文字生成。
+        """
+        if schema is None:
+            return None
+        return types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=schema,
+        )
+
     @synchronized_inference
     def analyze_media(self, media_input, media_type: str = MEDIA_TYPE_VIDEO, mode: TaskMode = TaskMode.VIDEO_EVENT_INDEX) -> dict:
         """
@@ -105,21 +122,21 @@ class GeminiModelManager(BaseModelManager):
         - 圖片（``media_type == "image"``）：``media_input`` 為 ``PIL.Image``，直接 inline，免上傳。
         - 影片（其餘）：``media_input`` 為本地檔案路徑，交由 :meth:`_analyze_video` 依大小分流。
         """
-        prompt_text = PromptFactory.create_prompt(mode, self.prompt_manager)
+        spec = PromptFactory.create_prompt(mode, self.prompt_manager)
         model = self._model_for(mode)  # 依任務 mode 選模型(per-task 對照表)
         if media_type == MEDIA_TYPE_IMAGE:
             # 圖片遠低於 inline 上限，SDK 原生吃 PIL.Image，直接同步推論最省
-            return self._generate_inline([media_input], prompt_text, model, mode)
-        return self._analyze_video(media_input, prompt_text, model, mode)
+            return self._generate_inline([media_input], spec, model, mode)
+        return self._analyze_video(media_input, spec, model, mode)
 
-    def _analyze_video(self, video_path: str, prompt_text: str, model: str, mode: TaskMode) -> dict:
+    def _analyze_video(self, video_path: str, spec, model: str, mode: TaskMode) -> dict:
         """
         影片分流（Strategy）：≤ ``GEMINI_INLINE_MAX_BYTES`` 走 inline（省上傳/輪詢/刪除往返），
         否則走 File API（大檔唯一可行路徑）；無法取得檔案大小時保守退回 File API。
         """
         if self._fits_inline(video_path):
-            return self._generate_inline([self._build_video_part(video_path)], prompt_text, model, mode)
-        return self._analyze_via_file_api(video_path, prompt_text, model, mode)
+            return self._generate_inline([self._build_video_part(video_path)], spec, model, mode)
+        return self._analyze_via_file_api(video_path, spec, model, mode)
 
     @staticmethod
     def _fits_inline(file_path: str) -> bool:
@@ -136,17 +153,18 @@ class GeminiModelManager(BaseModelManager):
         with open(video_path, "rb") as f:
             return types.Part.from_bytes(data=f.read(), mime_type=mime_type)
 
-    def _generate_inline(self, parts: list, prompt_text: str, model: str, mode: TaskMode) -> dict:
+    def _generate_inline(self, parts: list, spec, model: str, mode: TaskMode) -> dict:
         """
         inline 同步推論：媒體 part 與 prompt 一併送進 ``generate_content``。
 
         媒體不落雲端、無 upload/輪詢/delete 生命週期；失敗吞例外回 Null Object，
-        維持與 File API 路徑一致的下游契約。
+        維持與 File API 路徑一致的下游契約。``spec.schema`` 啟用結構化輸出。
         """
         try:
             response = self.client.models.generate_content(
                 model=model,
-                contents=[*parts, prompt_text],
+                contents=[*parts, spec.text],
+                config=self._build_config(spec.schema),
             )
             # 記錄 token 用量供分階段成本統計(無 job 帳本時 no-op)
             self._record(response, model, mode)
@@ -155,7 +173,7 @@ class GeminiModelManager(BaseModelManager):
             print(f"[Gemini API Error] 推理失敗: {str(e)}")
             return _failure_result()
 
-    def _analyze_via_file_api(self, video_path: str, prompt_text: str, model: str, mode: TaskMode) -> dict:
+    def _analyze_via_file_api(self, video_path: str, spec, model: str, mode: TaskMode) -> dict:
         """
         大影片走 File API：upload → 輪詢（最多 ``GEMINI_POLL_MAX_COUNT`` 次）→ generate_content
         → delete（``finally`` 保證）。雲端暫存檔無論成敗必被清除（隱私 + 配額）。
@@ -182,7 +200,8 @@ class GeminiModelManager(BaseModelManager):
             print("[Gemini API] 開始進行語意與時間碼推論...")
             response = self.client.models.generate_content(
                 model=model,
-                contents=[video_file, prompt_text]
+                contents=[video_file, spec.text],
+                config=self._build_config(spec.schema),
             )
             # 記錄 token 用量供分階段成本統計(無 job 帳本時 no-op)
             self._record(response, model, mode)
@@ -201,33 +220,36 @@ class GeminiModelManager(BaseModelManager):
                     print(f"[Gemini API Warning] 無法刪除雲端暫存檔: {e}")
 
     @synchronized_inference
-    def generate_director_plan(self, prompt: str, tools: list = None) -> str:
+    def generate_director_plan(self, prompt: str, schema: type[BaseModel] | None = None) -> str:
         """
-        Agentic 模式：建立 Gemini Chat Session 並傳送導演規劃指令，回傳純文字回應。
+        導演藍圖生成：one-shot ``generate_content`` + ``response_schema`` 結構化輸出。
 
-        模型由 per-task 對照表決定（``DIRECTOR_BLUEPRINT`` → 結構化 + agentic 強的型號）。
-        ``tools`` 為 Gemini Function Calling 工具列表；``None`` 時建立無工具的純對話 Session。
+        模型由 per-task 對照表決定（``DIRECTOR_BLUEPRINT`` → 結構化 + 推理強的型號）。
+        改用單次 ``generate_content``（取代舊 Chat Session）：reflection 每次重試本就是獨立呼叫、
+        未用到多輪對話記憶，one-shot 更單純；``schema`` 交給 ``response_schema`` 保證輸出結構合法。
         """
         model = self._model_for(TaskMode.DIRECTOR_BLUEPRINT)
-        chat = self.client.chats.create(
+        response = self.client.models.generate_content(
             model=model,
-            config={'tools': tools} if tools else None
+            contents=prompt,
+            config=self._build_config(schema),
         )
-        response = chat.send_message(prompt)
         # 記錄 token 用量(Phase 4);reflection 重試會多次呼叫、各自累加
         self._record(response, model, TaskMode.DIRECTOR_BLUEPRINT)
         return response.text
 
-    def generate_text(self, mode: TaskMode, prompt: str) -> str:
+    def generate_text(self, mode: TaskMode, prompt: str, schema: type[BaseModel] | None = None) -> str:
         """
-        純文字生成（供 music 配樂關鍵字萃取等輕量任務）：依 ``mode`` 選模型、記錄用量、回傳純文字。
+        純文字 / 結構化生成（供 music 配樂關鍵字萃取等輕量任務）：依 ``mode`` 選模型、記錄用量、回傳文字。
 
         取代 ``music_director`` 直接打 ``self.client`` 的舊寫法,讓所有 Gemini 出口統一經
         manager 記錄成本。刻意不加 ``@synchronized_inference``：維持與舊版 raw client 相同的
         非序列化行為,讓 music 分支能與 template 分支的雲端呼叫並行（fork-join 紅利）。
-        失敗時拋例外交回呼叫端（music 端已有 try/except 降級）。
+        ``schema`` 非 None 時啟用結構化輸出。失敗時拋例外交回呼叫端（music 端已有 try/except 降級）。
         """
         model = self._model_for(mode)
-        response = self.client.models.generate_content(model=model, contents=prompt)
+        response = self.client.models.generate_content(
+            model=model, contents=prompt, config=self._build_config(schema)
+        )
         self._record(response, model, mode)
         return response.text
