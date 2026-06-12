@@ -1,6 +1,7 @@
 import React from 'react';
 import { Sequence, AbsoluteFill, useVideoConfig, Audio } from 'remotion';
 import ClipComponent from './ClipComponent';
+import { TRANSITION_FRAMES, ADJACENCY_THRESHOLD_SECONDS } from './constants';
 
 export default function MainTimeline({ blueprint, assetsRootUrl }) {
   const { fps } = useVideoConfig();
@@ -45,14 +46,18 @@ export default function MainTimeline({ blueprint, assetsRootUrl }) {
 
       {/* --- 影片序列排版 --- */}
       {blueprint.timeline.map((clip, index) => {
+        // 以「邊界幀差」算長度：fromFrame 取自 start_at、toFrame 取自 end_at，各自 round 後相減。
+        // 因時間軸已 repack（end_at[i] === start_at[i+1]），相鄰片段必共用同一邊界幀，
+        // 故首尾嚴格相接、零黑縫零重疊；若改用 round(end-start) 則兩端獨立進位會差 ±1 幀 → 黑幀閃爍（亂跳主因之一）
         const fromFrame = Math.round(clip.start_at * fps);
-        const durationInFrames = Math.round((clip.end_at - clip.start_at) * fps);
+        const toFrame = Math.round(clip.end_at * fps);
+        const durationInFrames = toFrame - fromFrame;
 
         const nextClip = index < blueprint.timeline.length - 1 ? blueprint.timeline[index + 1] : null;
-        // 只在相鄰片段（間距 < 0.1s）且下一段有轉場時才延伸，避免非相鄰片段出現殘影
-        const isAdjacent = nextClip && Math.abs((nextClip.start_at ?? 0) - (clip.end_at ?? 0)) < 0.1;
+        // 只在相鄰片段（間距小於門檻）且下一段有轉場時才延伸，讓交叉淡入有重疊；非相鄰不延伸以免殘影
+        const isAdjacent = nextClip && Math.abs((nextClip.start_at ?? 0) - (clip.end_at ?? 0)) < ADJACENCY_THRESHOLD_SECONDS;
         const hasNextTransition = isAdjacent && nextClip.transition_in && nextClip.transition_in !== 'none';
-        const renderDuration = hasNextTransition ? durationInFrames + 15 : durationInFrames;
+        const renderDuration = hasNextTransition ? durationInFrames + TRANSITION_FRAMES : durationInFrames;
 
         if (renderDuration <= 0) return null;
 
