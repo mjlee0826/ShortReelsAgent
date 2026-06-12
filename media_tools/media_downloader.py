@@ -1,6 +1,8 @@
 import os
 import yt_dlp
 
+from config.app_config import TEMP_TEMPLATES_DIR, MUSIC_CACHE_SUBDIR
+
 
 class MediaDownloader:
     """
@@ -9,7 +11,9 @@ class MediaDownloader:
     呼叫端無需了解 yt-dlp 的設定細節。
     """
 
-    def __init__(self, download_dir: str = "temp_templates", cookies_path: str = "cookies.txt"):
+    # 預設下載根目錄取絕對的 TEMP_TEMPLATES_DIR（本地 /data1），與 /cache 靜態掛載點一致；
+    # 不再用相對 "temp_templates"（會隨後端 cwd 解析到 NFS，使配樂 _std 檔落在 /cache 服務不到的位置）。
+    def __init__(self, download_dir: str = TEMP_TEMPLATES_DIR, cookies_path: str = "cookies.txt"):
         self.download_dir = os.path.abspath(download_dir)
         self.cookies_path = os.path.abspath(cookies_path)
         os.makedirs(self.download_dir, exist_ok=True)
@@ -96,7 +100,7 @@ class MediaDownloader:
 
     def search_and_download_audio(self, search_query: str) -> str:
         """透過 YouTube 搜尋關鍵字並下載最佳音訊檔，回傳本地路徑。"""
-        music_dir = os.path.join(self.download_dir, "music_cache")
+        music_dir = os.path.join(self.download_dir, MUSIC_CACHE_SUBDIR)
         os.makedirs(music_dir, exist_ok=True)
 
         if os.path.exists(self.cookies_path):

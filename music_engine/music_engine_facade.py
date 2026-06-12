@@ -1,4 +1,5 @@
 import os
+from config.app_config import TEMP_TEMPLATES_DIR, MUSIC_CACHE_SUBDIR
 from media_tools.media_downloader import MediaDownloader
 from media_tools.ffmpeg_adapter import FFmpegAdapter
 from media_tools.audio_beat_extractor import AudioBeatExtractor
@@ -135,7 +136,9 @@ class MusicEngineFacade:
         """
         print(f"[music_engine] 開始搜尋免費音樂: {query}")
 
-        music_dir = os.path.join("temp_templates", "music_cache")
+        # 絕對的 TEMP_TEMPLATES_DIR/music_cache：與 MediaDownloader、/cache 掛載點同一根目錄，
+        # 避免相對 cwd 解析到 NFS 而使 track_id 指向 /cache 服務不到的路徑（造成前端配樂 404）。
+        music_dir = os.path.join(TEMP_TEMPLATES_DIR, MUSIC_CACHE_SUBDIR)
         os.makedirs(music_dir, exist_ok=True)
 
         source_tag = "jamendo"

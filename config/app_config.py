@@ -24,6 +24,11 @@ STANDARDIZED_MARKER = "_std"
 # 全域音樂快取目錄：由 /cache 靜態路由對外服務
 TEMP_TEMPLATES_DIR = os.environ.get("TEMP_TEMPLATES_DIR", "/data1/cache/mjlee/temp_templates")
 
+# 配樂快取子目錄：位於 TEMP_TEMPLATES_DIR 之下，存放 yt-dlp / Jamendo 下載的原始與 _std 配樂檔。
+# 下載端（MediaDownloader / MusicEngineFacade）寫入此處、director_service 以此組 /cache URL 對外服務，
+# 兩端共用同一絕對根目錄，避免相對 cwd 解析到 NFS 而與 /cache 掛載點不一致（導致 track_id 404）。
+MUSIC_CACHE_SUBDIR = "music_cache"
+
 # SSR 算圖暫存工作區：每次 render 建一個子目錄，render 完成後自動清除
 TEMP_WORKSPACES_DIR = os.environ.get("TEMP_WORKSPACES_DIR", "/data1/cache/mjlee/temp_workspaces")
 
