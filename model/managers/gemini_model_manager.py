@@ -67,6 +67,11 @@ class GeminiModelManager(BaseModelManager):
     ``device_id`` 對雲端 API 無意義，``self.device`` 未設置，``_uses_gpu()`` 自動回 False。
     """
 
+    # 雲端 API 無 VRAM / 執行緒安全問題，client 可並發；不以 L3 鎖序列化推論（否則多 asset 的
+    # Gemini 呼叫會排隊成「一個一個跑」，COMPLEX 影片 stage 的 wait 即源於此）。並發度交由
+    # API 資源池（RPS semaphore）控制。詳見 base_model_manager.inference_guard。
+    SERIALIZE_INFERENCE = False
+
     def _initialize(self, device_id: int = 0):
         """初始化 Gemini Client。device_id 對雲端 API 無效，保留簽名一致性。"""
         api_key = os.environ.get("GEMINI_API_KEY")

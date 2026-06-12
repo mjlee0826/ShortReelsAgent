@@ -151,6 +151,12 @@ class BaseModelManager(ABC):
     # BudgetGate 會讓「有高優先在等」時低優先請求讓路，避免 Qwen 被小模型串流餓死。
     INFERENCE_PRIORITY: int = NO_PRIORITY
 
+    # 子類別可 override：是否以 L3 推論鎖序列化「同一 instance」的推論。
+    # 預設 True：GPU / CPU 共用模型需要（VRAM 安全，或模型本身非執行緒安全、單例被多 asset thread 共搶）。
+    # 雲端 API 模型（Gemini）應覆寫為 False：client 可並發、無 VRAM 問題，序列化只會把吞吐壓成 1；
+    # 並發度改由 API 資源池（RPS semaphore）控制。僅影響非 GPU 路徑（GPU 路徑一律保留 L3）。
+    SERIALIZE_INFERENCE: bool = True
+
     def __init_subclass__(cls, **kwargs):
         """每個子類別擁有獨立的實例字典與建構鎖，避免不同 Manager 間互相干擾。"""
         super().__init_subclass__(**kwargs)
@@ -320,8 +326,11 @@ class BaseModelManager(ABC):
         """
         鎖序：L2 GPU Gate → L3 model inference lock。
 
-        所有推論路徑（裝飾器、BatchCollector）共用此入口，
-        確保鎖序一致，結構上不可能形成循環等待。CPU/API 模型自動跳過 L2。
+        所有推論路徑（裝飾器、BatchCollector）共用此入口，確保鎖序一致、結構上不可能循環等待。
+        - GPU 模型：L2 GpuGate + L3 鎖。
+        - CPU 共用模型：僅 L3 鎖（序列化多 asset thread 對單例的共搶）。
+        - 雲端 API 模型（``SERIALIZE_INFERENCE=False``）：不取 L3，並發度交由 API 資源池控制，
+          避免單一 L3 鎖把 Gemini 吞吐壓成 1（COMPLEX 影片 `wait` 的根因）。
         """
         if self._uses_gpu():
             # GPU 路徑：依 device_id 取 Gate，預算成本與優先序由子類屬性提供
@@ -331,10 +340,14 @@ class BaseModelManager(ABC):
             ):
                 with self._acquire_inference_lock():
                     yield
-        else:
-            # CPU/API 路徑：只取 L3 model lock，不申請 L2
+        elif self.SERIALIZE_INFERENCE:
+            # CPU 共用模型：只取 L3 model lock（不申請 L2），序列化單例被多 asset thread 共搶
             with self._acquire_inference_lock():
                 yield
+        else:
+            # 雲端 API 模型（Gemini）：不序列化推論，client 可並發、無 VRAM 問題；
+            # 並發度交由 API 資源池（RPS semaphore）控制，不再讓 L3 鎖把吞吐壓成 1
+            yield
 
     @contextmanager
     def _acquire_inference_lock(self) -> Iterator[None]:
