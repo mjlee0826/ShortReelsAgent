@@ -295,7 +295,7 @@ class BgmTrack(BaseModel):
 
 class PipVideo(BaseModel):
     """畫中畫（子畫面）疊加設定。"""
-    clip_id: str = Field(default="", description="子畫面的素材 ID（relpath）")
+    clip_id: str = Field(default="", description="子畫面素材 ID：一字不差照抄素材庫對應素材的 id（含 raw/ 或 standardized/ 前綴與 _std 後綴）；嚴禁改寫、去前綴或自行拼路徑")
     source_start: float = Field(default=0.0, description="子畫面素材擷取起點（秒）")
     position: PipPosition = Field(default=PipPosition.TOP_RIGHT, description="子畫面位置")
 
@@ -308,7 +308,7 @@ class Clip(BaseModel):
     導演決策理由、再填參數」，把原本沒人消費的欄位轉成提升決策品質的 inline 推理鏈。
     """
     reason: str = Field(default="", description="導演決策說明：先想清楚轉場 / 變速 / 混音 / 選材的考量，再填下方參數")
-    clip_id: str = Field(default="", description="素材 ID（relpath，與素材庫 id 一致）")
+    clip_id: str = Field(default="", description="素材 ID：必須一字不差照抄素材庫對應素材的 id 欄位（含 raw/ 或 standardized/ 前綴與 _std 後綴）；嚴禁改寫、簡化、去前綴或自行拼路徑")
     start_at: float = Field(default=0.0, description="總時間軸上的開始秒數")
     end_at: float = Field(default=0.0, description="總時間軸上的結束秒數")
     source_start: float = Field(default=0.0, description="素材擷取起點（秒）")

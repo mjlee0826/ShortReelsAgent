@@ -25,11 +25,13 @@ const PAN_BASE_SCALE = 1.12;
 /** 平移的單側最大位移（百分比，相對自身尺寸）；須小於底縮放溢出量以免露邊。 */
 const PAN_SHIFT_PCT = 3;
 /** 卡點脈衝的瞬間放大幅度（額外縮放比例）。 */
-const PUNCH_SCALE = 0.06;
+const PUNCH_SCALE = 0.05;
 /** 卡點脈衝衝上去的幀數（attack）。 */
 const PUNCH_ATTACK_FRAMES = 2;
 /** 卡點脈衝回穩的幀數（decay）。 */
 const PUNCH_DECAY_FRAMES = 7;
+/** 兩次卡點脈衝的最小間隔（秒）：避免每個重拍都 punch 造成「持續抖動」，只在夠稀疏處才彈一下。 */
+const MIN_PUNCH_INTERVAL_SEC = 1.2;
 
 /** 運鏡 preset 名稱（具名常數，供前端下拉與本引擎共用詞彙）。 */
 export const MOTION = {
@@ -119,6 +121,30 @@ function punchAt(frame, beatsInClipFrames) {
 }
 
 /**
+ * 稀疏化重拍：貪婪保留彼此間隔 ≥ MIN_PUNCH_INTERVAL_SEC 的重拍，其餘丟棄。
+ *
+ * librosa 的 beats 是「每一拍」（約每 0.5 秒一個），若每拍都 punch 會變成持續抖動；
+ * 故在送進渲染前先抽稀，讓 punch 成為「偶爾彈一下」的卡點重音，而非震動。
+ * @param {number[]} frames 片段內重拍幀（相對片段起點）
+ * @param {number} fps 幀率（換算最小間隔）
+ * @returns {number[]} 抽稀後的重拍幀
+ */
+export function thinBeatFrames(frames, fps) {
+  if (!frames || frames.length === 0) return frames;
+  const minGap = MIN_PUNCH_INTERVAL_SEC * (fps || 30);
+  const sorted = [...frames].sort((a, b) => a - b);
+  const kept = [];
+  let last = -Infinity;
+  for (const f of sorted) {
+    if (f - last >= minGap) {
+      kept.push(f);
+      last = f;
+    }
+  }
+  return kept;
+}
+
+/**
  * 算出某一幀的運鏡樣式（transform + transformOrigin）。
  *
  * 最終縮放 = 片段既有 scale × preset base 縮放 ×（1 + 卡點脈衝）；
@@ -149,7 +175,8 @@ export function computeMotionStyle({
     })
     : 0;
   const base = basePreset(presetName, progress);
-  const punch = punchAt(frame, beatsInClipFrames);
+  // 'none' 代表完全靜止（連卡點都不彈）；其餘 preset 才疊加卡點脈衝
+  const punch = presetName === MOTION.NONE ? 0 : punchAt(frame, beatsInClipFrames);
   const scale = baseScale * base.scale * (1 + punch);
   return {
     transform: `translate(${base.tx}%, ${base.ty}%) scale(${scale})`,

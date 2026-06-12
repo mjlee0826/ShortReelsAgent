@@ -2,6 +2,7 @@ import React from 'react';
 import { Sequence, AbsoluteFill, useVideoConfig, Audio } from 'remotion';
 import ClipComponent from './ClipComponent';
 import { TRANSITION_FRAMES, ADJACENCY_THRESHOLD_SECONDS } from './constants';
+import { thinBeatFrames } from '../../utils/motion';
 
 export default function MainTimeline({ blueprint, assetsRootUrl }) {
   const { fps } = useVideoConfig();
@@ -61,10 +62,14 @@ export default function MainTimeline({ blueprint, assetsRootUrl }) {
         const toFrame = Math.round(clip.end_at * fps);
         const durationInFrames = toFrame - fromFrame;
 
-        // 落在此片段內的重拍 → 換算成相對片段起點的幀，供卡點 punch（無節拍則為空陣列、自動退化）
-        const beatsInClipFrames = beatVideoTimes
-          .filter((vt) => vt >= clip.start_at && vt < clip.end_at)
-          .map((vt) => Math.round((vt - clip.start_at) * fps));
+        // 落在此片段內的重拍 → 換算成相對片段起點的幀，供卡點 punch（無節拍則為空陣列、自動退化）。
+        // 再抽稀至最小間隔，避免每拍都彈造成「持續抖動」（每拍 punch 是先前振動 bug 的主因）。
+        const beatsInClipFrames = thinBeatFrames(
+          beatVideoTimes
+            .filter((vt) => vt >= clip.start_at && vt < clip.end_at)
+            .map((vt) => Math.round((vt - clip.start_at) * fps)),
+          fps,
+        );
 
         const nextClip = index < blueprint.timeline.length - 1 ? blueprint.timeline[index + 1] : null;
         // 只在相鄰片段（間距小於門檻）且下一段有轉場時才延伸，讓交叉淡入有重疊；非相鄰不延伸以免殘影

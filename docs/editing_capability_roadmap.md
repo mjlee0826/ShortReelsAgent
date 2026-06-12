@@ -2,8 +2,11 @@
 
 > 本文件記錄為了剪出更好看、更精緻的 ShortReels，剪輯能力該往哪五個方向擴充。
 > 記錄每個方向「要做哪些事 / 技術難度 / 預估工時 / 風險 / 相依關係」。
-> **前瞻設計文件，尚未實作**；工時為「1 人 + AI 協作、集中作業」概算，
-> `prompt 調校` 與 `視覺 critic` 的「試到有效」部分屬 open-ended，與 coding 工時分開計。
+> 工時為「1 人 + AI 協作、集中作業」概算，`prompt 調校` 與 `視覺 critic` 的「試到有效」部分屬 open-ended，與 coding 工時分開計。
+>
+> **實作進度**（✅ 已完成 / 🚧 進行中 / ⬜ 未開始）：
+> - ✅ **#1 精簡版**（變化＋卡點自動運鏡）— 2026-06-13 上線，細節見 §3。
+> - ⬜ #1 完整版、#2、#3、#4、#5。
 
 ---
 
@@ -32,7 +35,7 @@
 
 | # | 方向 | 層 | 難度 | 精簡版 | 完整版 |
 |---|---|---|---|---|---|
-| 1 | Keyframe / 動畫原語 + 卡點運鏡 | 能力 | 中 → 高 | 3–5 天 | 2–3 週 |
+| 1 | Keyframe / 動畫原語 + 卡點運鏡 | 能力 | 中 → 高 | ✅ 已完成 | 2–3 週 ⬜ |
 | 2 | 結構化 TextOverlay + 卡拉OK字幕 | 能力 | 中 → 中高 | 3–4 天 | 1.5–2 週 |
 | 3 | 能力層 primitive + 命名 preset | 能力 | 中 | 3–5 天 | +LUT ~3 天 |
 | 4 | 決策層 style preset 約束 LLM | 決策 | 中 → 高 | 3–5 天 + 調校 | 1.5–2 週 + 調校 |
@@ -43,6 +46,11 @@
 ---
 
 ## 3. 方向一：Keyframe / 動畫原語 + 卡點運鏡
+
+> **🟢 實作狀態（2026-06-13）：精簡版已上線。** 變化型自動運鏡（Ken Burns 推近 / 拉遠 / 左右平移、相鄰輪替 + 卡點 punch）、前端「啟用自動運鏡」總開關、逐段「運鏡」覆寫皆已實作。
+> 採**務實精簡路線**：未做下方「keyframe 陣列」通用 schema，改在 clip 加 `motion` preset 欄位，由 `frontend/src/utils/motion.js` 於 render-time 依 preset / 節拍算逐幀 transform（純函式、與 fade 同源用 `interpolate`，縮放支點＝主體 `object_position`）。後端把 librosa 既有 beats 注入 `bgm_track`（post-LLM、刻意不入 LLM schema）＋ `global_settings.auto_motion`。
+> 檔案：`utils/motion.js`(新)、`RemotionPlayer/ClipComponent.jsx`、`MainTimeline.jsx`、`schemas.py`(`Clip.motion`)、`backend/api/director.py`、`services/director_service.py`、`store/useBlueprintStore.js`、`GenerationForm.jsx`、`Inspector/ClipInspector.jsx`。
+> **未做（完整版）**：通用 keyframe schema、Inspector 手動 keyframe 編輯 UI、變速 ramp、動態轉場（含 `slide`）。已知限制：music-only 換曲後暫無 punch（beats 尚未在換曲路徑注入）。
 
 **問題**：現在每個屬性都是**一顆靜態值**（`scale` 一個數、`filter` 一個值）。精緻的 reel 靠**屬性隨時間變化**：Ken Burns 緩慢推軌、字幕彈入、卡節拍的縮放、變速 ramp。架構目前**沒有「屬性在片段內隨時間變化」的概念**。
 
@@ -55,8 +63,8 @@
 
 **難度**：渲染機制 **中**（已有底子）；完整 keyframe + 編輯 UI **高**。
 **工時**
-- 精簡版（只開 Ken Burns / beat-sync zoom 等 preset 動畫，**不做手動 keyframe UI**）：**3–5 天**
-- 完整版（通用 keyframe schema + Inspector 拖曳編輯 + easing 曲線）：**2–3 週**
+- 精簡版（只開 Ken Burns / beat-sync zoom 等 preset 動畫，**不做手動 keyframe UI**）：**3–5 天** → ✅ **已完成**
+- 完整版（通用 keyframe schema + Inspector 拖曳編輯 + easing 曲線）：**2–3 週** ⬜
 
 **風險**：beats 資料管線是否現成可取用、VFR（變動幀率）影片下的時間精度、多屬性逐幀 `interpolate` 的效能。
 **相依**：是 #2 字幕動畫的地基（兩者共用同一 keyframe 機制）。
@@ -212,8 +220,8 @@ function buildCssFilter(color) {
 **建議路徑（最省力、最快看到「精緻」）**
 
 ```
-#1 精簡(Ken Burns + 卡點)
-   → #2 樣式字幕
+#1 精簡(Ken Burns + 卡點)   ✅ 已完成 (2026-06-13)
+   → #2 樣式字幕            ← 下一步
    → #5 規則 critic
    → #3 primitive + preset
    → #4 style 約束導演

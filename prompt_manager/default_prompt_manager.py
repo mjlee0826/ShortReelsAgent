@@ -131,7 +131,9 @@ class DefaultPromptManager(BasePromptManager):
             "   - 變速一致性：(source_end - source_start) / playback_rate 必須等於 (end_at - start_at)。\n"
             "   - source_end 不得超過該素材的原始長度 dur。\n"
             "   - 嚴禁假剪輯：絕不可把同一支影片的連續畫面硬切成多個片段（相鄰片段 clip_id 必須不同）；\n"
-            "     要連續播放就合併成『一個』長片段。\n\n"
+            "     要連續播放就合併成『一個』長片段。\n"
+            "   - clip_id 必須與素材庫某筆 id 逐字完全相同：原樣照抄（含 raw/ 或 standardized/ 前綴與 _std\n"
+            "     後綴），嚴禁改寫前綴、去掉 _std、簡化或自行拼湊路徑；填了素材庫不存在的 id 會被打回重做。\n\n"
         )
 
         # 3. 工具箱（僅列前端真正支援的能力，不承諾不存在的效果）
@@ -171,7 +173,8 @@ class DefaultPromptManager(BasePromptManager):
         # 6. 輸入欄位說明（素材庫為精簡縮寫，給導演一份完整欄位字典；對齊 ContextCompressor 實際輸出）
         instruction += (
             "# 素材庫欄位說明（assets 為精簡縮寫）\n"
-            "通用：id=素材ID(即 clip_id) / type=image|video / res=解析度{w,h} / time=拍攝時間 / geo=GPS地點。\n"
+            "通用：id=素材ID(即 clip_id；填回 clip_id 時務必『原樣照抄』，含 raw/ 或 standardized/ 前綴與 _std 後綴，"
+            "不可更動前綴或去掉 _std) / type=image|video / res=解析度{w,h} / time=拍攝時間 / geo=GPS地點。\n"
             "品質：aes,tech=美學,技術畫質分（選材優先取高分）。\n"
             "語意：cap=客觀描述 / critique=攝影評論 / mood=情緒 / scene_tags=場景 / cam=視角 / actions=動作 / tod=時段。\n"
             "視覺特徵：bright=亮度 / color_temp=色溫(warm/cool/neutral) / colors=主色清單。\n"
