@@ -2,7 +2,7 @@ import React from 'react';
 import { Composition, registerRoot } from 'remotion';
 // 引入我們寫好的時間軸核心
 import MainTimeline from './components/RemotionPlayer/MainTimeline';
-import '../index.css'; // 如果影片中有用到 Tailwind CSS 樣式，記得引入
+import './index.css'; // 如果影片中有用到 Tailwind CSS 樣式，記得引入（index.css 與本檔同在 src/ 底下，用 ./）
 
 export const RemotionRoot = () => {
     return (
