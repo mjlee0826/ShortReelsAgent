@@ -9,6 +9,9 @@ import useProjectStore from '../store/useProjectStore';
 import useProgressSocket from '../hooks/useProgressSocket';
 import { apiService } from '../services/api.service';
 
+// 就地編輯自動儲存的 debounce 間隔（毫秒）：連續編輯只在停手後寫一次，避免每次 mutate 都打後端。
+const AUTOSAVE_DEBOUNCE_MS = 1000;
+
 /**
  * EditorPage：編輯器頁的兩階段殼層。
  *
@@ -26,6 +29,8 @@ export default function EditorPage() {
   const redirectToAssetsProject = useBlueprintStore((s) => s.redirectToAssetsProject);
   const clearAssetsRedirect = useBlueprintStore((s) => s.clearAssetsRedirect);
   const currentProjectName = useProjectStore((s) => s.currentProject?.name);
+  const isProcessing = useBlueprintStore((s) => s.isProcessing);
+  const persistBlueprint = useBlueprintStore((s) => s.persistBlueprint);
   // 進行中生成的 WS 訂閱狀態 / 回呼（Observer Pattern 前端側）
   const generationJobId = useBlueprintStore((s) => s.generationJobId);
   const onGenerationEvent = useBlueprintStore((s) => s.onGenerationEvent);
@@ -44,6 +49,16 @@ export default function EditorPage() {
   useEffect(() => {
     if (generationJobId) connect(generationJobId);
   }, [generationJobId, connect]);
+
+  // 就地編輯自動儲存：任何編輯（裁切 / 字幕 / 音量 / 運鏡開關 / 換曲 / undo-redo / 還原快照）
+  // 都會換掉 blueprint 物件參照 → 此效果 debounce 後落地。persistBlueprint 內以 persistedBlueprint
+  // 去重，故載入 / 生成結果（剛從磁碟讀回或 run_workflow 已寫）會 no-op，不冗餘回寫。
+  // 生成 / 載入中不自動存：避免與後端寫 PHASE4 競寫，且當下 blueprint 非使用者就地編輯。
+  useEffect(() => {
+    if (!blueprint || !currentProjectName || isProcessing || isLoadingBlueprint) return;
+    const timerId = setTimeout(() => persistBlueprint(currentProjectName), AUTOSAVE_DEBOUNCE_MS);
+    return () => clearTimeout(timerId);
+  }, [blueprint, currentProjectName, isProcessing, isLoadingBlueprint, persistBlueprint]);
 
   // 掛載 / 換專案：查是否有進行中生成 job，有就接回其即時進度（比照 Phase 1 重整接回，見 docs §10.9）。
   // 後端已校驗孤兒（重啟後回 null），故只在仍有有效 job 時才訂閱；無則維持讀磁碟藍圖的既有路徑。

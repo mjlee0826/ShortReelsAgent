@@ -65,9 +65,12 @@ export function createGenerationSlice(set, get) {
       try {
         const result = await apiService.fetchBlueprint(folderName);
         // 視為「初始載入」：重置選取與 Undo 堆疊（這份藍圖即新的起點）
+        const loaded = migrateBlueprintTextOverlays(result.blueprint);
         set({
           // 載入時把 legacy per-clip 字幕一次遷移成獨立字幕軌（與渲染 / 編輯一致）
-          blueprint: migrateBlueprintTextOverlays(result.blueprint),
+          blueprint: loaded,
+          // 剛從磁碟讀回即落地版，設為 autosave 去重基準（避免載入後立刻回寫同份）
+          persistedBlueprint: loaded,
           assetsRootUrl: result.assets_root_url,
           selection: { ...EMPTY_SELECTION },
           history: { past: [], future: [] },
@@ -172,19 +175,26 @@ export function createGenerationSlice(set, get) {
       if (type === PROGRESS_EVENT.JOB_FINISHED) {
         const result = event?.payload?.result || {};
         // AI 結果推進 Undo 快照（可一鍵還原，政策 C 安全網）；時間軸結構可能整個改變，故清空選取避免錯位
-        set((prev) => ({
-          blueprint: result.blueprint ? migrateBlueprintTextOverlays(result.blueprint) : prev.blueprint,
-          assetsRootUrl: result.assets_root_url ?? prev.assetsRootUrl,
-          isProcessing: false,
-          generationJobId: null,
-          generationStage: null,
-          history: result.blueprint ? pushHistory(prev.history, prev.blueprint) : prev.history,
-          selection: { ...EMPTY_SELECTION },
-          chatHistory: [
-            ...prev.chatHistory,
-            { role: 'system', content: '✅ 導演已更新劇本與時間軸！請查看左側預覽。' }
-          ]
-        }));
+        set((prev) => {
+          const nextBlueprint = result.blueprint
+            ? migrateBlueprintTextOverlays(result.blueprint)
+            : prev.blueprint;
+          return {
+            blueprint: nextBlueprint,
+            // run_workflow 已把這份結果寫入 PHASE4，設為 autosave 去重基準（避免生成完又回寫同份）
+            persistedBlueprint: result.blueprint ? nextBlueprint : prev.persistedBlueprint,
+            assetsRootUrl: result.assets_root_url ?? prev.assetsRootUrl,
+            isProcessing: false,
+            generationJobId: null,
+            generationStage: null,
+            history: result.blueprint ? pushHistory(prev.history, prev.blueprint) : prev.history,
+            selection: { ...EMPTY_SELECTION },
+            chatHistory: [
+              ...prev.chatHistory,
+              { role: 'system', content: '✅ 導演已更新劇本與時間軸！請查看左側預覽。' }
+            ]
+          };
+        });
         return;
       }
       if (type === PROGRESS_EVENT.JOB_ERROR) {
@@ -220,8 +230,11 @@ export function createGenerationSlice(set, get) {
       try {
         const data = await apiService.fetchBlueprint(folderName);
         if (data?.blueprint) {
+          const recovered = migrateBlueprintTextOverlays(data.blueprint);
           set((prev) => ({
-            blueprint: migrateBlueprintTextOverlays(data.blueprint),
+            blueprint: recovered,
+            // 從磁碟兜回即落地版，設為 autosave 去重基準
+            persistedBlueprint: recovered,
             assetsRootUrl: data.assets_root_url ?? prev.assetsRootUrl,
           }));
         }

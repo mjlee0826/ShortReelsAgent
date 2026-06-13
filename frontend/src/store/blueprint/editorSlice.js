@@ -24,6 +24,10 @@ export function createEditorSlice(set, get) {
     assetsRootUrl: '',
     // music-only 換曲進行中（配樂引擎抓取較久，用於彈窗 loading）
     isChangingMusic: false,
+    // 已落地到後端 PHASE4 的 blueprint「物件參照」：autosave 去重基準。
+    // 由 server-sourced 路徑（載入 / 生成結果）與 persistBlueprint 成功後設定；
+    // 當前 blueprint 與此參照相同時代表磁碟已是最新，autosave 直接 no-op（見 persistBlueprint）。
+    persistedBlueprint: null,
 
     // --- 編輯器互動狀態 ---
     // 目前選取對象：type 為 'clip'|'bgm'|'text'|'project'|null；clipIndex 僅在 type==='clip'、
@@ -118,12 +122,29 @@ export function createEditorSlice(set, get) {
           previous_bgm_track: get().blueprint?.bgm_track ?? null,
         });
         get().mutateBlueprint((bp) => ({ ...bp, bgm_track: result.bgm_track }));
+        // 換曲是明確 apply 動作：立即落地（不等 autosave debounce），杜絕「換完秒重整就消失」
+        await get().persistBlueprint(folderName);
         set({ isChangingMusic: false });
         return true;
       } catch (error) {
         alert(`換曲失敗：${extractErrorMessage(error)}`);
         set({ isChangingMusic: false });
         return false;
+      }
+    },
+
+    // 編輯器自動儲存：把當前 blueprint 落地後端 PHASE4，讓重整後 loadSavedBlueprint 能還原。
+    // 以 persistedBlueprint 參照去重：當前 blueprint 即上次落地版（剛載入 / 剛生成完）時直接 no-op，
+    // 避免「載入即回寫」與冗餘寫。失敗只記 console（沿用就地編輯不阻斷 UX 的風格，不彈 alert）。
+    persistBlueprint: async (folderName) => {
+      const bp = get().blueprint;
+      if (!folderName || !bp) return;
+      if (bp === get().persistedBlueprint) return;
+      try {
+        await apiService.saveBlueprint(folderName, bp);
+        set({ persistedBlueprint: bp });
+      } catch (error) {
+        console.warn('[Editor] 自動儲存藍圖失敗：', extractErrorMessage(error));
       }
     },
 

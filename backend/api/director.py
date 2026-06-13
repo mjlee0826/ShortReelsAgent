@@ -141,6 +141,27 @@ async def get_blueprint(folder_name: str, user_id: str = Depends(verify_token)):
     return result
 
 
+class SaveBlueprintRequest(BaseModel):
+    """編輯器自動儲存的請求體：前端送來要落地的當前完整 blueprint。"""
+    blueprint: Dict
+
+
+@router.put("/projects/{folder_name}/blueprint")
+async def save_blueprint(folder_name: str, req: SaveBlueprintRequest, user_id: str = Depends(verify_token)):
+    """
+    編輯器自動儲存：把前端當前完整 blueprint 落地 PHASE4，供重整後 get_blueprint 自動還原。
+
+    換曲 / 就地編輯 / 還原快照等不重新生成的變更，過去只存記憶體、重整即遺失；經此持久化後
+    重整可完整還原。找不到素材資料夾回 404（沿用 get_blueprint 的錯誤契約）。
+    """
+    try:
+        return await asyncio.to_thread(
+            director_service.save_blueprint, folder_name, req.blueprint, user_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 class ChangeMusicRequest(BaseModel):
     """music-only 換曲請求：只重挑配樂、不重剪時間軸。"""
     asset_folder_name: str

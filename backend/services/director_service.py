@@ -176,6 +176,34 @@ class DirectorService:
             print(f"⚠️ [Service] 轉換快取連結失敗: {e}")
             return None
 
+    def _inject_beats(self, bgm_track: dict, audio_dna: dict) -> None:
+        """
+        把 audio_dna.analysis 的節拍(bpm/beats/onsets)就地注入 bgm_track,供前端 punch 卡點。
+
+        beats/onsets 由 librosa 預先算好存於 audio_dna.analysis；LLM 不產出(故不入 BgmTrack schema),
+        在此 post-LLM 注入 dict。僅在分析到節拍(有 beats)時才覆寫,否則不動 bgm_track(保留沿用的
+        previous_bgm_track 節拍)。生成流程(run_workflow)與 music-only 換曲(change_music)共用,
+        避免兩處節拍注入邏輯漂移而讓換曲後 punch 失效。
+        """
+        if not (isinstance(bgm_track, dict) and isinstance(audio_dna, dict)):
+            return
+        analysis = audio_dna.get("analysis") or {}
+        if analysis.get("beats"):
+            bgm_track["bpm"] = analysis.get("bpm")
+            bgm_track["beats"] = analysis.get("beats", [])
+            bgm_track["onsets"] = analysis.get("onsets", [])
+
+    def _dump_blueprint(self, target_dir: str, blueprint: dict) -> None:
+        """
+        原子寫回最終藍圖(PHASE4):生成(run_workflow)與編輯器自動儲存(save_blueprint)共用。
+
+        以 atomic_write_json(寫唯一 temp + os.replace)取代 open('w') 直寫:NFS 上截斷+寫入非原子,
+        併發 / 半寫會讓 load_blueprint 讀到損毀檔。讀者由 read_json_tolerant 兜底,二者搭配恆見完整檔。
+        """
+        dump_path = os.path.join(target_dir, PHASE4_BLUEPRINT_FILENAME)
+        atomic_write_json(dump_path, blueprint)
+        print(f"💾 [Dump] 最終劇本藍圖已儲存至 {dump_path}")
+
     def _standardize(self, target_dir: str) -> None:
         """
         標準化某專案素材：掃 raw/ 原始檔，``_std`` 衍生檔輸出到 standardized/（分層，解計數錯亂）。
@@ -451,7 +479,6 @@ class DirectorService:
         phase1_dump_path = os.path.join(target_dir, PHASE1_METADATA_FILENAME)
         phase2_dump_path = os.path.join(target_dir, PHASE2_TEMPLATE_DNA_FILENAME)
         phase3_dump_path = os.path.join(target_dir, PHASE3_AUDIO_DNA_FILENAME)
-        blueprint_dump_path = os.path.join(target_dir, PHASE4_BLUEPRINT_FILENAME)
 
         raw_assets_metadata = []
         template_dna = None
@@ -555,25 +582,16 @@ class DirectorService:
             print(f"🎵 [Service] 已套用全域快取配樂連結: {audio_url}")
 
         # --- 6b. 自動運鏡卡點：節拍帶進 bgm_track（供前端 punch）---
-        # beats/onsets 由 librosa 預先算好存在 audio_dna.analysis；LLM 不產出（故不入 BgmTrack schema），
-        # 在此 post-LLM 注入 dict。僅在重新分析到節拍時覆寫，否則保留沿用的 previous_bgm_track 節拍。
         # 註：auto_motion / auto_punch 總開關已由 DirectorFacade 在 global_settings 初始化時寫入預設，
         #     生成後改由前端即時開關接管，此處不再寫旗標（運鏡是 render-time 視覺效果，與生成解耦）。
-        if isinstance(final_blueprint.get("bgm_track"), dict) and isinstance(audio_dna, dict):
-            analysis = audio_dna.get("analysis") or {}
-            if analysis.get("beats"):
-                final_blueprint["bgm_track"]["bpm"] = analysis.get("bpm")
-                final_blueprint["bgm_track"]["beats"] = analysis.get("beats", [])
-                final_blueprint["bgm_track"]["onsets"] = analysis.get("onsets", [])
+        self._inject_beats(final_blueprint.get("bgm_track"), audio_dna)
 
         # --- 6c. 關閉字幕：後端強制清空 text_overlays（雙保險）---
         # prompt 已提示 LLM 輸出空陣列；此處 post-LLM 再硬清一次，確保 LLM 不照做時也不會冒出字幕。
         if not subtitles:
             final_blueprint["text_overlays"] = []
 
-        with open(blueprint_dump_path, 'w', encoding='utf-8') as f:
-            json.dump(final_blueprint, f, ensure_ascii=False, indent=2)
-            print(f"💾 [Dump] 最終劇本藍圖已儲存至 {blueprint_dump_path}")
+        self._dump_blueprint(target_dir, final_blueprint)
 
         # 更新專案 meta（最後修改時間、素材數量、藍圖狀態）
         self._update_project_meta(target_dir, folder_name)
@@ -640,11 +658,26 @@ class DirectorService:
                 "source_start": 0.0,
                 "volume": prev.get("volume", 1.0),
             }
+            # 比照 run_workflow 注入新曲節拍：否則前端 bgm.beats 為空 → punch 卡點失效。
+            # source_start 已歸零、beats 為相對音檔起點秒數，前端 t - source_start 映射無偏移。
+            self._inject_beats(bgm_track, audio_dna)
         else:
             # 策略 none 或抓取失敗：移除配樂
             bgm_track = {"track_id": None}
 
         return {"bgm_track": bgm_track}
+
+    def save_blueprint(self, folder_name: str, blueprint: dict, user_id: str = None) -> dict:
+        """
+        編輯器自動儲存：把前端當前完整 blueprint 原子寫回 PHASE4，供重整後 load_blueprint 還原。
+
+        讓「磁碟 PHASE4 = 編輯器當前狀態」：換曲 / 就地編輯 / 還原快照等不重新生成的變更，
+        過去只存記憶體、重整即遺失（音樂 / 裁切 / 字幕…）；經此端點落地後重整可完整還原。
+        刻意不更新 project_meta（autosave 頻繁，has_blueprint 早已為 True，避免每次重算與競寫）。
+        """
+        target_dir = self._require_target_dir(folder_name, user_id)
+        self._dump_blueprint(target_dir, blueprint)
+        return {"saved": True}
 
     # ── 編輯器具名快照（版本檢查點）：解析專案路徑後委派 snapshot_store ──────────────
 

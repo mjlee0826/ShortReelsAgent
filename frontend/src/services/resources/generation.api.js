@@ -17,6 +17,12 @@ export const generationApi = {
     return response.data;
   },
 
+  // 編輯器自動儲存：把當前完整 blueprint 落地後端 PHASE4，供重整後自動還原；回傳 { saved: true }。
+  async saveBlueprint(projectName, blueprint) {
+    const response = await apiClient.put(`/api/projects/${projectName}/blueprint`, { blueprint });
+    return response.data;
+  },
+
   // 送出藍圖至後端雲端算圖，回傳 MP4 Blob。
   // 刻意走 apiClient（axios）而非裸 fetch：interceptor 會自動附上 Authorization token，
   // 修掉先前裸 fetch 缺 token 導致 render_mp4 被 verify_token 擋下的問題。
