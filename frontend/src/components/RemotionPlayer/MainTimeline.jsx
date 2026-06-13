@@ -1,7 +1,7 @@
 import React from 'react';
 import { Sequence, AbsoluteFill, useVideoConfig, Audio } from 'remotion';
 import ClipComponent from './ClipComponent';
-import { TRANSITION_FRAMES, ADJACENCY_THRESHOLD_SECONDS } from './constants';
+import { TRANSITION_FRAMES, ADJACENCY_THRESHOLD_SECONDS, PREMOUNT_LEAD_SECONDS } from './constants';
 import { thinBeatFrames } from '../../utils/motion';
 import { resolveBgmUrl } from '../../utils/assetUrl';
 
@@ -34,6 +34,10 @@ export default function MainTimeline({ blueprint, assetsRootUrl }) {
   const beatVideoTimes = (autoMotion && autoPunch && Array.isArray(bgm?.beats))
     ? bgm.beats.map((t) => (bgm.start_at || 0) + (t - (bgm.source_start || 0)))
     : [];
+
+  // 交界預掛載幀數：提前掛載下一段，使其 <video> 先 seek/decode 就緒，消除切片瞬間的卡頓。
+  // （第一段 from=0 無法再往前提前，故首段仍依賴 pauseWhenBuffering 兜底。）
+  const premountFrames = Math.round(fps * PREMOUNT_LEAD_SECONDS);
 
   return (
     <AbsoluteFill style={{ backgroundColor: 'black' }}>
@@ -75,7 +79,7 @@ export default function MainTimeline({ blueprint, assetsRootUrl }) {
         if (renderDuration <= 0) return null;
 
         return (
-          <Sequence key={`${clip.clip_id}-${index}`} from={fromFrame} durationInFrames={renderDuration}>
+          <Sequence key={`${clip.clip_id}-${index}`} from={fromFrame} durationInFrames={renderDuration} premountFor={premountFrames}>
             <ClipComponent
               clipData={clip}
               assetsRootUrl={assetsRootUrl}

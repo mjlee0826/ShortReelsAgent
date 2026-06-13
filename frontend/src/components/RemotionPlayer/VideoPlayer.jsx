@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useRef, useEffect } from 'react';
+import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
 import { Player } from '@remotion/player';
 import MainTimeline from './MainTimeline';
 import useBlueprintStore from '../../store/useBlueprintStore';
@@ -77,6 +77,14 @@ export default function VideoPlayer() {
   // 4. 【新增】嚴格判斷按鈕是否應該被禁用
   const isDownloadDisabled = isBlueprintEmpty || isRendering;
 
+  // 緩衝時於影片中央顯示轉圈圈：搭配 Player 的 showPosterWhenBuffering，僅在素材未就緒（buffering）
+  // 時觸發；正常暫停 / 未播放不顯示（未開啟對應 showPoster 旗標）。pointer-events-none 不擋底層控制列。
+  const renderBufferingSpinner = useCallback(() => (
+    <div className="w-full h-full flex items-center justify-center bg-black/25 pointer-events-none">
+      <FaSpinner className="animate-spin text-accent text-5xl drop-shadow-[0_0_12px_rgba(109,94,252,0.7)]" />
+    </div>
+  ), []);
+
   return (
     <div className="flex-1 flex flex-col items-center justify-center bg-canvas relative w-full h-full p-8">
       
@@ -147,9 +155,11 @@ export default function VideoPlayer() {
             compositionHeight={1920}
             resolutionScale={0.5}   
             style={{ width: '100%', height: '100%' }}
-            controls 
-            autoPlay 
-            loop     
+            controls
+            autoPlay
+            loop
+            showPosterWhenBuffering
+            renderPoster={renderBufferingSpinner}
           />
         </div>
       )}
