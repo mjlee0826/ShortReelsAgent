@@ -50,13 +50,19 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Short Reels Agent API", lifespan=lifespan)
 
-# 讀取允許連線的前端網址 (若未設定則預設為 localhost:5173)
-frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+# CORS 放行全部來源時使用的萬用字元(具名常數,避免 magic string)
+CORS_WILDCARD_ORIGIN = "*"
 
+# 讀取允許連線的前端網址 (若未設定則預設為 localhost:5173;填 "*" 代表放行全部)
+frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+allow_all_origins = frontend_url.strip() == CORS_WILDCARD_ORIGIN
+
+# 規範限制:Access-Control-Allow-Origin "*" 不可與 allow_credentials=True 並存,瀏覽器會拒絕。
+# 本服務以 Authorization(Bearer token)header 認證、不使用 cookie,故放行全部時關閉 credentials 即可。
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[frontend_url], 
-    allow_credentials=True,
+    allow_origins=[CORS_WILDCARD_ORIGIN] if allow_all_origins else [frontend_url],
+    allow_credentials=not allow_all_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
