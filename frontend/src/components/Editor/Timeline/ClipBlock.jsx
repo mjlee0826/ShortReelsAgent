@@ -1,4 +1,5 @@
 import React from 'react';
+import { resolveTextOverlay } from '../../../utils/textOverlay';
 
 // 拖邊裁切的把手寬度（左右各一）
 const EDGE_HANDLE_PX = 8;
@@ -18,6 +19,8 @@ const EDGE_HANDLE_PX = 8;
  */
 export default function ClipBlock({ clip, index, widthPx, isSelected, isDragging, onEdgeDown, onBodyDown }) {
   const hasTransition = clip.transition_in && clip.transition_in !== 'none';
+  // 字幕摘要：相容新結構 text_overlay 與 legacy overlay_text
+  const overlayText = resolveTextOverlay(clip)?.text;
 
   return (
     <div
@@ -34,8 +37,8 @@ export default function ClipBlock({ clip, index, widthPx, isSelected, isDragging
       >
         {hasTransition && <span className="absolute left-0 top-0 bottom-0 w-1 bg-accent/70 pointer-events-none" />}
         <span className="text-[11px] font-bold text-ink">{index + 1}</span>
-        {clip.overlay_text && (
-          <span className="block text-[10px] text-ink-faint truncate">💬 {clip.overlay_text}</span>
+        {overlayText && (
+          <span className="block text-[10px] text-ink-faint truncate">💬 {overlayText}</span>
         )}
       </div>
 

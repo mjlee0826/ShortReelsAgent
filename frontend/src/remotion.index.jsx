@@ -4,6 +4,7 @@ import { Composition, registerRoot } from 'remotion';
 import MainTimeline from './components/RemotionPlayer/MainTimeline';
 import { computeVideoMetadata } from './utils/timeline';
 import './index.css'; // 如果影片中有用到 Tailwind CSS 樣式，記得引入（index.css 與本檔同在 src/ 底下，用 ./）
+import './utils/fonts'; // 載入字幕字型（Noto Sans TC）：副作用會掛 delayRender，確保 SSR 算圖前字型就緒
 
 // Composition 的靜態預設規格；實際時長 / 幀率一律由 calculateMetadata 依注入的 props 覆寫。
 // Remotion 規定 Composition 必填這兩個欄位，故此處保留與預覽相同的安全回退值。

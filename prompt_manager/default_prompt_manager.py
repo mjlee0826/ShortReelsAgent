@@ -144,7 +144,10 @@ class DefaultPromptManager(BasePromptManager):
             "- transition_in：硬切用 'none'；情緒 / 場景落差大時用 'fade'（交叉淡入）。\n"
             "- filter：依氛圍選 'none' / 'cinematic' / 'grayscale' / 'blur'。\n"
             "- scale：可放大（如 1.1~1.2）做構圖微調（注意：為靜態縮放，非動態推鏡，勿描述成緩慢推進）。\n"
-            "- overlay_text：有重要對話或需綜藝效果時，填要顯示在畫面上的字幕。\n"
+            "- text_overlay：有重要對話或需綜藝效果時加字幕（物件；無字幕則設 null）。text 為字幕內容；\n"
+            "  vertical_position（0=畫面頂、100=畫面底，水平自動置中）依該段主體 bbox 放在『不擋主體』處——\n"
+            "  主體在畫面下半就取小值偏上、在上半就取大值偏下；上下邊界系統會自動夾進 safe-area，不必自己算平台 UI；\n"
+            "  size / color / outline / background / animation 控制樣式，整支盡量沿用一致的 size / color / outline，避免每段不同顯得廉價。\n"
             "- pip_video：需畫中畫時疊加另一畫面，position 僅支援 'top_right' / 'bottom_left'。\n"
             "- reason：每個片段請『先』在 reason 寫下導演決策考量（選材 / 轉場 / 變速 / 混音），再填其餘參數。\n\n"
         )

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Sequence, AbsoluteFill, useVideoConfig, Audio } from 'remotion';
 import ClipComponent from './ClipComponent';
+import TextOverlayLayer from './TextOverlayLayer';
 import { TRANSITION_FRAMES, ADJACENCY_THRESHOLD_SECONDS, PREMOUNT_LEAD_SECONDS } from './constants';
 import { thinBeatFrames } from '../../utils/motion';
 import { resolveBgmUrl } from '../../utils/assetUrl';
@@ -89,13 +90,8 @@ export default function MainTimeline({ blueprint, assetsRootUrl }) {
               durationInFrames={durationInFrames}
             />
             
-            {clip.overlay_text && (
-              <AbsoluteFill className="flex items-center justify-center pointer-events-none z-50">
-                <div className="text-white text-5xl font-bold text-center px-8 drop-shadow-2xl bg-black/40 rounded-xl p-4">
-                  {clip.overlay_text}
-                </div>
-              </AbsoluteFill>
-            )}
+            {/* 字幕疊加：讀結構化 text_overlay（相容 legacy overlay_text），樣式 / 定位 / 進出場見 TextOverlayLayer */}
+            <TextOverlayLayer clip={clip} durationInFrames={durationInFrames} />
           </Sequence>
         );
       })}

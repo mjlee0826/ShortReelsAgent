@@ -461,7 +461,7 @@ class DirectorService:
         # 提示詞增強(字幕 / 濾鏡開關)提前算:fork-join 的 music 分支需吃它作搜尋關鍵字來源
         enhanced_prompt = prompt
         if not subtitles:
-            enhanced_prompt += " (注意：本影片不需要任何字幕，請讓 overlay_text 保持為空)"
+            enhanced_prompt += " (注意：本影片不需要任何字幕，請讓每個片段的 text_overlay 保持為 null)"
         if not filters:
             enhanced_prompt += " (注意：請不要套用任何濾鏡，filter 欄位請設為 none)"
 

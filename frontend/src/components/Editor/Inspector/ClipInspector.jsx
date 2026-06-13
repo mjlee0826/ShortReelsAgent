@@ -1,6 +1,7 @@
 import React from 'react';
 import useBlueprintStore from '../../../store/useBlueprintStore';
 import { clipDuration } from '../../../utils/timeline';
+import { resolveTextOverlay, DEFAULT_OVERLAY } from '../../../utils/textOverlay';
 import { IconButton } from '../../ui';
 import { FaArrowLeft, FaArrowRight, FaTrashAlt } from 'react-icons/fa';
 import {
@@ -29,6 +30,41 @@ const MOTION_OPTIONS = [
   { value: 'pan', label: '平移' },
   { value: 'punch', label: '卡點' },
 ];
+// 字幕樣式選項（對應 schema 的 TextOverlay enum 與前端 SUBTITLE_*_MAP）
+const TEXT_SIZE_OPTIONS = [
+  { value: 's', label: '小' },
+  { value: 'm', label: '中' },
+  { value: 'l', label: '大' },
+  { value: 'xl', label: '特大' },
+];
+const TEXT_COLOR_OPTIONS = [
+  { value: 'white', label: '白' },
+  { value: 'black', label: '黑' },
+  { value: 'yellow', label: '黃' },
+  { value: 'accent', label: '品牌紫' },
+];
+const TEXT_OUTLINE_OPTIONS = [
+  { value: 'none', label: '無' },
+  { value: 'outline', label: '描邊' },
+  { value: 'shadow', label: '陰影' },
+  { value: 'outline_shadow', label: '描邊+陰影' },
+];
+const TEXT_BG_OPTIONS = [
+  { value: 'none', label: '無' },
+  { value: 'solid', label: '實底' },
+  { value: 'blur', label: '霧面' },
+  { value: 'pill', label: '膠囊' },
+];
+const TEXT_ANIM_OPTIONS = [
+  { value: 'none', label: '無' },
+  { value: 'fade', label: '淡入' },
+  { value: 'slide_up', label: '上滑' },
+  { value: 'pop', label: '彈跳' },
+];
+// 字幕垂直位置滑桿範圍（0=畫面頂、100=畫面底；預設取自 DEFAULT_OVERLAY）
+const VPOS_MIN = 0;
+const VPOS_MAX = 100;
+const VPOS_STEP = 1;
 
 // 控制項數值範圍（具名常數，禁 magic number）
 const SCALE_MIN = 1.0;
@@ -68,6 +104,15 @@ export default function ClipInspector() {
 
   const pip = clip.pip_video;
   const pipSummary = pip?.clip_id ? `${pip.clip_id}（${pip.position || 'top_right'}）` : '無';
+
+  // 字幕：resolve 後含預設（overlay 為 null 表示此片段無字幕）。
+  // 編輯時把文字 + 樣式合併寫回 text_overlay；text 清空即整個物件設 null（＝無字幕，與 schema 契約一致）。
+  const overlay = resolveTextOverlay(clip);
+  const ov = overlay || { text: '', ...DEFAULT_OVERLAY };
+  const setOverlay = (patch) => {
+    const next = { ...ov, ...patch };
+    set('text_overlay', next.text && next.text.trim() ? next : null);
+  };
 
   // 刪除前確認，避免誤刪
   const handleDelete = () => {
@@ -136,11 +181,28 @@ export default function ClipInspector() {
       {/* 字幕 */}
       <InspectorSection title="字幕">
         <TextAreaRow
-          label="疊加文字 (overlay_text)"
-          value={clip.overlay_text}
+          label="字幕文字"
+          value={ov.text}
           placeholder="此片段要顯示的字幕 / 花字（留空為無）"
-          onChange={(v) => set('overlay_text', v)}
+          onChange={(v) => setOverlay({ text: v })}
         />
+        {/* 有字幕時才展開樣式控制（無字幕時只留輸入框） */}
+        {overlay && (
+          <>
+            <SliderRow
+              label="垂直位置"
+              value={ov.vertical_position ?? DEFAULT_OVERLAY.vertical_position}
+              min={VPOS_MIN} max={VPOS_MAX} step={VPOS_STEP}
+              onChange={(v) => setOverlay({ vertical_position: v })}
+              format={(v) => `${Math.round(v ?? DEFAULT_OVERLAY.vertical_position)}%`}
+            />
+            <SelectRow label="字級" value={ov.size || DEFAULT_OVERLAY.size} options={TEXT_SIZE_OPTIONS} onChange={(v) => setOverlay({ size: v })} />
+            <SelectRow label="顏色" value={ov.color || DEFAULT_OVERLAY.color} options={TEXT_COLOR_OPTIONS} onChange={(v) => setOverlay({ color: v })} />
+            <SelectRow label="描邊" value={ov.outline || DEFAULT_OVERLAY.outline} options={TEXT_OUTLINE_OPTIONS} onChange={(v) => setOverlay({ outline: v })} />
+            <SelectRow label="底框" value={ov.background || DEFAULT_OVERLAY.background} options={TEXT_BG_OPTIONS} onChange={(v) => setOverlay({ background: v })} />
+            <SelectRow label="動畫" value={ov.animation || DEFAULT_OVERLAY.animation} options={TEXT_ANIM_OPTIONS} onChange={(v) => setOverlay({ animation: v })} />
+          </>
+        )}
       </InspectorSection>
 
       {/* 音訊 */}

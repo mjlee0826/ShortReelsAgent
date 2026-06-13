@@ -12,6 +12,7 @@
   "dependencies": {
     "@logto/react": "^4.0.14",
     "@remotion/cli": "^4.0.451",
+    "@remotion/google-fonts": "^4.0.451",
     "@remotion/player": "^4.0.451",
     "@tailwindcss/vite": "^4.2.4",
     "axios": "^1.15.2",

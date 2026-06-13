@@ -38,3 +38,66 @@ export const PIP_STYLE = {
   Z_INDEX: 20,
   EDGE_OFFSET: '3%', // 距畫面邊緣的內縮量（四角共用）
 };
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 字幕（TextOverlay）相關常數：集中管理，渲染端只做機械式組裝（比照 FILTER_MAP）。
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 平台 UI 安全區（佔畫面高度的百分比）：字幕垂直錨點會被線性映進 [TOP_PCT, 100-BOTTOM_PCT]，
+ * 確保任何 vertical_position 都不壓到 IG/TikTok 上方狀態列與下方說明 / 互動按鈕。
+ */
+export const SAFE_AREA = {
+  TOP_PCT: 12, // 頂部保留：狀態列 / 帳號資訊
+  BOTTOM_PCT: 18, // 底部保留：說明文字 / 互動按鈕列
+};
+
+/** 字幕 z 軸（疊在主畫面與 PiP 之上）。 */
+export const SUBTITLE_Z_INDEX = 50;
+
+/** 字級分級 → 合成空間（1080×1920）的字體大小（px）。 */
+export const SUBTITLE_SIZE_MAP = {
+  s: 48,
+  m: 64,
+  l: 84,
+  xl: 110,
+};
+
+/** 字幕顏色 enum → 實際色碼（accent 與 index.css 的 --color-accent 同步）。 */
+export const SUBTITLE_COLOR_MAP = {
+  white: '#ffffff',
+  black: '#141414',
+  yellow: '#ffe14d',
+  accent: '#6d5efc',
+};
+
+/** 各字幕顏色對應的『描邊對比色』：淺字配深邊、深字配淺邊，確保描邊真的拉開對比。 */
+export const SUBTITLE_OUTLINE_CONTRAST = {
+  white: '#000000',
+  black: '#ffffff',
+  yellow: '#000000',
+  accent: '#000000',
+};
+
+/** 描邊粗細（合成空間 px）。 */
+export const SUBTITLE_OUTLINE_WIDTH_PX = 2;
+
+/** 柔和投影字串（shadow / outline_shadow 用）。 */
+export const SUBTITLE_DROP_SHADOW = '0 4px 14px rgba(0,0,0,0.55)';
+
+/** 底框 enum → 樣式片段（none 為空；其餘墊底以保可讀性）。 */
+export const SUBTITLE_BG_MAP = {
+  none: {},
+  solid: { backgroundColor: 'rgba(0,0,0,0.55)' },
+  blur: { backgroundColor: 'rgba(0,0,0,0.30)', backdropFilter: 'blur(8px)' },
+  pill: { backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: '9999px' },
+};
+
+/** 有底框時的內距（合成空間 px；none 不套用）。 */
+export const SUBTITLE_BOX_PADDING = '14px 28px';
+
+/** 文字塊相對畫面寬度的最大寬度（%）：避免長句頂到左右邊。 */
+export const SUBTITLE_MAX_WIDTH_PCT = 86;
+
+/** 字幕進出場動畫的幀數（進場 attack / 出場 decay 共用；約 0.27s@30fps）。 */
+export const SUBTITLE_ANIM_FRAMES = 8;
