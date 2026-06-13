@@ -71,8 +71,6 @@ const useBlueprintStore = create((set, get) => ({
   templateSource: '',
   enableSubtitles: true,
   enableFilters: true,
-  // 是否啟用自動運鏡（Ken Burns + 卡點）：送 enable_motion，後端寫進 global_settings.auto_motion
-  enableMotion: true,
   musicStrategy: 'search_copyright',
 
   // --- 音訊上傳狀態 ---
@@ -275,6 +273,13 @@ const useBlueprintStore = create((set, get) => ({
     bgm_track: { ...(bp.bgm_track || {}), [key]: value },
   })),
 
+  // 更新全域設定欄位（自動運鏡 / 卡點等 render-time 視覺旗標）；即時改 blueprint，預覽立即重算、免重新生成。
+  // 走 mutateBlueprint 故會推進 Undo、並隨快照持久化；global_settings 不存在時補成空物件再寫入。
+  updateGlobalSettingField: (key, value) => get().mutateBlueprint((bp) => ({
+    ...bp,
+    global_settings: { ...(bp.global_settings || {}), [key]: value },
+  })),
+
   // music-only 換曲：只重挑配樂、保留時間軸；成功後就地套用新 bgm_track（推進 Undo，可還原）
   changeMusic: async (folderName, { musicStrategy, userMusicFile, userPrompt }) => {
     if (!folderName || !get().blueprint) return;
@@ -394,7 +399,6 @@ const useBlueprintStore = create((set, get) => ({
         template_source: state.templateSource || null,
         enable_subtitles: state.enableSubtitles,
         enable_filters: state.enableFilters,
-        enable_motion: state.enableMotion,
         previous_timeline: isRefinement && state.blueprint ? state.blueprint : null,
         music_strategy: state.musicStrategy,
         user_music_file: state.uploadedMusicFile || null,

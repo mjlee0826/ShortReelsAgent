@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FaChevronDown, FaChevronRight, FaLock } from 'react-icons/fa';
+import { FaChevronDown, FaChevronRight, FaLock, FaCheckSquare, FaRegSquare } from 'react-icons/fa';
 
 /**
  * 檢視器共用小控制項（DRY）。
@@ -126,6 +126,35 @@ export function TextAreaRow({ label, value, placeholder, onChange, rows = 2 }) {
         className="bg-surface-2 text-ink text-base p-3 rounded-lg border border-border focus:outline-none focus:border-accent resize-none placeholder-ink-faint leading-relaxed"
       />
     </div>
+  );
+}
+
+/**
+ * ToggleRow：布林開關列（如自動運鏡 / 卡點總開關）。以勾選框呈現，與生成表單的勾選樣式一致。
+ * disabled 時置灰且不可點，用於表達「從屬於另一開關」的相依關係（例：卡點需先開運鏡）。
+ * @param {string} label 欄位標籤
+ * @param {boolean} checked 是否勾選
+ * @param {(next: boolean) => void} onChange 勾選變更回呼（傳出切換後的布林值）
+ * @param {string} [hint] 標籤下方的輔助說明
+ * @param {boolean} [disabled] 是否置灰不可點
+ */
+export function ToggleRow({ label, checked, onChange, hint, disabled = false }) {
+  return (
+    <Row label={label} hint={hint}>
+      <button
+        type="button"
+        disabled={disabled}
+        aria-pressed={checked}
+        onClick={() => onChange(!checked)}
+        className={`flex items-center text-lg shrink-0 transition-colors ${
+          disabled ? 'opacity-40 cursor-not-allowed text-ink-faint' : 'cursor-pointer hover:text-ink'
+        }`}
+      >
+        {checked
+          ? <FaCheckSquare className={disabled ? '' : 'text-accent'} />
+          : <FaRegSquare />}
+      </button>
+    </Row>
   );
 }
 

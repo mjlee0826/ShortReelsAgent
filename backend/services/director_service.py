@@ -407,7 +407,7 @@ class DirectorService:
 
     def run_workflow(self, prompt: str, folder_name: str, user_id: str = None,
                     template: str = None,
-                    subtitles: bool = True, filters: bool = True, motion: bool = True, old_timeline: dict = None,
+                    subtitles: bool = True, filters: bool = True, old_timeline: dict = None,
                     music_strategy: str = "search_copyright",
                     user_music_file: str = None,
                     regenerate_music: bool = True,
@@ -422,7 +422,7 @@ class DirectorService:
         with cost_session() as ledger:
             result = self._run_workflow_inner(
                 prompt, folder_name, user_id=user_id, template=template,
-                subtitles=subtitles, filters=filters, motion=motion, old_timeline=old_timeline,
+                subtitles=subtitles, filters=filters, old_timeline=old_timeline,
                 music_strategy=music_strategy, user_music_file=user_music_file,
                 regenerate_music=regenerate_music, previous_bgm_track=previous_bgm_track,
                 tracker=tracker,
@@ -433,7 +433,7 @@ class DirectorService:
 
     def _run_workflow_inner(self, prompt: str, folder_name: str, user_id: str = None,
                     template: str = None,
-                    subtitles: bool = True, filters: bool = True, motion: bool = True, old_timeline: dict = None,
+                    subtitles: bool = True, filters: bool = True, old_timeline: dict = None,
                     music_strategy: str = "search_copyright",
                     user_music_file: str = None,
                     regenerate_music: bool = True,
@@ -554,18 +554,17 @@ class DirectorService:
             final_blueprint["bgm_track"]["track_id"] = audio_url
             print(f"🎵 [Service] 已套用全域快取配樂連結: {audio_url}")
 
-        # --- 6b. 自動運鏡：節拍帶進 bgm_track（供前端卡點）+ 開關寫進 global_settings ---
+        # --- 6b. 自動運鏡卡點：節拍帶進 bgm_track（供前端 punch）---
         # beats/onsets 由 librosa 預先算好存在 audio_dna.analysis；LLM 不產出（故不入 BgmTrack schema），
         # 在此 post-LLM 注入 dict。僅在重新分析到節拍時覆寫，否則保留沿用的 previous_bgm_track 節拍。
+        # 註：auto_motion / auto_punch 總開關已由 DirectorFacade 在 global_settings 初始化時寫入預設，
+        #     生成後改由前端即時開關接管，此處不再寫旗標（運鏡是 render-time 視覺效果，與生成解耦）。
         if isinstance(final_blueprint.get("bgm_track"), dict) and isinstance(audio_dna, dict):
             analysis = audio_dna.get("analysis") or {}
             if analysis.get("beats"):
                 final_blueprint["bgm_track"]["bpm"] = analysis.get("bpm")
                 final_blueprint["bgm_track"]["beats"] = analysis.get("beats", [])
                 final_blueprint["bgm_track"]["onsets"] = analysis.get("onsets", [])
-        # 自動運鏡總開關落地（前端 render-time 依此決定是否套用，可隨藍圖持久化 / Undo）
-        if isinstance(final_blueprint.get("global_settings"), dict):
-            final_blueprint["global_settings"]["auto_motion"] = motion
 
         with open(blueprint_dump_path, 'w', encoding='utf-8') as f:
             json.dump(final_blueprint, f, ensure_ascii=False, indent=2)

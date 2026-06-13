@@ -24,9 +24,10 @@ export default function RegeneratePanel({ onClose }) {
         </div>
       )}
 
-      <p className="text-xs text-ink-faint mb-4 leading-relaxed">
-        變更以下設定將請 AI 重新生成整支影片。手動編輯的細節可能被覆蓋，必要時可用上方「復原」還原。
-      </p>
+      {/* 手動編輯遺失警訊（一律顯示）：重新生成以全新藍圖取代，逐段就地編輯可能被覆蓋 */}
+      <div className="bg-warning/10 border-l-4 border-warning text-warning px-4 py-3 text-sm rounded-r-xl mb-5">
+        ⚠️ 重新生成會以全新藍圖取代目前影片，<strong>手動編輯的結果可能消失</strong>；必要時可用上方「復原」還原。
+      </div>
 
       <GenerationForm submitLabel="🔄 重新生成" showProject={false} onSubmitted={onClose} />
     </Modal>

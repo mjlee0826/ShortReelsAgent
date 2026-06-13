@@ -28,7 +28,7 @@ const PROMPT_ROWS = 5;
 export default function GenerationForm({ submitLabel = '🎬 開始生成影片', showProject = true, onSubmitted }) {
   const {
     userPrompt, templateSource,
-    enableSubtitles, enableFilters, enableMotion,
+    enableSubtitles, enableFilters,
     musicStrategy, uploadedMusicFile, isUploadingMusic,
     isProcessing, generationStage, updateForm, submitPrompt, uploadMusic, clearUploadedMusic,
   } = useBlueprintStore();
@@ -154,13 +154,7 @@ export default function GenerationForm({ submitLabel = '🎬 開始生成影片'
         >
           {enableFilters ? <FaCheckSquare className="text-accent text-lg" /> : <FaRegSquare className="text-lg" />} 啟用濾鏡
         </button>
-        <button
-          type="button"
-          onClick={() => updateForm('enableMotion', !enableMotion)}
-          className="flex items-center gap-2 text-sm font-medium text-ink-muted hover:text-ink transition-colors"
-        >
-          {enableMotion ? <FaCheckSquare className="text-accent text-lg" /> : <FaRegSquare className="text-lg" />} 啟用自動運鏡
-        </button>
+        {/* 自動運鏡 / 卡點改為編輯器「專案 / 輸出」面板的即時開關（render-time 視覺效果，免重新生成）*/}
       </div>
 
       {/* 6. 提交（生成中顯示 WS 即時階段文案：下載配樂 / 範本語意分析 / 聽寫中…，兩分支交錯更新） */}

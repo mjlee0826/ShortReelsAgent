@@ -36,8 +36,11 @@ export default function MainTimeline({ blueprint, assetsRootUrl }) {
   // 【自動運鏡】總開關（舊藍圖無此欄位 → 視為關閉，不改變既有專案行為）+ 節拍時間映射（一次算好）。
   // 音檔 beat 秒 → 影片時間軸秒：影片時間 = bgm 起播秒 +（beat 秒 − 擷取起點秒）。
   const autoMotion = blueprint.global_settings?.auto_motion ?? false;
+  // 【卡點 Punch】獨立子開關（編輯器即時可切）：舊藍圖無此欄位 → 預設 true，維持「運鏡開即有卡點」的既有行為。
+  // 關閉時不映射任何節拍 → 各片段 beatsInClipFrames 為空 → punch 自動退化為 0，但 base Ken Burns 運鏡不受影響。
+  const autoPunch = blueprint.global_settings?.auto_punch ?? true;
   const bgm = blueprint.bgm_track;
-  const beatVideoTimes = (autoMotion && Array.isArray(bgm?.beats))
+  const beatVideoTimes = (autoMotion && autoPunch && Array.isArray(bgm?.beats))
     ? bgm.beats.map((t) => (bgm.start_at || 0) + (t - (bgm.source_start || 0)))
     : [];
 

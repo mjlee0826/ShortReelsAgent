@@ -3,6 +3,15 @@ from director_agent.context_compressor import ContextCompressor
 from director_agent.states.casting_state import CastingState
 from director_agent.states.scheduling_state import SchedulingState
 
+# ── 藍圖預設值（禁 magic number / magic string，集中具名）──────────────────────────
+# 運鏡 / 卡點為純 render-time 視覺旗標，與 AI 決策無關：生成時固定給開啟預設，
+# 之後完全交由前端「專案 / 輸出」面板的即時開關控制（不再透過生成參數 / 重新生成）。
+DEFAULT_AUTO_MOTION = True
+DEFAULT_AUTO_PUNCH = True
+# 逐段運鏡預設：LLM 不輸出 motion，由後端統一補此值（前端視 'auto' 為依索引自動輪替運鏡）。
+DEFAULT_CLIP_MOTION = "auto"
+
+
 class DirectorFacade:
     """
     Facade Pattern: Phase 4 總指揮。
@@ -73,13 +82,24 @@ class DirectorFacade:
         # 如果最高 FPS 達到或超過高幀標準 (例如 50 以上)，則全局設定為 60，否則為 30
         target_fps = 60 if max_fps >= 50.0 else 30
 
+        # LLM 不再輸出逐段 motion（已移出 response schema）：在此對每段補預設運鏡值，
+        # 讓藍圖欄位完整（SSOT）；timeline 為 list[dict]（JSON parse 而來），故直接 setdefault。
+        timeline = context["final_timeline"] or []
+        for clip in timeline:
+            if isinstance(clip, dict):
+                clip.setdefault("motion", DEFAULT_CLIP_MOTION)
+
         final_blueprint = {
+            # 運鏡 / 卡點旗標於此初始化（與 fps / 比例同為 render-time 全域設定），
+            # 取代過去由 service 層吃 enable_motion 參數寫入的做法；生成後由前端即時開關接管。
             "global_settings": {
                 "fps": target_fps,
-                "aspect_ratio": "9:16"
+                "aspect_ratio": "9:16",
+                "auto_motion": DEFAULT_AUTO_MOTION,
+                "auto_punch": DEFAULT_AUTO_PUNCH,
             },
             "bgm_track": context.get("bgm_track", {"track_id": None}), # ⬅️ 新增這一行
-            "timeline": context["final_timeline"]
+            "timeline": timeline
         }
 
         # 不重抓配樂（純對話微調）：直接沿用上一版 bgm_track，覆蓋 LLM 可能重寫的內容，

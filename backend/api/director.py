@@ -36,8 +36,8 @@ class GenerateRequest(BaseModel):
     template_source: Optional[str] = None
     enable_subtitles: bool = True
     enable_filters: bool = True
-    # 是否啟用自動運鏡（Ken Burns + 卡點）：寫入 blueprint.global_settings.auto_motion 供前端渲染決定
-    enable_motion: bool = True
+    # 註：自動運鏡 / 卡點為純 render-time 視覺旗標，已由 DirectorFacade 在 global_settings 給開啟預設，
+    #     生成後完全交由前端「專案 / 輸出」面板的即時開關控制，故不再經此生成參數（不需重新生成即可切換）。
     previous_timeline: Optional[Dict] = None
 
     # 配樂策略：由前端明確選擇，不依賴 AI 推測
@@ -101,7 +101,6 @@ async def generate_timeline(req: GenerateRequest, user_id: str = Depends(verify_
                 template=req.template_source,
                 subtitles=req.enable_subtitles,
                 filters=req.enable_filters,
-                motion=req.enable_motion,
                 old_timeline=req.previous_timeline,
                 music_strategy=req.music_strategy,
                 user_music_file=req.user_music_file,
