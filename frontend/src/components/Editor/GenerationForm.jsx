@@ -1,17 +1,13 @@
 import React from 'react';
 import useBlueprintStore from '../../store/useBlueprintStore';
 import useProjectStore from '../../store/useProjectStore';
-import { FaFilm, FaLink, FaMagic, FaCheckSquare, FaRegSquare, FaMusic, FaSpinner, FaTimes } from 'react-icons/fa';
+import { FaFilm, FaLink, FaMagic, FaCheckSquare, FaRegSquare, FaMusic } from 'react-icons/fa';
 import { Input, Select, Button } from '../ui';
+import { makeMusicOptions, MUSIC_NONE } from '../../constants/music';
+import MusicUploadField from './MusicUploadField';
 
-// 配樂策略選項（具名常數，避免散落 magic string）
-const MUSIC_OPTIONS = [
-  { value: 'search_copyright', label: '🎵 搜尋配樂（可能含版權）' },
-  { value: 'search_free', label: '🆓 搜尋免費配樂 (Jamendo CC 授權)' },
-  { value: 'none', label: '🔇 不加配樂（自行在發布平台套用）' },
-];
-const MUSIC_NONE = 'none';
-const ALLOWED_AUDIO_ACCEPT = '.mp3,.wav,.m4a,.aac,.flac,.ogg';
+// 配樂策略選項（none 標籤：生成情境用「不加配樂」）
+const MUSIC_OPTIONS = makeMusicOptions('🔇 不加配樂（自行在發布平台套用）');
 const PROMPT_ROWS = 5;
 
 /**
@@ -88,39 +84,15 @@ export default function GenerationForm({ submitLabel = '🎬 開始生成影片'
         />
 
         {musicStrategy !== MUSIC_NONE && (
-          <div className="flex flex-col gap-1.5 mt-1">
-            <label className="text-xs text-ink-faint px-1">📁 上傳自訂 BGM（選填，優先於搜尋策略）</label>
-            {uploadedMusicFile ? (
-              <div className="flex items-center gap-2 bg-success/10 border border-success/30 rounded-xl px-3 py-2">
-                <span className="text-success text-sm flex-1 truncate">✓ {uploadedMusicFile}</span>
-                <button
-                  type="button"
-                  onClick={clearUploadedMusic}
-                  className="text-ink-faint hover:text-danger transition-colors shrink-0"
-                  title="移除自訂音樂"
-                >
-                  <FaTimes />
-                </button>
-              </div>
-            ) : (
-              <label
-                className={`flex items-center justify-center gap-2 p-2.5 rounded-xl border border-dashed border-border-strong cursor-pointer transition-colors text-sm text-ink-faint ${
-                  isUploadingMusic ? 'opacity-50 cursor-not-allowed' : 'hover:border-accent hover:text-accent'
-                }`}
-              >
-                {isUploadingMusic
-                  ? <><FaSpinner className="animate-spin" /> 上傳中...</>
-                  : '+ 選擇音訊檔案 (.mp3 / .wav / .m4a)'}
-                <input
-                  type="file"
-                  accept={ALLOWED_AUDIO_ACCEPT}
-                  onChange={handleMusicUpload}
-                  disabled={isUploadingMusic}
-                  className="hidden"
-                />
-              </label>
-            )}
-          </div>
+          <MusicUploadField
+            uploadedFile={uploadedMusicFile}
+            isUploading={isUploadingMusic}
+            onSelectFile={handleMusicUpload}
+            onClear={clearUploadedMusic}
+            label="📁 上傳自訂 BGM（選填，優先於搜尋策略）"
+            labelClassName="text-xs text-ink-faint px-1"
+            className="mt-1"
+          />
         )}
       </div>
 

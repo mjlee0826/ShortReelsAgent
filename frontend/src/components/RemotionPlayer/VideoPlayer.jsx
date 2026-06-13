@@ -3,6 +3,7 @@ import { Player } from '@remotion/player';
 import MainTimeline from './MainTimeline';
 import useBlueprintStore from '../../store/useBlueprintStore';
 import { apiService } from '../../services/api.service';
+import { extractErrorMessage } from '../../utils/errorMessage';
 import { computeVideoMetadata } from '../../utils/timeline';
 import { useAssetPrefetch } from './useAssetPrefetch';
 // 【新增】引入科技感圖示 (包含 FaRocket 增加動態感)
@@ -67,7 +68,7 @@ export default function VideoPlayer() {
       a.remove();
       window.URL.revokeObjectURL(url);
     } catch (error) {
-      const msg = error.response?.data?.detail || error.message || String(error);
+      const msg = extractErrorMessage(error);
       alert(`❌ 匯出失敗：${msg}`);
     } finally {
       setIsRendering(false);

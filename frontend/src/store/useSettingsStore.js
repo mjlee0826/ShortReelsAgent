@@ -7,6 +7,7 @@
  */
 import { create } from 'zustand';
 import { apiService } from '../services/api.service';
+import { extractErrorMessage } from '../utils/errorMessage';
 
 // 設定預設值（與後端 UserSettings 預設對齊；後端缺檔時亦回這組值）
 const DEFAULT_SETTINGS = {
@@ -30,7 +31,7 @@ const useSettingsStore = create((set, get) => ({
       const settings = await apiService.fetchSettings();
       set({ settings, isLoading: false });
     } catch (error) {
-      const msg = error.response?.data?.detail || error.message || String(error);
+      const msg = extractErrorMessage(error);
       set({ errorMsg: `載入設定失敗：${msg}`, isLoading: false });
     }
   },
@@ -45,7 +46,7 @@ const useSettingsStore = create((set, get) => ({
       const settings = await apiService.updateSettings(patch);
       set({ settings, isSaving: false });
     } catch (error) {
-      const msg = error.response?.data?.detail || error.message || String(error);
+      const msg = extractErrorMessage(error);
       set({ settings: prev, isSaving: false, errorMsg: `儲存設定失敗：${msg}` });
     }
   },

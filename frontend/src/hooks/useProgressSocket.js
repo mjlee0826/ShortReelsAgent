@@ -10,12 +10,8 @@
  */
 import { useCallback, useEffect, useRef } from 'react';
 import { useLogto } from '@logto/react';
-
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5174';
-// 換取 access token 時指定的 API resource（與 api.service 一致）
-const API_RESOURCE = import.meta.env.VITE_LOGTO_API_RESOURCE;
-// 收到這些事件型態即視為工作流結束，主動關閉連線
-const TERMINAL_EVENT_TYPES = new Set(['job_finished', 'job_error']);
+import { BACKEND_URL, API_RESOURCE } from '../config/env';
+import { TERMINAL_EVENT_TYPES } from '../constants/events';
 
 /** 把後端 http(s) base 轉成 ws(s) base。 */
 function toWebSocketBase(httpUrl) {

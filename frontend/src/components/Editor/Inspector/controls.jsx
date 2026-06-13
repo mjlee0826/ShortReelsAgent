@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FaChevronDown, FaChevronRight, FaLock, FaCheckSquare, FaRegSquare } from 'react-icons/fa';
+import { FaChevronDown, FaChevronRight, FaChevronLeft, FaLock, FaCheckSquare, FaRegSquare } from 'react-icons/fa';
 
 /**
  * 檢視器共用小控制項（DRY）。
@@ -7,6 +7,27 @@ import { FaChevronDown, FaChevronRight, FaLock, FaCheckSquare, FaRegSquare } fro
  * 提供分組容器與各式列控制項（滑桿 / 下拉 / 文字框 / 數字 / 唯讀），
  * 讓 ClipInspector、BgmInspector、ProjectInspector 以一致樣式組裝欄位。
  */
+
+/**
+ * InspectorBackRow：返回全域設定的麵包屑列（呈現層）。
+ *
+ * 選中片段 / 配樂後右側檢視器會切離全域（專案）面板，編輯器內原本缺少
+ * 「取消選取」的導線；此列補足該導線。實際清除選取的動作由呼叫端透過
+ * onBack 注入（通常為 store 的 clearSelection），維持本模組純呈現、不耦合 store。
+ * @param {() => void} onBack 點擊時觸發
+ * @param {string} [label] 顯示文字
+ */
+export function InspectorBackRow({ onBack, label = '回到全域設定' }) {
+  return (
+    <button
+      type="button"
+      onClick={onBack}
+      className="w-full flex items-center gap-1.5 px-5 py-2 text-xs text-ink-faint hover:text-ink hover:bg-surface-2/60 border-b border-border transition-colors cursor-pointer"
+    >
+      <FaChevronLeft size={10} /> {label}
+    </button>
+  );
+}
 
 /**
  * InspectorSection：檢視器分組容器，可選收合。

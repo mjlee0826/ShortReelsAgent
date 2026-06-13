@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { FaExclamationCircle } from 'react-icons/fa';
 import { Modal, Spinner, Badge } from '../ui';
 import { apiService } from '../../services/api.service';
+import { extractErrorMessage } from '../../utils/errorMessage';
 import { hasValue, formatScore } from './assetMeta';
 import AssetMediaViewer from './AssetMediaViewer';
 import AssetMetaPanel from './AssetMetaPanel';
@@ -62,7 +63,7 @@ export default function AssetDetailModal({ projectName, path, filename, thumbnai
     apiService.fetchAssetDetail(projectName, path)
       .then((data) => { if (active) { setDetail(data); setErrorMsg(''); } })
       .catch((error) => {
-        if (active) setErrorMsg(error.response?.data?.detail || error.message || String(error));
+        if (active) setErrorMsg(extractErrorMessage(error));
       })
       .finally(() => { if (active) setIsLoading(false); });
     return () => { active = false; };

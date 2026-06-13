@@ -4,7 +4,7 @@ import { clipDuration } from '../../../utils/timeline';
 import { IconButton } from '../../ui';
 import { FaArrowLeft, FaArrowRight, FaTrashAlt } from 'react-icons/fa';
 import {
-  InspectorSection, SliderRow, SelectRow, NumberRow, TextAreaRow, ReadonlyRow,
+  InspectorSection, InspectorBackRow, SliderRow, SelectRow, NumberRow, TextAreaRow, ReadonlyRow,
 } from './controls';
 
 // 濾鏡 / 轉場選項（對應 ClipComponent 的 FILTER_MAP 與 schema）
@@ -59,6 +59,7 @@ export default function ClipInspector() {
   const updateClipField = useBlueprintStore((s) => s.updateClipField);
   const reorderClips = useBlueprintStore((s) => s.reorderClips);
   const removeClip = useBlueprintStore((s) => s.removeClip);
+  const clearSelection = useBlueprintStore((s) => s.clearSelection);
 
   if (!clip) return null;
 
@@ -77,6 +78,9 @@ export default function ClipInspector() {
 
   return (
     <div className="flex flex-col">
+      {/* 取消選取、回到全域（專案）設定的導線 */}
+      <InspectorBackRow onBack={clearSelection} />
+
       {/* 標題列 + 結構操作（重排 / 刪除，皆 ripple 接合）*/}
       <div className="px-5 py-4 border-b border-border bg-surface-2/40 flex items-center justify-between gap-2">
         <div className="min-w-0">

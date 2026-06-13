@@ -20,3 +20,21 @@ export const ADJACENCY_THRESHOLD_SECONDS = 0.1;
  * 注意：值越大、同時掛載的 <video> 越多（快速剪輯時尤甚），會增加瀏覽器解碼負擔；1 秒為平衡點。
  */
 export const PREMOUNT_LEAD_SECONDS = 1;
+
+/** LLM 輸出的語意濾鏡名稱 → 合法 CSS filter 值（集中管理，避免散落於元件）。 */
+export const FILTER_MAP = {
+  cinematic: 'contrast(1.1) saturate(0.85) brightness(0.9)',
+  grayscale: 'grayscale(1)',
+  blur: 'blur(4px)',
+  none: 'none',
+};
+
+/** 畫中畫（PiP）子畫面的版面常數（避免散落 magic number 於 inline style）。 */
+export const PIP_STYLE = {
+  WIDTH: '35%',
+  BORDER_RADIUS: '16px',
+  BORDER: '3px solid white',
+  BOX_SHADOW: '0 10px 25px rgba(0,0,0,0.5)',
+  Z_INDEX: 20,
+  EDGE_OFFSET: '3%', // 距畫面邊緣的內縮量（四角共用）
+};

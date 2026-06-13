@@ -1,6 +1,6 @@
 import React from 'react';
 import { Video, OffthreadVideo, Img, useVideoConfig, useCurrentFrame, interpolate, getRemotionEnvironment } from 'remotion';
-import { TRANSITION_FRAMES } from './constants';
+import { TRANSITION_FRAMES, FILTER_MAP, PIP_STYLE } from './constants';
 import { resolveClipMotion, computeMotionStyle } from '../../utils/motion';
 import { resolveClipAssetUrl, isImageAsset } from '../../utils/assetUrl';
 
@@ -29,13 +29,7 @@ export default function ClipComponent({
     ? interpolate(frame, [0, TRANSITION_FRAMES], [0, 1], { extrapolateRight: 'clamp' })
     : 1;
 
-  // LLM 輸出的語意濾鏡名稱 → 合法 CSS filter 值
-  const FILTER_MAP = {
-    cinematic: 'contrast(1.1) saturate(0.85) brightness(0.9)',
-    grayscale:  'grayscale(1)',
-    blur:       'blur(4px)',
-    none:       'none',
-  };
+  // LLM 輸出的語意濾鏡名稱 → 合法 CSS filter 值（對應表集中於 constants.js）
   const cssFilter = FILTER_MAP[clipData.filter] ?? 'none';
 
   // 【自動運鏡】開啟時依 preset + 節拍算逐幀 transform（縮放支點＝主體定位，故推近往主體靠）；
@@ -76,12 +70,12 @@ export default function ClipComponent({
     const pos = clipData.pip_video.position || 'top_right';
     const pipStyle = {
       position: 'absolute',
-      width: '35%', height: 'auto',
-      borderRadius: '16px', border: '3px solid white',
-      boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
-      zIndex: 20,
-      ...(pos === 'top_right' ? { top: '3%', right: '3%' } : {}),
-      ...(pos === 'bottom_left' ? { bottom: '3%', left: '3%' } : {}),
+      width: PIP_STYLE.WIDTH, height: 'auto',
+      borderRadius: PIP_STYLE.BORDER_RADIUS, border: PIP_STYLE.BORDER,
+      boxShadow: PIP_STYLE.BOX_SHADOW,
+      zIndex: PIP_STYLE.Z_INDEX,
+      ...(pos === 'top_right' ? { top: PIP_STYLE.EDGE_OFFSET, right: PIP_STYLE.EDGE_OFFSET } : {}),
+      ...(pos === 'bottom_left' ? { bottom: PIP_STYLE.EDGE_OFFSET, left: PIP_STYLE.EDGE_OFFSET } : {}),
     };
 
     // pauseWhenBuffering：PiP 影片未就緒時讓播放器暫停等待，而非黑屏（與主畫面一致）

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import useBlueprintStore from '../../../store/useBlueprintStore';
-import { SliderRow, NumberRow, InspectorSection } from './controls';
+import { SliderRow, NumberRow, InspectorSection, InspectorBackRow } from './controls';
 import { Button } from '../../ui';
 import ChangeMusicModal from '../ChangeMusicModal';
 import { FaExchangeAlt, FaMusic } from 'react-icons/fa';
@@ -33,12 +33,16 @@ function trackLabel(trackId) {
 export default function BgmInspector() {
   const bgm = useBlueprintStore((s) => s.blueprint?.bgm_track);
   const updateBgmField = useBlueprintStore((s) => s.updateBgmField);
+  const clearSelection = useBlueprintStore((s) => s.clearSelection);
   const [showChangeMusic, setShowChangeMusic] = useState(false);
 
   const label = trackLabel(bgm?.track_id);
 
   return (
     <div className="flex flex-col">
+      {/* 取消選取、回到全域（專案）設定的導線 */}
+      <InspectorBackRow onBack={clearSelection} />
+
       <div className="px-5 py-4 border-b border-border bg-surface-2/40">
         <h3 className="text-base font-bold text-ink flex items-center gap-2"><FaMusic className="text-accent" /> 配樂</h3>
         <p className="text-xs text-ink-faint mt-0.5 truncate">{label || '目前無配樂'}</p>

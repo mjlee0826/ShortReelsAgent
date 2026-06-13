@@ -6,6 +6,7 @@
  */
 import { create } from 'zustand';
 import { apiService } from '../services/api.service';
+import { extractErrorMessage } from '../utils/errorMessage';
 
 const useProjectStore = create((set, get) => ({
   // --- 狀態 ---
@@ -23,7 +24,7 @@ const useProjectStore = create((set, get) => ({
       const projects = await apiService.fetchProjects();
       set({ projects, isLoading: false });
     } catch (error) {
-      const msg = error.response?.data?.detail || error.message || String(error);
+      const msg = extractErrorMessage(error);
       set({ errorMsg: `載入專案失敗：${msg}`, isLoading: false });
     }
   },
@@ -35,7 +36,7 @@ const useProjectStore = create((set, get) => ({
       await apiService.createProjectFromDrive(displayName, sourceUrl);
       await get().fetchProjects();
     } catch (error) {
-      const msg = error.response?.data?.detail || error.message || String(error);
+      const msg = extractErrorMessage(error);
       set({ errorMsg: `建立專案失敗：${msg}`, isLoading: false });
       throw error;
     }
@@ -49,7 +50,7 @@ const useProjectStore = create((set, get) => ({
       await apiService.syncProject(projectName);
       await get().fetchProjects();
     } catch (error) {
-      const msg = error.response?.data?.detail || error.message || String(error);
+      const msg = extractErrorMessage(error);
       set({ errorMsg: `同步失敗：${msg}` });
       throw error; // 讓呼叫端（卡片）得知失敗以還原按鈕狀態
     }
@@ -66,7 +67,7 @@ const useProjectStore = create((set, get) => ({
       }
       await get().fetchProjects();
     } catch (error) {
-      const msg = error.response?.data?.detail || error.message || String(error);
+      const msg = extractErrorMessage(error);
       set({ errorMsg: `刪除專案失敗：${msg}`, isLoading: false });
       throw error;
     }
