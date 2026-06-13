@@ -461,7 +461,7 @@ class DirectorService:
         # 提示詞增強(字幕 / 濾鏡開關)提前算:fork-join 的 music 分支需吃它作搜尋關鍵字來源
         enhanced_prompt = prompt
         if not subtitles:
-            enhanced_prompt += " (注意：本影片不需要任何字幕，請讓每個片段的 text_overlay 保持為 null)"
+            enhanced_prompt += " (注意：本影片不需要任何字幕，請讓 text_overlays 保持為空陣列 [])"
         if not filters:
             enhanced_prompt += " (注意：請不要套用任何濾鏡，filter 欄位請設為 none)"
 
@@ -565,6 +565,11 @@ class DirectorService:
                 final_blueprint["bgm_track"]["bpm"] = analysis.get("bpm")
                 final_blueprint["bgm_track"]["beats"] = analysis.get("beats", [])
                 final_blueprint["bgm_track"]["onsets"] = analysis.get("onsets", [])
+
+        # --- 6c. 關閉字幕：後端強制清空 text_overlays（雙保險）---
+        # prompt 已提示 LLM 輸出空陣列；此處 post-LLM 再硬清一次，確保 LLM 不照做時也不會冒出字幕。
+        if not subtitles:
+            final_blueprint["text_overlays"] = []
 
         with open(blueprint_dump_path, 'w', encoding='utf-8') as f:
             json.dump(final_blueprint, f, ensure_ascii=False, indent=2)

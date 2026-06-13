@@ -2,48 +2,47 @@ import React from 'react';
 import { AbsoluteFill, useCurrentFrame } from 'remotion';
 import { SUBTITLE_Z_INDEX } from './constants';
 import {
-  resolveTextOverlay,
   resolveVerticalCenterPct,
+  resolveHorizontalCenterPct,
   buildSubtitleCssStyle,
   computeTextAnimationStyle,
 } from '../../utils/textOverlay';
 
 /**
- * 字幕疊加層：讀 clip 的結構化 text_overlay（相容 legacy overlay_text），
- * 水平置中、垂直依 vertical_position 定位並夾進 safe-area；樣式與進出場由純函式組裝。
+ * 字幕疊加層：渲染單一條已填好預設的字幕（overlay）。
  *
- * 在 <Sequence> 內渲染，故 useCurrentFrame() 為「clip 相對幀」，配合傳入的 durationInFrames
- * 做進出場。定位 transform 與動畫 transform 分兩層套用，避免互相覆蓋。
- * @param {object} props.clip 片段資料
- * @param {number} props.durationInFrames 片段顯示總幀數（決定出場時機）
+ * 由 MainTimeline 把每條 text_overlay 包進自己的 <Sequence> 後渲染本元件，故 useCurrentFrame()
+ * 為「該字幕相對幀」（在各自 Sequence 內歸零）→ 進出場不在 clip 切點閃爍。
+ * 錨點由 vertical/horizontal_position 決定（皆已 clamp 進 safe-area），定位 transform 與進出場
+ * transform 合成於同一字串（非兩個 style 屬性互蓋）。文字塊為 AbsoluteFill 的直接子節點，
+ * 故 buildSubtitleCssStyle 的 maxWidth（% of 合成寬）正確相對 1080 寬解析。
+ * @param {object} props.overlay 已 fillOverlayDefaults 的字幕物件（含 text / 位置 / 樣式）
+ * @param {number} props.durationInFrames 此字幕顯示總幀數（決定出場時機）
  */
-export default function TextOverlayLayer({ clip, durationInFrames }) {
+export default function TextOverlayLayer({ overlay, durationInFrames }) {
   const frame = useCurrentFrame();
-  const overlay = resolveTextOverlay(clip);
   if (!overlay) return null;
 
-  const centerPct = resolveVerticalCenterPct(overlay.vertical_position);
+  const topPct = resolveVerticalCenterPct(overlay.vertical_position);
+  const leftPct = resolveHorizontalCenterPct(overlay.horizontal_position);
   const boxStyle = buildSubtitleCssStyle(overlay);
   const anim = computeTextAnimationStyle({ animation: overlay.animation, frame, durationInFrames });
+  // 定位 transform（把錨點移到文字塊中心）後接進出場 transform；fade/none 的 transform 為 'none' 則略去。
+  const animTransform = anim.transform && anim.transform !== 'none' ? ` ${anim.transform}` : '';
 
   return (
     <AbsoluteFill className="pointer-events-none" style={{ zIndex: SUBTITLE_Z_INDEX }}>
-      {/* 定位層：把文字塊錨在 (50%, centerPct%)，水平置中 */}
       <div
         style={{
+          ...boxStyle,
           position: 'absolute',
-          left: '50%',
-          top: `${centerPct}%`,
-          transform: 'translate(-50%, -50%)',
-          display: 'flex',
-          justifyContent: 'center',
-          width: '100%',
+          left: `${leftPct}%`,
+          top: `${topPct}%`,
+          transform: `translate(-50%, -50%)${animTransform}`,
+          opacity: anim.opacity,
         }}
       >
-        {/* 動畫層：opacity + 進出場 transform，與定位 transform 解耦 */}
-        <div style={{ ...boxStyle, opacity: anim.opacity, transform: anim.transform }}>
-          {overlay.text}
-        </div>
+        {overlay.text}
       </div>
     </AbsoluteFill>
   );

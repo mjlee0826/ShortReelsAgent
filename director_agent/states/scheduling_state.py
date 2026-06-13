@@ -39,17 +39,22 @@ class SchedulingState(BaseState):
         # 【修改點 1】呼叫新的解析器
         parsed_data = self._parse_json_response(raw_response)
         
-        # 【修改點 2】根據新版格式分別取出 timeline 與 bgm_track
+        # 【修改點 2】根據新版格式分別取出 timeline / bgm_track / text_overlays（字幕軌）
         if isinstance(parsed_data, dict) and "timeline" in parsed_data:
             context["timeline_draft"] = parsed_data.get("timeline", [])
             context["bgm_track"] = parsed_data.get("bgm_track", {"track_id": None})
+            # 字幕為與 timeline 平行的頂層陣列：須在此一併接出存進 context，
+            # 否則 DirectorFacade 重組 final_blueprint 時會遺失（藍圖是重建、非原樣帶過）。
+            context["text_overlays"] = parsed_data.get("text_overlays", [])
         elif isinstance(parsed_data, list):
             # 容錯：如果 LLM 退化輸出純陣列
             context["timeline_draft"] = parsed_data
             context["bgm_track"] = {"track_id": None}
+            context["text_overlays"] = []
         else:
             context["timeline_draft"] = []
             context["bgm_track"] = {"track_id": None}
+            context["text_overlays"] = []
         
         from director_agent.states.reflection_state import ReflectionState
         return ReflectionState()

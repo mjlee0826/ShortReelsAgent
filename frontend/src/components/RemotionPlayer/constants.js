@@ -44,12 +44,15 @@ export const PIP_STYLE = {
 // ──────────────────────────────────────────────────────────────────────────────
 
 /**
- * 平台 UI 安全區（佔畫面高度的百分比）：字幕垂直錨點會被線性映進 [TOP_PCT, 100-BOTTOM_PCT]，
- * 確保任何 vertical_position 都不壓到 IG/TikTok 上方狀態列與下方說明 / 互動按鈕。
+ * 平台 UI 安全區（佔畫面的百分比）：字幕的垂直 / 水平錨點會被「夾(clamp)」進
+ * [TOP_PCT, 100-BOTTOM_PCT] × [LEFT_PCT, 100-RIGHT_PCT]，確保任何 vertical/horizontal_position
+ * 都不壓到 IG/TikTok 的上下狀態列與右側互動按鈕列。水平刻意不對稱（右側留大避讚 / 留言 / 分享列）。
  */
 export const SAFE_AREA = {
   TOP_PCT: 12, // 頂部保留：狀態列 / 帳號資訊
   BOTTOM_PCT: 18, // 底部保留：說明文字 / 互動按鈕列
+  LEFT_PCT: 6, // 左側保留（較小）
+  RIGHT_PCT: 14, // 右側保留（較大）：避開 TikTok 讚 / 留言 / 分享按鈕列
 };
 
 /** 字幕 z 軸（疊在主畫面與 PiP 之上）。 */
@@ -101,3 +104,13 @@ export const SUBTITLE_MAX_WIDTH_PCT = 86;
 
 /** 字幕進出場動畫的幀數（進場 attack / 出場 decay 共用；約 0.27s@30fps）。 */
 export const SUBTITLE_ANIM_FRAMES = 8;
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 時間軸「字幕軌」編輯相關常數（僅編輯器時間軸用，與渲染 / 畫面位置無關）。
+// ──────────────────────────────────────────────────────────────────────────────
+
+/** 字幕軌每條 lane 的列高（px）：重疊字幕做 lane-stacking 時逐層往下堆疊用。 */
+export const TEXT_LANE_H = 30;
+
+/** 在時間軸「＋新增字幕」時的預設時長（秒）。 */
+export const NEW_TEXT_DEFAULT_SEC = 2;

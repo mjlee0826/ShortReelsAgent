@@ -1,6 +1,7 @@
 import { apiService } from '../../services/api.service';
 import { extractErrorMessage } from '../../utils/errorMessage';
 import { PROGRESS_EVENT } from '../../constants/events';
+import { migrateBlueprintTextOverlays } from '../../utils/textOverlay';
 import { EMPTY_SELECTION, pushHistory } from './history';
 
 // 生成 stage_name → 進度面板使用者面向文案（template 走 pipeline 各 stage + music 分支三步，
@@ -65,7 +66,8 @@ export function createGenerationSlice(set, get) {
         const result = await apiService.fetchBlueprint(folderName);
         // 視為「初始載入」：重置選取與 Undo 堆疊（這份藍圖即新的起點）
         set({
-          blueprint: result.blueprint,
+          // 載入時把 legacy per-clip 字幕一次遷移成獨立字幕軌（與渲染 / 編輯一致）
+          blueprint: migrateBlueprintTextOverlays(result.blueprint),
           assetsRootUrl: result.assets_root_url,
           selection: { ...EMPTY_SELECTION },
           history: { past: [], future: [] },
@@ -171,7 +173,7 @@ export function createGenerationSlice(set, get) {
         const result = event?.payload?.result || {};
         // AI 結果推進 Undo 快照（可一鍵還原，政策 C 安全網）；時間軸結構可能整個改變，故清空選取避免錯位
         set((prev) => ({
-          blueprint: result.blueprint ?? prev.blueprint,
+          blueprint: result.blueprint ? migrateBlueprintTextOverlays(result.blueprint) : prev.blueprint,
           assetsRootUrl: result.assets_root_url ?? prev.assetsRootUrl,
           isProcessing: false,
           generationJobId: null,
@@ -219,7 +221,7 @@ export function createGenerationSlice(set, get) {
         const data = await apiService.fetchBlueprint(folderName);
         if (data?.blueprint) {
           set((prev) => ({
-            blueprint: data.blueprint,
+            blueprint: migrateBlueprintTextOverlays(data.blueprint),
             assetsRootUrl: data.assets_root_url ?? prev.assetsRootUrl,
           }));
         }

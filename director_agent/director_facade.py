@@ -98,8 +98,11 @@ class DirectorFacade:
                 "auto_motion": DEFAULT_AUTO_MOTION,
                 "auto_punch": DEFAULT_AUTO_PUNCH,
             },
-            "bgm_track": context.get("bgm_track", {"track_id": None}), # ⬅️ 新增這一行
-            "timeline": timeline
+            "bgm_track": context.get("bgm_track", {"track_id": None}),
+            "timeline": timeline,
+            # 字幕軌：獨立於片段的頂層陣列，由 SchedulingState 從 LLM 輸出接出存進 context。
+            # 與 timeline 同為 list[dict]（JSON parse 而來），原樣帶進藍圖供前端 / SSR 渲染。
+            "text_overlays": context.get("text_overlays", []),
         }
 
         # 不重抓配樂（純對話微調）：直接沿用上一版 bgm_track，覆蓋 LLM 可能重寫的內容，

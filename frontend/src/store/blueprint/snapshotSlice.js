@@ -1,5 +1,6 @@
 import { apiService } from '../../services/api.service';
 import { extractErrorMessage } from '../../utils/errorMessage';
+import { migrateBlueprintTextOverlays } from '../../utils/textOverlay';
 import { EMPTY_SELECTION, pushHistory } from './history';
 
 /**
@@ -42,7 +43,7 @@ export function createSnapshotSlice(set, get) {
       try {
         const result = await apiService.getSnapshot(folderName, snapshotId);
         set((state) => ({
-          blueprint: result.blueprint,
+          blueprint: migrateBlueprintTextOverlays(result.blueprint),
           assetsRootUrl: result.assets_root_url,
           history: pushHistory(state.history, state.blueprint),
           selection: { ...EMPTY_SELECTION },

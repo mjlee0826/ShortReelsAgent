@@ -345,20 +345,32 @@ _TEXT_VPOS_MIN = 0.0
 _TEXT_VPOS_MAX = 100.0
 _TEXT_VPOS_DEFAULT = 85.0  # ≈ 下三分之一：在底部 UI 之上、又不致頂到主體
 
+# 字幕水平位置的合法範圍（0=畫面左、100=畫面右）；同樣會被前端夾進 safe-area（右側留大避平台互動鈕列）。
+_TEXT_HPOS_MIN = 0.0
+_TEXT_HPOS_MAX = 100.0
+_TEXT_HPOS_DEFAULT = 50.0  # 置中：閱讀型字幕的安全預設
+
 
 class TextOverlay(BaseModel):
     """
-    畫面文字疊加（字幕 / 花字）的結構化樣式設定。
+    畫面文字疊加（字幕 / 花字）的結構化樣式 + 計時設定。
 
-    取代舊版單一字串 ``overlay_text``：把『內容 + 樣式』結構化，讓渲染端、導演 LLM、Inspector
-    三方共讀同一份欄位（照 :class:`PipVideo` 的巢狀物件模式）。位置刻意採『連續垂直 %』而非固定
-    enum：讓導演依主體 bbox 把字幕放在不擋主體處，水平固定置中以利閱讀；上下邊界由前端夾進
+    字幕為**獨立於片段**的時間軸物件（見 :class:`DirectorBlueprint` 的 ``text_overlays``）：帶絕對
+    ``start_at/end_at``，故可跨多個片段持續顯示、同一時段亦可並存多條。樣式以 enum / bounded float
+    結構化，讓渲染端、導演 LLM、Inspector 三方共讀同一份欄位（照 :class:`PipVideo` 巢狀物件模式）。
+    位置採『連續垂直 / 水平 %』：讓導演依主體 bbox 把字幕放在不擋主體處；上下左右邊界由前端夾進
     safe-area，故 LLM 不需自行算平台 UI 遮擋。
     """
-    text: str = Field(default="", description="要顯示在畫面上的字幕文字；留空代表此片段無字幕")
+    text: str = Field(default="", description="要顯示在畫面上的字幕文字")
+    start_at: float = Field(default=0.0, description="字幕在總時間軸上的開始秒數（可跨多個片段）")
+    end_at: float = Field(default=0.0, description="字幕在總時間軸上的結束秒數")
     vertical_position: float = Field(
         default=_TEXT_VPOS_DEFAULT, ge=_TEXT_VPOS_MIN, le=_TEXT_VPOS_MAX,
-        description="字幕垂直錨點：0=畫面頂、100=畫面底（水平自動置中）。依主體 bbox 放在不擋主體處，系統會再夾進 safe-area",
+        description="字幕垂直錨點：0=畫面頂、100=畫面底。依主體 bbox 放在不擋主體處，系統會再夾進 safe-area",
+    )
+    horizontal_position: float = Field(
+        default=_TEXT_HPOS_DEFAULT, ge=_TEXT_HPOS_MIN, le=_TEXT_HPOS_MAX,
+        description="字幕水平錨點：0=畫面左、100=畫面右、50=置中。依主體 bbox 避主體；閱讀型字幕用 50，系統會再夾進 safe-area",
     )
     size: TextSize = Field(default=TextSize.M, description="字級分級")
     color: TextColor = Field(default=TextColor.WHITE, description="字幕顏色（精選可讀色票）")
@@ -390,14 +402,19 @@ class Clip(BaseModel):
     # 使用者要逐段覆寫時於前端 ClipInspector 就地編輯，不經 LLM。
     clip_volume: float = Field(default=1.0, description="原音音量（0.0 靜音、1.0 最大）")
     bgm_volume: float = Field(default=1.0, description="播到此片段時全局 BGM 的動態音量權重（Audio Ducking）")
-    text_overlay: Optional[TextOverlay] = Field(default=None, description="畫面文字疊加（字幕 / 花字）的結構化設定；無字幕則為 null")
+    # 註：字幕已從片段解耦，改為 DirectorBlueprint.text_overlays 獨立字幕軌（可跨片段、可同框多條），
+    # 故此處不再有 text_overlay 欄位。
     pip_video: Optional[PipVideo] = Field(default=None, description="畫中畫設定；無則為 null")
 
 
 class DirectorBlueprint(BaseModel):
-    """導演剪輯藍圖：全局配樂 + 片段時間軸（驅動 Remotion 渲染）。"""
+    """導演剪輯藍圖：全局配樂 + 片段時間軸 + 獨立字幕軌（驅動 Remotion 渲染）。"""
     bgm_track: BgmTrack = Field(default_factory=BgmTrack, description="全局背景音樂設定")
     timeline: list[Clip] = Field(default_factory=list, description="依序排列的片段時間軸")
+    text_overlays: list[TextOverlay] = Field(
+        default_factory=list,
+        description="畫面字幕清單（獨立於片段，可跨片段持續顯示、同一時段可並存多條）",
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────

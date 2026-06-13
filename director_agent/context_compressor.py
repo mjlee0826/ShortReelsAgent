@@ -89,7 +89,7 @@ class ContextCompressor:
                 base_info["cuts"] = metadata.get("scene_cuts", [])
 
                 # 完整逐字稿(text + 帶時間戳 chunks + language)一律給導演（simple/complex 皆送），
-                # 讓導演用 chunks 的 timestamp 精準卡 text_overlay 字幕與 bgm_volume ducking
+                # 讓導演用 chunks 的 timestamp 精準卡 text_overlays 字幕與 bgm_volume ducking
                 base_info["audio"] = {
                     "transcript": metadata.get("audio_transcript", {}),
                     "env": metadata.get("environmental_sounds", []),

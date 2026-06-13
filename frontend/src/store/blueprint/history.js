@@ -8,7 +8,7 @@
 export const HISTORY_LIMIT = 50;
 
 /** 無選取時的初始選取狀態。 */
-export const EMPTY_SELECTION = { type: null, clipIndex: null };
+export const EMPTY_SELECTION = { type: null, clipIndex: null, textIndex: null };
 
 /**
  * 推進一筆 Undo 快照：把舊 blueprint 推入 past（超過上限則丟最舊），並清空 future。

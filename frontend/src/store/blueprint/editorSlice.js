@@ -1,7 +1,12 @@
 import { apiService } from '../../services/api.service';
 import { extractErrorMessage } from '../../utils/errorMessage';
-import { removeAt, reorder, repack } from '../../utils/timeline';
+import { removeAt, reorder, repack, MIN_CLIP_DURATION } from '../../utils/timeline';
+import { DEFAULT_OVERLAY } from '../../utils/textOverlay';
+import { NEW_TEXT_DEFAULT_SEC } from '../../components/RemotionPlayer/constants';
 import { EMPTY_SELECTION, HISTORY_LIMIT, pushHistory, remapIndexAfterMove } from './history';
+
+/** 夾在 [lo, hi] 區間（純工具）。 */
+const clampNum = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
 /**
  * 編輯器就地編輯 slice：藍圖本體、選取與預覽互動、就地編輯與 Undo/Redo。
@@ -21,9 +26,10 @@ export function createEditorSlice(set, get) {
     isChangingMusic: false,
 
     // --- 編輯器互動狀態 ---
-    // 目前選取對象：type 為 'clip'|'bgm'|'project'|null；clipIndex 僅在 type==='clip' 時有效
-    // 以「陣列索引」識別片段，因 clip_id 是素材 relpath、同一素材可重複出現於多段而不唯一
-    selection: { type: null, clipIndex: null },
+    // 目前選取對象：type 為 'clip'|'bgm'|'text'|'project'|null；clipIndex 僅在 type==='clip'、
+    // textIndex 僅在 type==='text' 時有效。以「陣列索引」識別，因 clip_id 是素材 relpath、同一素材
+    // 可重複出現於多段而不唯一；字幕亦以 text_overlays 陣列索引識別。
+    selection: { type: null, clipIndex: null, textIndex: null },
     // 預覽 seek 請求：時間軸點片段時請求播放器跳轉；nonce 確保即使秒數相同也能再次觸發
     seekRequest: { seconds: 0, nonce: 0 },
     // 播放頭目前秒數：由 VideoPlayer 監聽 Remotion frameupdate 回寫，時間軸 Playhead 據此定位
@@ -33,8 +39,11 @@ export function createEditorSlice(set, get) {
 
     // ── 編輯器：選取 ───────────────────────────────────────────────────────────
 
-    // 設定目前選取對象；右側檢視器依此切換顯示 Clip / Bgm / Project 面板
-    select: (type, clipIndex = null) => set({ selection: { type, clipIndex } }),
+    // 設定目前選取對象；右側檢視器依此切換顯示 Clip / Bgm / Project 面板。
+    // 以 EMPTY_SELECTION 打底重置 textIndex，避免選 clip 時殘留上次的字幕索引。
+    select: (type, clipIndex = null) => set({ selection: { ...EMPTY_SELECTION, type, clipIndex } }),
+    // 選取某條字幕（時間軸字幕軌 / 字幕 Inspector 用）；打底重置 clipIndex。
+    selectText: (index) => set({ selection: { ...EMPTY_SELECTION, type: 'text', textIndex: index } }),
     clearSelection: () => set({ selection: { ...EMPTY_SELECTION } }),
 
     // 請求預覽播放器跳轉到指定秒數（VideoPlayer 監聽 nonce 後換算成 frame 並 seekTo）
@@ -138,6 +147,63 @@ export function createEditorSlice(set, get) {
         const sel = state.selection;
         if (sel.type !== 'clip') return {};
         return { selection: { ...sel, clipIndex: remapIndexAfterMove(sel.clipIndex, fromIndex, toIndex) } };
+      });
+    },
+
+    // ── 編輯器：字幕軌 CRUD（獨立於片段、自由浮動；一律不 repack）──────────────────
+
+    /**
+     * 新增一條字幕：起點取目前播放頭、終點 = 起點 + 預設時長（夾進影片總長）。新增後選取它。
+     * @param {object} partial 可覆寫的初始欄位（如 text）
+     */
+    addTextOverlay: (partial = {}) => {
+      const state = get();
+      if (!state.blueprint) return;
+      // 影片總長 = 各片段 end_at 的最大值（片段已 gapless，等同末段終點）
+      const total = (state.blueprint.timeline || []).reduce((m, c) => Math.max(m, c.end_at ?? 0), 0);
+      const start = clampNum(state.playheadSeconds ?? 0, 0, Math.max(0, total - MIN_CLIP_DURATION));
+      const end = Math.min(start + NEW_TEXT_DEFAULT_SEC, total || start + NEW_TEXT_DEFAULT_SEC);
+      const overlay = { ...DEFAULT_OVERLAY, text: '', start_at: start, end_at: end, ...partial };
+      let newIndex = 0;
+      get().mutateBlueprint((bp) => {
+        const list = Array.isArray(bp.text_overlays) ? bp.text_overlays : [];
+        newIndex = list.length;
+        return { ...bp, text_overlays: [...list, overlay] };
+      });
+      get().selectText(newIndex);
+    },
+
+    // 更新某條字幕的單一欄位（文字 / 位置 / 樣式 / 起訖）；immutable map，推進 Undo
+    updateTextOverlayField: (index, key, value) => get().mutateBlueprint((bp) => ({
+      ...bp,
+      text_overlays: (bp.text_overlays || []).map((ov, i) => (i === index ? { ...ov, [key]: value } : ov)),
+    })),
+
+    // 拖曳期間用：更新某條字幕的起訖秒數，直接 set 不推快照（基準已於拖拽起點由 commitSnapshot 存好）
+    updateTextOverlayTransient: (index, { startAt, endAt }) => set((state) => {
+      if (!state.blueprint) return {};
+      const text_overlays = (state.blueprint.text_overlays || []).map((ov, i) => {
+        if (i !== index) return ov;
+        const next = { ...ov };
+        if (startAt !== undefined) next.start_at = startAt;
+        if (endAt !== undefined) next.end_at = endAt;
+        return next;
+      });
+      return { blueprint: { ...state.blueprint, text_overlays } };
+    }),
+
+    // 刪除某條字幕；同步修正選取索引（刪到選取者則清空、刪在其前則前移）
+    removeTextOverlay: (index) => {
+      get().mutateBlueprint((bp) => ({
+        ...bp,
+        text_overlays: (bp.text_overlays || []).filter((_, i) => i !== index),
+      }));
+      set((state) => {
+        const sel = state.selection;
+        if (sel.type !== 'text') return {};
+        if (sel.textIndex === index) return { selection: { ...EMPTY_SELECTION } };
+        if (sel.textIndex > index) return { selection: { ...sel, textIndex: sel.textIndex - 1 } };
+        return {};
       });
     },
 

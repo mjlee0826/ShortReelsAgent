@@ -144,12 +144,20 @@ class DefaultPromptManager(BasePromptManager):
             "- transition_in：硬切用 'none'；情緒 / 場景落差大時用 'fade'（交叉淡入）。\n"
             "- filter：依氛圍選 'none' / 'cinematic' / 'grayscale' / 'blur'。\n"
             "- scale：可放大（如 1.1~1.2）做構圖微調（注意：為靜態縮放，非動態推鏡，勿描述成緩慢推進）。\n"
-            "- text_overlay：有重要對話或需綜藝效果時加字幕（物件；無字幕則設 null）。text 為字幕內容；\n"
-            "  vertical_position（0=畫面頂、100=畫面底，水平自動置中）依該段主體 bbox 放在『不擋主體』處——\n"
-            "  主體在畫面下半就取小值偏上、在上半就取大值偏下；上下邊界系統會自動夾進 safe-area，不必自己算平台 UI；\n"
-            "  size / color / outline / background / animation 控制樣式，整支盡量沿用一致的 size / color / outline，避免每段不同顯得廉價。\n"
             "- pip_video：需畫中畫時疊加另一畫面，position 僅支援 'top_right' / 'bottom_left'。\n"
             "- reason：每個片段請『先』在 reason 寫下導演決策考量（選材 / 轉場 / 變速 / 混音），再填其餘參數。\n\n"
+        )
+
+        # 3b. 字幕軌（text_overlays：與 timeline 平行的頂層陣列，獨立於片段）
+        instruction += (
+            "# 字幕（text_overlays，與 timeline 平行的頂層陣列、獨立於片段）\n"
+            "- 每條字幕含 text、絕對 start_at / end_at（總時間軸秒數）：請用素材逐字稿 audio.transcript.chunks\n"
+            "  的時間戳對齊講話時段；字幕可橫跨多個片段持續顯示，不必與片段邊界對齊。\n"
+            "- vertical_position / horizontal_position（皆 0~100）依該時段主體 bbox 放在『不擋主體』處：主體偏\n"
+            "  下就把字幕往上、偏上就往下；閱讀型字幕水平用 50 置中，花字可左右擺放。上下左右邊界系統會自動\n"
+            "  夾進 safe-area，不必自己算平台 UI。\n"
+            "- size / color / outline / background / animation 控制樣式；整支盡量沿用一致樣式，避免每條不同顯得廉價。\n"
+            "- 同一時段可並存多條字幕（時間區間重疊者會同時顯示）。若無字幕需求，text_overlays 給空陣列 []。\n\n"
         )
 
         # 4. 配樂守則（track_id 由後端注入，LLM 不填）

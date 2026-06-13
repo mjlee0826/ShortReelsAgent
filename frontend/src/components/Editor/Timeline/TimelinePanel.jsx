@@ -1,10 +1,13 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import useBlueprintStore from '../../../store/useBlueprintStore';
 import { clipDuration, MIN_CLIP_DURATION } from '../../../utils/timeline';
+import { assignTextOverlayLanes } from '../../../utils/textOverlay';
+import { TEXT_LANE_H } from '../../RemotionPlayer/constants';
 import ClipBlock from './ClipBlock';
+import TextBlock from './TextBlock';
 import Playhead from './Playhead';
 import { IconButton } from '../../ui';
-import { FaMusic, FaFilm, FaSearchMinus, FaSearchPlus } from 'react-icons/fa';
+import { FaMusic, FaFilm, FaFont, FaPlus, FaSearchMinus, FaSearchPlus } from 'react-icons/fa';
 
 // 縮放：每秒像素的預設 / 範圍 / 級距（具名常數，禁 magic number）
 const DEFAULT_PX_PER_SEC = 80;
@@ -67,9 +70,11 @@ const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 export default function TimelinePanel() {
   const timeline = useBlueprintStore((s) => s.blueprint?.timeline);
   const bgm = useBlueprintStore((s) => s.blueprint?.bgm_track);
+  const textOverlays = useBlueprintStore((s) => s.blueprint?.text_overlays);
   const selection = useBlueprintStore((s) => s.selection);
   const select = useBlueprintStore((s) => s.select);
   const seekTo = useBlueprintStore((s) => s.seekTo);
+  const addTextOverlay = useBlueprintStore((s) => s.addTextOverlay);
 
   const [pxPerSecond, setPxPerSecond] = useState(DEFAULT_PX_PER_SEC);
   const [draggingIndex, setDraggingIndex] = useState(null);
@@ -94,6 +99,12 @@ export default function TimelinePanel() {
   const contentWidth = total * pxPerSecond;
   const bgmName = trackLabel(bgm?.track_id);
 
+  // 字幕軌：lane-stacking（重疊字幕分層，讓每條都點得到）；軌高隨層數動態增高。
+  // overlays 以 useMemo 穩定參考（textOverlays 為空時不致每次 render 都產生新陣列洗掉下游 memo）。
+  const overlays = useMemo(() => textOverlays || [], [textOverlays]);
+  const { laneOf, laneCount } = useMemo(() => assignTextOverlayLanes(overlays), [overlays]);
+  const textTrackH = Math.max(1, laneCount) * TEXT_LANE_H;
+
   // ── 片段方塊：起始事件（實際運算在 document 監聽）──────────────────────────────
 
   const handleEdgeDown = (index, edge, e) => {
@@ -114,6 +125,29 @@ export default function TimelinePanel() {
 
   const handleBodyDown = (index, e) => {
     dragRef.current = { mode: 'reorder', index, startX: e.clientX, moved: false, insertion: null };
+    e.preventDefault();
+  };
+
+  // ── 字幕方塊：起始事件（自由浮動，不 repack；實際運算在 document 監聽）──────────────
+
+  const handleTextBodyDown = (index, e) => {
+    const ov = (textOverlays || [])[index];
+    if (!ov) return;
+    dragRef.current = {
+      mode: 'text-move', index, startX: e.clientX, moved: false,
+      origStart: ov.start_at ?? 0, origEnd: ov.end_at ?? 0,
+    };
+    e.preventDefault();
+  };
+
+  const handleTextEdgeDown = (index, edge, e) => {
+    const ov = (textOverlays || [])[index];
+    if (!ov) return;
+    dragRef.current = {
+      mode: 'text-trim', index, edge, startX: e.clientX, committed: false,
+      origStart: ov.start_at ?? 0, origEnd: ov.end_at ?? 0,
+    };
+    document.body.style.cursor = 'ew-resize';
     e.preventDefault();
   };
 
@@ -174,6 +208,26 @@ export default function TimelinePanel() {
         }
         d.insertion = insertion;
         setDragOverIndex(insertion);
+      } else if (d.mode === 'text-move') {
+        // 字幕整條平移（改 start/end，不 ripple、不影響 clip 軌）；先過門檻才算拖移、否則 onUp 視為點選。
+        if (!d.moved && Math.abs(x - d.startX) < DRAG_THRESHOLD_PX) return;
+        if (!d.moved) { d.moved = true; store.commitSnapshot(); document.body.style.cursor = 'grabbing'; }
+        const total = (store.blueprint?.timeline || []).reduce((m, c) => Math.max(m, c.end_at ?? 0), 0);
+        const len = d.origEnd - d.origStart;
+        const start = clamp(d.origStart + (x - d.startX) / px, 0, Math.max(0, total - len));
+        store.updateTextOverlayTransient(d.index, { startAt: start, endAt: start + len });
+      } else if (d.mode === 'text-trim') {
+        // 字幕拖邊：左改 start、右改 end，各自 clamp（不 ripple）。整段拖拽只記一次 Undo。
+        if (!d.committed) { store.commitSnapshot(); d.committed = true; }
+        const total = (store.blueprint?.timeline || []).reduce((m, c) => Math.max(m, c.end_at ?? 0), 0);
+        const deltaSec = (x - d.startX) / px;
+        if (d.edge === 'left') {
+          const start = clamp(d.origStart + deltaSec, 0, d.origEnd - MIN_CLIP_DURATION);
+          store.updateTextOverlayTransient(d.index, { startAt: start });
+        } else {
+          const end = clamp(d.origEnd + deltaSec, d.origStart + MIN_CLIP_DURATION, total);
+          store.updateTextOverlayTransient(d.index, { endAt: end });
+        }
       }
     };
 
@@ -199,6 +253,11 @@ export default function TimelinePanel() {
           store.select('clip', d.index);
           store.seekTo(clip?.start_at ?? 0);
         }
+      } else if (d && d.mode === 'text-move' && !d.moved) {
+        // 未超過門檻 → 視為點選：選取該字幕並 seek 到其起點
+        const store = useBlueprintStore.getState();
+        store.selectText(d.index);
+        store.seekTo(d.origStart);
       }
       dragRef.current = null;
       setDraggingIndex(null);
@@ -267,6 +326,17 @@ export default function TimelinePanel() {
           <div style={{ height: VIDEO_TRACK_H }} className="flex items-center gap-1.5 px-2 text-xs text-ink-faint">
             <FaFilm size={11} /> 影片
           </div>
+          <div style={{ height: textTrackH }} className="flex items-center gap-1.5 px-2 text-xs text-ink-faint border-t border-border/60">
+            <FaFont size={10} /> 字幕
+            <button
+              type="button"
+              onClick={() => addTextOverlay()}
+              title="在播放頭新增字幕"
+              className="ml-auto text-accent hover:text-accent/80"
+            >
+              <FaPlus size={10} />
+            </button>
+          </div>
           <div style={{ height: BGM_TRACK_H }} className="flex items-center gap-1.5 px-2 text-xs text-ink-faint">
             <FaMusic size={11} /> 配樂
           </div>
@@ -306,6 +376,26 @@ export default function TimelinePanel() {
                       isDragging={draggingIndex === index}
                       onEdgeDown={handleEdgeDown}
                       onBodyDown={handleBodyDown}
+                    />
+                  ))}
+                </div>
+
+                {/* 字幕軌（自由浮動、可重疊；lane-stacking 讓每條都點得到）*/}
+                <div
+                  style={{ height: textTrackH, width: `${contentWidth}px` }}
+                  className="relative border-t border-border/60 bg-surface-2/20"
+                >
+                  {overlays.map((ov, i) => (
+                    <TextBlock
+                      key={`text-${i}`}
+                      overlay={ov}
+                      index={i}
+                      leftPx={(ov.start_at ?? 0) * pxPerSecond}
+                      widthPx={Math.max(0, (ov.end_at ?? 0) - (ov.start_at ?? 0)) * pxPerSecond}
+                      topPx={laneOf[i] * TEXT_LANE_H}
+                      isSelected={selection.type === 'text' && selection.textIndex === i}
+                      onBodyDown={handleTextBodyDown}
+                      onEdgeDown={handleTextEdgeDown}
                     />
                   ))}
                 </div>

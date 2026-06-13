@@ -5,6 +5,7 @@ import TextOverlayLayer from './TextOverlayLayer';
 import { TRANSITION_FRAMES, ADJACENCY_THRESHOLD_SECONDS, PREMOUNT_LEAD_SECONDS } from './constants';
 import { thinBeatFrames } from '../../utils/motion';
 import { resolveBgmUrl } from '../../utils/assetUrl';
+import { resolveTimelineTextOverlays } from '../../utils/textOverlay';
 
 export default function MainTimeline({ blueprint, assetsRootUrl }) {
   const { fps } = useVideoConfig();
@@ -89,9 +90,20 @@ export default function MainTimeline({ blueprint, assetsRootUrl }) {
               beatsInClipFrames={beatsInClipFrames}
               durationInFrames={durationInFrames}
             />
-            
-            {/* 字幕疊加：讀結構化 text_overlay（相容 legacy overlay_text），樣式 / 定位 / 進出場見 TextOverlayLayer */}
-            <TextOverlayLayer clip={clip} durationInFrames={durationInFrames} />
+          </Sequence>
+        );
+      })}
+
+      {/* --- 獨立字幕軌（與片段解耦）--- */}
+      {/* 每條字幕包成自己的 <Sequence>：跨片段持續顯示不在切點閃爍、同框重疊者並存（Remotion 原生疊放）。 */}
+      {/* resolveTimelineTextOverlays 容錯：新藍圖讀 text_overlays，legacy / SSR 未遷移則回退 per-clip。 */}
+      {resolveTimelineTextOverlays(blueprint).map((ov, i) => {
+        const from = Math.round((ov.start_at ?? 0) * fps);
+        const dur = Math.round((ov.end_at ?? 0) * fps) - from;
+        if (dur <= 0) return null;
+        return (
+          <Sequence key={`text-${i}`} from={from} durationInFrames={dur}>
+            <TextOverlayLayer overlay={ov} durationInFrames={dur} />
           </Sequence>
         );
       })}
