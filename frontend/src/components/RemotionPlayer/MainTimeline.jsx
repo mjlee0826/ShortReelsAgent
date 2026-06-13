@@ -3,6 +3,7 @@ import { Sequence, AbsoluteFill, useVideoConfig, Audio } from 'remotion';
 import ClipComponent from './ClipComponent';
 import { TRANSITION_FRAMES, ADJACENCY_THRESHOLD_SECONDS } from './constants';
 import { thinBeatFrames } from '../../utils/motion';
+import { resolveBgmUrl } from '../../utils/assetUrl';
 
 export default function MainTimeline({ blueprint, assetsRootUrl }) {
   const { fps } = useVideoConfig();
@@ -20,18 +21,8 @@ export default function MainTimeline({ blueprint, assetsRootUrl }) {
     return baseVol * duckingWeight;
   };
 
-  // 【新增】智慧判斷音樂來源網址
-  const getBgmSrc = () => {
-    const trackId = blueprint.bgm_track?.track_id;
-    if (!trackId) return null;
-    
-    // 若為完整網址 (例如全域快取池來的)，直接回傳
-    if (trackId.startsWith('http')) {
-      return trackId;
-    }
-    // 否則為舊版相容 (同資料夾的檔名)
-    return `${assetsRootUrl}${trackId.split('/').pop()}`;
-  };
+  // 背景音樂來源網址：走共用 util 解析（http 直通 / 否則同資料夾檔名），與預抓共用同一邏輯
+  const getBgmSrc = () => resolveBgmUrl(assetsRootUrl, blueprint.bgm_track?.track_id);
 
   // 【自動運鏡】總開關（舊藍圖無此欄位 → 視為關閉，不改變既有專案行為）+ 節拍時間映射（一次算好）。
   // 音檔 beat 秒 → 影片時間軸秒：影片時間 = bgm 起播秒 +（beat 秒 − 擷取起點秒）。
@@ -49,10 +40,11 @@ export default function MainTimeline({ blueprint, assetsRootUrl }) {
       
       {/* --- 全局背景音樂 --- */}
       {blueprint.bgm_track && blueprint.bgm_track.track_id && (
-        <Audio 
+        <Audio
           src={getBgmSrc()}
           startFrom={Math.round((blueprint.bgm_track.source_start || 0) * fps)}
           volume={getDynamicBgmVolume}
+          pauseWhenBuffering
         />
       )}
 

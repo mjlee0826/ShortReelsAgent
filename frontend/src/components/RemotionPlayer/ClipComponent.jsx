@@ -2,6 +2,7 @@ import React from 'react';
 import { Video, OffthreadVideo, Img, useVideoConfig, useCurrentFrame, interpolate, getRemotionEnvironment } from 'remotion';
 import { TRANSITION_FRAMES } from './constants';
 import { resolveClipMotion, computeMotionStyle } from '../../utils/motion';
+import { resolveClipAssetUrl, isImageAsset } from '../../utils/assetUrl';
 
 export default function ClipComponent({
   clipData,
@@ -19,10 +20,9 @@ export default function ClipComponent({
   // 預覽（Player）維持 Video 以保拖曳 / 即時播放流暢；兩者 props 介面相同，可直接替換元件。
   const VideoComp = getRemotionEnvironment().isRendering ? OffthreadVideo : Video;
 
-  // clip_id 為素材身分 relpath（如 standardized/clip_std.mp4）；assetsRootUrl + clip_id 直接命中
-  // /static 磁碟分層，不可再 split('/').pop()（那會丟掉 raw/standardized 子目錄而指向錯誤路徑）
-  const fileUrl = `${assetsRootUrl}${clipData.clip_id}`;
-  const isImage = /\.(jpg|jpeg|png|heic|heif)$/i.test(clipData.clip_id);
+  // 素材 URL 與圖片判別走共用 util：與預抓（useAssetPrefetch）共用同一解析，確保 prefetch 逐字命中快取
+  const fileUrl = resolveClipAssetUrl(assetsRootUrl, clipData.clip_id);
+  const isImage = isImageAsset(clipData.clip_id);
 
   // 【轉場】Fade 淡入：前 TRANSITION_FRAMES 幀透明度 0→1（與 MainTimeline 的延伸重疊幀數同源，確保對齊）
   const opacity = clipData.transition_in === 'fade'
@@ -68,8 +68,8 @@ export default function ClipComponent({
   const renderPiP = () => {
     if (!clipData.pip_video || !clipData.pip_video.clip_id) return null;
     
-    // 同主畫面：PiP 的 clip_id 亦為 relpath，直接接在 root 後命中磁碟分層
-    const pipUrl = `${assetsRootUrl}${clipData.pip_video.clip_id}`;
+    // 同主畫面：PiP 的 clip_id 亦為 relpath，走共用 util 解析
+    const pipUrl = resolveClipAssetUrl(assetsRootUrl, clipData.pip_video.clip_id);
     const pipStart = Math.round((clipData.pip_video.source_start || 0) * fps);
     
     // PiP 樣式與位置計算
@@ -84,7 +84,8 @@ export default function ClipComponent({
       ...(pos === 'bottom_left' ? { bottom: '3%', left: '3%' } : {}),
     };
 
-    return <VideoComp src={pipUrl} startFrom={pipStart} style={pipStyle} muted />;
+    // pauseWhenBuffering：PiP 影片未就緒時讓播放器暫停等待，而非黑屏（與主畫面一致）
+    return <VideoComp src={pipUrl} startFrom={pipStart} style={pipStyle} muted pauseWhenBuffering />;
   };
 
   const startFromFrame = Math.round((clipData.source_start || 0) * fps);
@@ -92,9 +93,9 @@ export default function ClipComponent({
 
   return (
     <>
-      {/* 主畫面 */}
+      {/* 主畫面（pauseWhenLoading / pauseWhenBuffering：素材未就緒時播放器暫停轉圈而非黑屏）*/}
       {isImage ? (
-        <Img src={fileUrl} style={dynamicStyle} />
+        <Img src={fileUrl} style={dynamicStyle} pauseWhenLoading />
       ) : (
         <VideoComp
           src={fileUrl}
@@ -103,6 +104,7 @@ export default function ClipComponent({
           playbackRate={clipData.playback_rate || 1.0}
           volume={clipData.clip_volume ?? 1.0}
           style={dynamicStyle}
+          pauseWhenBuffering
         />
       )}
       

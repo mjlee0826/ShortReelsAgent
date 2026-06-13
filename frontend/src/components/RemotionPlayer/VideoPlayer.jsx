@@ -4,6 +4,7 @@ import MainTimeline from './MainTimeline';
 import useBlueprintStore from '../../store/useBlueprintStore';
 import { apiService } from '../../services/api.service';
 import { computeVideoMetadata } from '../../utils/timeline';
+import { useAssetPrefetch } from './useAssetPrefetch';
 // 【新增】引入科技感圖示 (包含 FaRocket 增加動態感)
 import { FaSpinner, FaRocket } from 'react-icons/fa';
 
@@ -16,6 +17,9 @@ export default function VideoPlayer() {
   const [isRendering, setIsRendering] = useState(false);
   // Remotion 播放器實例 ref：供時間軸點擊片段時 seek（playhead 雙向同步的基礎）
   const playerRef = useRef(null);
+
+  // 藍圖變動時預抓全部素材進快取，消除即時播放時「素材未就緒 → 黑屏」競態（生命週期由 hook 內管理）
+  useAssetPrefetch(blueprint, assetsRootUrl);
 
   // 1. 判斷藍圖是否為空 (嚴格條件)
   const isBlueprintEmpty = !blueprint || !blueprint.timeline || blueprint.timeline.length === 0;
