@@ -1,6 +1,6 @@
 """
 ClaudeModelManager：雲端導演大腦 (Claude)，透過 Anthropic SDK 完成 Phase 4 導演藍圖的
-結構化 + agentic 推理。與 ``GeminiModelManager`` 平行，專責 director blueprint 這條接縫。
+agentic 推理。與 ``GeminiModelManager`` 平行，專責 director blueprint 這條接縫。
 
 設計模式
 --------
@@ -9,12 +9,14 @@ ClaudeModelManager：雲端導演大腦 (Claude)，透過 Anthropic SDK 完成 P
 - **Strategy**：``PromptManager`` 可由外部注入（``set_prompt_manager``），與 Gemini 對稱。
 - **Adapter**：把 Anthropic 的 usage 物件交由 ``record_anthropic_usage`` 轉成共同成本帳本記錄。
 
-結構化輸出策略
---------------
-``schema`` 非 None 時走 Anthropic structured outputs（``messages.parse(output_format=...)``），
-由 SDK 保證輸出結構與 enum 合法，並自動處理 pydantic 不被 server 支援的數值界線
-（``ge``/``le`` → client 端驗證）。回傳已驗證的 ``parsed_output``，再 ``model_dump_json()``
-轉回 JSON 字串，維持與 ``GeminiModelManager`` 相同的「回傳 str、下游 ``json.loads``」契約。
+輸出格式策略（為何不用 Anthropic structured outputs）
+----------------------------------------------------
+``DirectorBlueprint`` 是大型巢狀 schema（timeline + text_overlays + 多組 enum），Anthropic 原生
+structured outputs 會回 400 ``Schema is too complex``（Gemini 的 ``response_schema`` 容忍度較高故無此限）。
+因此 Claude **不走** native structured output，改比照本地 Qwen 路徑：以 ``schema_to_text`` 把**同一份**
+schema 序列化進 prompt（SSOT、不另手抄、不會飄移），由 Claude 依文字結構輸出 JSON，下游
+``SchedulingState`` 以既有 robust parser 解析。``schema_to_text`` 的開頭已含「直接輸出 JSON、不要
+markdown」指示，故輸出可被穩定解析。
 
 GPU 策略
 --------
@@ -31,6 +33,7 @@ from model.infra.base_model_manager import BaseModelManager, synchronized_infere
 from model.infra.usage_ledger import phase_for_mode, record_anthropic_usage
 from prompt_manager.base_prompt_manager import BasePromptManager
 from prompt_manager.default_prompt_manager import DefaultPromptManager
+from prompt_manager.schemas import schema_to_text
 from prompt_manager.task_mode import TaskMode
 
 # adaptive thinking：導演藍圖屬複雜 agentic 推理，讓 Claude 自行決定思考深度。
@@ -39,7 +42,7 @@ _ADAPTIVE_THINKING = {"type": "adaptive"}
 
 
 class ClaudeModelManager(BaseModelManager):
-    """雲端導演大腦 (Claude)：Phase 4 導演藍圖的結構化 + agentic 推理。"""
+    """雲端導演大腦 (Claude)：Phase 4 導演藍圖的 agentic 推理。"""
 
     # 雲端 API 無 VRAM / 執行緒安全問題，client 可並發；不以 L3 鎖序列化推論
     # （同 GeminiModelManager；序列化只會把吞吐壓成 1）。並發度交由 API 資源池控制。
@@ -68,33 +71,28 @@ class ClaudeModelManager(BaseModelManager):
     @synchronized_inference
     def generate_director_plan(self, prompt: str, schema: type[BaseModel] | None = None) -> str:
         """
-        導演藍圖生成：one-shot 結構化輸出，回傳 JSON 字串（與 ``GeminiModelManager`` 同契約）。
+        導演藍圖生成：one-shot 生成，回傳 JSON 字串（與 ``GeminiModelManager`` 同契約）。
 
         模型由 ``CLAUDE_DIRECTOR_MODEL`` 決定（預設 Opus 4.8，env 可切 Sonnet 做省錢 A/B）。
-        ``schema`` 非 None 時走 structured outputs，回傳已驗證的 ``parsed_output`` 再轉 JSON 字串；
-        ``schema`` 為 None（理論上 director 一律帶 schema）退化為純文字，取第一個 text block。
-        例外往上拋（比照 Gemini 的 director 路徑，由 job / service 層處理）。
+        不走 native structured output（schema 太複雜會 400，見 module docstring）：``schema`` 非 None
+        時把 ``schema_to_text(schema)`` 附在 prompt 末尾（director 一律帶 schema），由 Claude 依文字
+        結構輸出 JSON；下游 ``SchedulingState`` 以 robust parser 解析。例外往上拋（比照 Gemini director
+        路徑，由 job / service 層處理）。
         """
         model = CLAUDE_DIRECTOR_MODEL
-        if schema is not None:
-            response = self.client.messages.parse(
-                model=model,
-                max_tokens=CLAUDE_DIRECTOR_MAX_TOKENS,
-                thinking=_ADAPTIVE_THINKING,
-                messages=[{"role": "user", "content": prompt}],
-                output_format=schema,
-            )
-            # 記錄 token 用量（Phase 4）；reflection 重試會多次呼叫、各自累加
-            self._record(response, model)
-            # parsed_output 為 SDK 已驗證的 schema 實例 → 轉回 JSON 字串供下游 json.loads
-            return response.parsed_output.model_dump_json()
-
-        # 無 schema 後備：純文字生成，取第一個 text block（維持回傳 str 契約）
+        # 把結構說明附在 prompt 末尾（schema_to_text 已含「只輸出 JSON、不要 markdown」指示）
+        content = f"{prompt}\n\n{schema_to_text(schema)}" if schema is not None else prompt
         response = self.client.messages.create(
             model=model,
             max_tokens=CLAUDE_DIRECTOR_MAX_TOKENS,
             thinking=_ADAPTIVE_THINKING,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": content}],
         )
+        # 記錄 token 用量（Phase 4）；reflection 重試會多次呼叫、各自累加
         self._record(response, model)
+        return self._extract_text(response)
+
+    @staticmethod
+    def _extract_text(response) -> str:
+        """從 Anthropic 回應取第一段文字內容（略過 adaptive thinking 的 thinking block）；無則回空字串。"""
         return next((block.text for block in response.content if block.type == "text"), "")
