@@ -99,8 +99,13 @@ class DefaultPromptManager(BasePromptManager):
         return PromptSpec(text=text, schema=TemplateAnalysisSemantics)
 
     def get_director_blueprint_prompt(self, user_prompt, assets, audio_dna, template_dna=None,
-                                      previous_timeline=None, error_prompt="") -> PromptSpec:
-        """導演剪輯藍圖（把素材庫編排成 Remotion 可渲染的 JSON 剪輯藍圖）。"""
+                                      previous_timeline=None, error_prompt="",
+                                      draft_to_fix=None) -> PromptSpec:
+        """導演剪輯藍圖（把素材庫編排成 Remotion 可渲染的 JSON 剪輯藍圖）。
+
+        ``draft_to_fix`` 非空時進入『糾錯模式』：帶著上一輪未通過 Critic 的藍圖做最小幅度就地
+        修正（搭配 ``error_prompt`` 的索引式錯誤清單），而非從零重生，藉此保留已正確的創意決策。
+        """
         # 1. 角色與最高指導原則
         instruction = (
             "# 角色\n"
@@ -148,16 +153,31 @@ class DefaultPromptManager(BasePromptManager):
             "- reason：每個片段請『先』在 reason 寫下導演決策考量（選材 / 轉場 / 變速 / 混音），再填其餘參數。\n\n"
         )
 
-        # 3b. 字幕軌（text_overlays：與 timeline 平行的頂層陣列，獨立於片段）
+        # 3b. 字幕心法（text_overlays：與 timeline 平行的頂層陣列，獨立於片段）
+        # 字幕已從片段解耦成獨立軌：每條帶絕對 start_at/end_at、可跨片段、同框可並存多條。
+        # 此段落聚焦『短影音字幕的剪輯心法』而非單純欄位列舉——分工 / 斷句 / 計時 / 可讀性 / 節制。
         instruction += (
-            "# 字幕（text_overlays，與 timeline 平行的頂層陣列、獨立於片段）\n"
-            "- 每條字幕含 text、絕對 start_at / end_at（總時間軸秒數）：請用素材逐字稿 audio.transcript.chunks\n"
-            "  的時間戳對齊講話時段；字幕可橫跨多個片段持續顯示，不必與片段邊界對齊。\n"
-            "- vertical_position / horizontal_position（皆 0~100）依該時段主體 bbox 放在『不擋主體』處：主體偏\n"
-            "  下就把字幕往上、偏上就往下；閱讀型字幕水平用 50 置中，花字可左右擺放。上下左右邊界系統會自動\n"
-            "  夾進 safe-area，不必自己算平台 UI。\n"
-            "- size / color / outline / background / animation 控制樣式；整支盡量沿用一致樣式，避免每條不同顯得廉價。\n"
-            "- 同一時段可並存多條字幕（時間區間重疊者會同時顯示）。若無字幕需求，text_overlays 給空陣列 []。\n\n"
+            "# 字幕心法（text_overlays：與 timeline 平行的頂層陣列、獨立於片段）\n"
+            "1. 以『對白字幕』為主幹，非對白文字省著用：\n"
+            "   - 『對白字幕』是全片骨幹——現在的短影音幾乎都靠逐字稿字幕撐全程：跟著人聲走，用素材逐字稿\n"
+            "     audio.transcript.chunks 的時間戳對齊講話時段，整支沿用一致樣式（建議 white + outline_shadow、\n"
+            "     animation=fade、水平置中），統一才專業。\n"
+            "   - 非對白文字只留兩種用途：『開場 Hook 句』（前幾秒疊一句勾子點破主題 / 製造好奇，呼應前 3 秒\n"
+            "     Hook，收尾即收）與『關鍵字強調』（偶爾把一兩個重點字放大、用 accent/yellow、配 pop/slide_up 點睛）。\n"
+            "     ⚠️ 別做傳統正式的『標題卡 / 片頭大標題』——現在的短影音不興這套；整片堆花字也顯廉價。\n"
+            "2. 斷句鐵律——一條字幕只放『一口氣、一個重點』，寧短勿長：9:16 直式扣掉安全區後一行容不下長句，\n"
+            "   逐字稿過長務必沿語意拆成『連續多條』短字幕接力顯示，切勿把整段話塞進一條。\n"
+            "3. 計時要讀得完：每條至少停留約 1 秒、句子越長給越久，讓觀眾來得及讀完；可略晚於語音收尾，\n"
+            "   但別拖進後面的長段靜默。字幕可橫跨多個片段持續顯示，不必與片段邊界對齊。\n"
+            "4. 位置避主體：vertical_position / horizontal_position（皆 0~100）依該時段主體 bbox 放在『不擋主體』\n"
+            "   處——主體偏下就把字幕往上、偏上就往下；對白字幕慣例壓在下三分之一（vertical 約 85）、水平置中。\n"
+            "   上下左右邊界系統會自動夾進 safe-area，不必自己算平台 UI 遮擋。\n"
+            "5. 可讀性優先：畫面雜亂 / 亮底時靠 outline_shadow（預設）或 background（solid/blur/pill）拉開對比；\n"
+            "   顏色省著用——對白維持白字，accent/yellow 只點在要強調的字眼上，不要整句上色。\n"
+            "6. 別過度字幕：純風景 / 純情緒 / 無人聲的段落留白，讓畫面與配樂呼吸；只在有對白或要強調時才上字幕。\n"
+            "   與混音呼應——上對白字幕的時段，通常正是保留原音（clip_volume 高）、BGM 避讓的講話段。\n"
+            "7. 同一時段可並存多條（時間區間重疊者同時顯示），但別讓兩條『對白字幕』互相疊住；重疊請保留給\n"
+            "   『對白 + 花字』分處不同位置。語言跟著人聲 / 使用者指定的受眾走。無字幕需求時 text_overlays 給 []。\n\n"
         )
 
         # 4. 配樂守則（track_id 由後端注入，LLM 不填）
@@ -168,8 +188,18 @@ class DefaultPromptManager(BasePromptManager):
             "- 【範本 DNA】的配樂（若有）僅供風格參考，不是可播放的音檔，切勿拿來當 BGM。\n\n"
         )
 
-        # 5. 處理模式（對話式微調 / 範本風格參考）
-        if previous_timeline:
+        # 5. 處理模式（糾錯就地修正 / 對話式微調 / 範本風格參考）
+        # 糾錯模式優先於微調模式：draft_to_fix 本就是微調意圖產出的結果，當下最緊要的是修掉物理錯誤。
+        if draft_to_fix:
+            instruction += (
+                "# 糾錯模式（最小幅度就地修正）\n"
+                "下方【待修正藍圖】未通過系統 Critic 驗證。請『只』修正錯誤清單點名的片段，其餘片段、\n"
+                "字幕、配樂與所有創意決策（選材 / 排序 / 轉場 / 變速 / 裁切）一律原樣保留，不要重排或重新發想。\n"
+                "⚠️ 索引對應：錯誤訊息中的『第 N 段』與『Clip [N]』就是【待修正藍圖】timeline 陣列由 0 起算的第 N 個元素。\n"
+                "⚠️ 維持無縫：修改某段時間後，為遵守『首尾相接、零間隙零重疊』鐵律，可順移其後片段的\n"
+                "   start_at / end_at，但同樣以最小更動為原則，不要波及無關片段。\n\n"
+            )
+        elif previous_timeline:
             instruction += (
                 "# 微調模式\n"
                 "這是一次修改任務：參考下方【上一版藍圖】，只針對使用者的【最新指令】做局部修改，\n"
@@ -206,7 +236,11 @@ class DefaultPromptManager(BasePromptManager):
             f"- 📦 素材庫: {json.dumps(assets, ensure_ascii=False)}\n"
             f"- 🎵 配樂 DNA: {json.dumps(audio_dna, ensure_ascii=False)}\n"
         )
-        if previous_timeline:
+        # 糾錯模式注入待修正藍圖（與 previous_timeline 互斥：draft_to_fix 已是微調後結果，
+        # 再附原始上一版反成干擾），緊接著由下方 error_prompt 列出對應的索引式錯誤。
+        if draft_to_fix:
+            prompt += f"- 🩹 待修正藍圖（timeline）: {json.dumps(draft_to_fix, ensure_ascii=False)}\n"
+        elif previous_timeline:
             prompt += f"- ⏪ 上一版藍圖: {json.dumps(previous_timeline, ensure_ascii=False)}\n"
         if template_dna:
             prompt += f"- 🧬 範本 DNA: {json.dumps(template_dna, ensure_ascii=False)}\n"

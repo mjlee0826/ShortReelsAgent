@@ -174,6 +174,38 @@ def record_usage(response, model: str, phase: Phase) -> None:
     ))
 
 
+def record_anthropic_usage(response, model: str, phase: Phase) -> None:
+    """讀 Anthropic ``response.usage`` 計價並記入當前帳本；無帳本 / 無 usage 則 no-op。
+
+    供 ``ClaudeModelManager`` 在 director 出口呼叫。與 Gemini 版 ``record_usage`` 對稱：兩者皆為
+    「各家 usage 物件的 Adapter」，最終都寫進同一本 ``UsageLedger``，各自隔離供應商欄位差異。
+    Anthropic 的 thinking token 已計入 ``output_tokens``（輸出價），無須像 Gemini 另外併入。
+    """
+    ledger = _active_ledger.get()
+    if ledger is None:  # Null Object：無 job 帳本時不記
+        return
+    usage = getattr(response, "usage", None)
+    if usage is None:  # 某些錯誤回應可能無 usage
+        return
+
+    pricing = get_pricing(model)
+    # input_tokens 為「未命中快取」的輸入；命中快取者另計（director 走 one-shot、通常無快取）
+    input_tokens = _safe_int(getattr(usage, "input_tokens", 0))
+    cached_tokens = _safe_int(getattr(usage, "cache_read_input_tokens", 0))
+    output_tokens = _safe_int(getattr(usage, "output_tokens", 0))
+    cached_rate = pricing.cached_input if pricing.cached_input is not None else pricing.input_text
+    cost = (
+        input_tokens / TOKENS_PER_MILLION * pricing.input_text
+        + cached_tokens / TOKENS_PER_MILLION * cached_rate
+        + output_tokens / TOKENS_PER_MILLION * pricing.output
+    )
+    # input 統計併入快取部分，讓帳本反映實際輸入量（與 Gemini 版的歸戶口徑一致）
+    ledger.add(UsageRecord(
+        phase=phase, model=model,
+        input_tokens=input_tokens + cached_tokens, output_tokens=output_tokens, cost_usd=cost,
+    ))
+
+
 def _input_cost(usage, pricing: ModelPricing) -> float:
     """算輸入成本:有模態明細走分模態(Level 1),否則總量 × 文字價(Level 0)。"""
     total_input = _safe_int(getattr(usage, "prompt_token_count", 0))

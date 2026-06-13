@@ -62,7 +62,10 @@ class ReflectionState(BaseState):
 
         # 整理錯誤訊息，塞回 context 供 SchedulingState 反思
         context["error_prompt"] = "\n".join([f"- {err}" for err in errors])
-        
+        # 同時帶回『這份未通過的草稿』：Critic 錯誤訊息是索引式的（「第 N 段 / Clip [N]」），
+        # 唯有讓下一輪看到對應的藍圖陣列，才能做最小幅度的就地糾錯而非盲改重生。
+        context["draft_to_fix"] = draft
+
         # 狀態切換：打回重構！
         from director_agent.states.scheduling_state import SchedulingState
         return SchedulingState()

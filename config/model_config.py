@@ -44,6 +44,12 @@ __all__ = [
     "GEMINI_STRONG_MODEL",
     "GEMINI_TASK_MODEL",
     "GEMINI_FALLBACK_MODEL",
+    # Claude（Phase 4 導演藍圖 provider 切換）
+    "DIRECTOR_PROVIDER",
+    "DIRECTOR_PROVIDER_CLAUDE",
+    "DIRECTOR_PROVIDER_GEMINI",
+    "CLAUDE_DIRECTOR_MODEL",
+    "CLAUDE_DIRECTOR_MAX_TOKENS",
     # Qwen
     "QWEN_MODEL_ID",
     "QWEN_PROCESSOR_ID",
@@ -164,6 +170,20 @@ def _read_float_env(env_name: str, default: float) -> float:
         return float(raw.strip())
     except ValueError:
         return default
+
+
+# ── Phase 4 導演藍圖 provider 切換 (Claude 預設 / Gemini) ─────────────────────────
+# director blueprint 改用 Claude（長程一致性強、結構化輸出）；Casting 仍走 Gemini 2.5 Flash。
+# 以 env DIRECTOR_PROVIDER 切換供應商，方便不改碼做 A/B、或一鍵切回 Gemini（GEMINI_TASK_MODEL
+# 的 director_blueprint 條目刻意保留不動）。具名常數避免散落 magic string。
+DIRECTOR_PROVIDER_CLAUDE = "claude"
+DIRECTOR_PROVIDER_GEMINI = "gemini"
+DIRECTOR_PROVIDER = os.getenv("DIRECTOR_PROVIDER", DIRECTOR_PROVIDER_CLAUDE).strip().lower()
+
+# Claude 導演模型（預設 Opus 4.8，品質優先）；env 可切 claude-sonnet-4-6 做省錢 A/B。
+CLAUDE_DIRECTOR_MODEL = os.getenv("CLAUDE_MODEL_DIRECTOR", "claude-opus-4-8")
+# 單次導演生成的輸出上限（含 adaptive thinking token）；截斷時（stop_reason=max_tokens）調高此值。
+CLAUDE_DIRECTOR_MAX_TOKENS = _read_int_env("CLAUDE_DIRECTOR_MAX_TOKENS", 16000)
 
 
 # Qwen 量化策略（QWEN_QUANT_MODE）已於 config.media_processor_config 解析（含 env 覆寫），上方 import

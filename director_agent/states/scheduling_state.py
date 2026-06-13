@@ -1,7 +1,7 @@
 import json
 import re
 from director_agent.states.base_state import BaseState
-from model.managers.gemini_model_manager import GeminiModelManager
+from model.managers.director_provider import get_director_manager
 from prompt_manager.prompt_factory import PromptFactory
 from prompt_manager.task_mode import TaskMode
 
@@ -19,22 +19,26 @@ class SchedulingState(BaseState):
         else:
             print("\n[Agent State] 正在呼叫高強度導演模型生成藍圖...")
         
-        gemini = GeminiModelManager()
+        # 依 DIRECTOR_PROVIDER 取得導演 manager（預設 Claude，可 env 切回 Gemini 做 A/B）
+        manager = get_director_manager()
         
         # 透過 PromptFactory 請求 PromptSpec(文字 + 結構化輸出 schema)
         spec = PromptFactory.create_prompt(
             mode=TaskMode.DIRECTOR_BLUEPRINT,
-            manager=gemini.prompt_manager,
+            manager=manager.prompt_manager,
             user_prompt=context.get("user_prompt", ""),
             assets=assets,
             template_dna=context.get("template_dna"),
             previous_timeline=context.get("previous_timeline"),
             audio_dna=context.get("audio_dna", {}),
             error_prompt=context.get("error_prompt", ""),
+            # 糾錯模式：上一輪被 Critic 打回時 ReflectionState 會塞入待修正草稿，供就地最小修正
+            draft_to_fix=context.get("draft_to_fix"),
         )
 
-        # 呼叫後端：把 schema 交給 response_schema，由 Gemini 保證輸出結構合法
-        raw_response = gemini.generate_director_plan(prompt=spec.text, schema=spec.schema)
+        # 呼叫後端：把 schema 交給後端結構化輸出（Gemini response_schema / Claude structured
+        # outputs）保證結構合法，與 provider 無關
+        raw_response = manager.generate_director_plan(prompt=spec.text, schema=spec.schema)
         
         # 【修改點 1】呼叫新的解析器
         parsed_data = self._parse_json_response(raw_response)

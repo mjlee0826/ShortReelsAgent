@@ -58,6 +58,11 @@ MODEL_PRICING: dict[str, ModelPricing] = {
 
     # fallback（舊 default；2.5 Flash 音訊歷史上另計，保守先視同文字 ⚠️ 待確認）
     "gemini-2.5-flash": ModelPricing(input_text=0.30, output=2.50),
+
+    # 4 導演藍圖（Claude；Phase 4 跨雲改用）。cached_input 取輸入價約 0.1×（director one-shot
+    # 通常無快取，列出供完整性）；thinking token 由 Anthropic 計入 output、以 output 價計。
+    "claude-opus-4-8": ModelPricing(input_text=5.00, output=25.00, cached_input=0.50),
+    "claude-sonnet-4-6": ModelPricing(input_text=3.00, output=15.00, cached_input=0.30),
 }
 
 # 查無對應模型時的後備單價（與 GEMINI_FALLBACK_MODEL 對齊，避免 KeyError）

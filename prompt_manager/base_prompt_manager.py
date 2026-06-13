@@ -46,8 +46,8 @@ class BasePromptManager(ABC):
     @abstractmethod
     def get_director_blueprint_prompt(self, user_prompt: str, assets: list, audio_dna: dict,
                                       template_dna: dict = None, previous_timeline: list = None,
-                                      error_prompt: str = "") -> PromptSpec:
-        """導演剪輯藍圖：將素材庫編排成 Remotion 可渲染的 JSON 剪輯藍圖"""
+                                      error_prompt: str = "", draft_to_fix: list = None) -> PromptSpec:
+        """導演剪輯藍圖：將素材庫編排成 Remotion 可渲染的 JSON 剪輯藍圖（draft_to_fix 非空時走糾錯模式）"""
 
     @abstractmethod
     def get_director_casting_prompt(self, user_prompt: str, casting_cards: list, audio_dna: dict,
