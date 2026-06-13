@@ -269,7 +269,7 @@ class DefaultPromptManager(BasePromptManager):
         # 2. 粗篩心法（顧的是「池子夠不夠用、有沒有誤殺」，不是定剪）
         instruction += (
             "# 粗篩心法\n"
-            f"1. 池子大小：目標保留『約 {DIRECTOR_CASTING_POOL_TARGET} 個』候選素材。素材夠多時就盡量補滿，\n"
+            f"1. 池子大小：目標保留『剛好 {DIRECTOR_CASTING_POOL_TARGET} 個』候選素材。素材夠多時就盡量補滿，\n"
             "   給精修階段充足的選擇空間；寧可多留幾個邊際素材，也不要在這步就砍光。\n"
             "2. 只剔明顯不適合：剔除『明顯不相關、重複、或品質太差（aes/tech 很低又 crop not_recommended）』的；\n"
             "   只要『有機會用到』就留著——是否真的用、用哪段，交給第二段。\n"
