@@ -365,15 +365,15 @@ class CastingCard(BaseModel):
 
 class CastingSelection(BaseModel):
     """
-    導演選角結果（第一段 Casting 的結構化輸出）：從素材庫挑出『要用的素材 id』。
+    導演選角結果（第一段 Casting 的結構化輸出）：從素材庫粗篩出一個『候選池』交給第二段。
 
     ``rationale`` 刻意置首（同 :class:`Clip` 的手法）：藉結構化輸出的隱含 property ordering 逼模型
-    『先想清楚故事走向、情緒弧線與所需素材，再列出 id』，把 think-first 轉成選材品質。
-    刻意只輸出 id：精準排序 / 時長 / 裁切 / 混音全部交給第二段在『選中的少數素材』上自由發揮，
-    不讓較弱的選角模型框死較強的精修模型。
+    『先想清楚故事走向與所需素材，再列出 id』，把 think-first 轉成選材品質。
+    刻意只輸出 id、且是『候選池（粗篩）』而非最終定剪：最終要用哪些、精準排序 / 時長 / 裁切 / 混音
+    全部交給第二段在這個池子上自由發揮，不讓較弱的選角模型框死較強的精修模型。
     """
-    rationale: str = Field(default="", description="整體選材思路：先想清楚故事走向、情緒弧線與所需素材，再列出 id")
-    selected_ids: list[str] = Field(default_factory=list, description="選用的素材 id 清單（一字不差照抄素材庫 id，含 raw/ 或 standardized/ 前綴與 _std 後綴；順序不必精確，精準排序由第二段決定）")
+    rationale: str = Field(default="", description="整體選材思路：先想清楚故事走向、需要哪些素材，再列出 id")
+    selected_ids: list[str] = Field(default_factory=list, description="候選池素材 id 清單（一字不差照抄素材庫 id，含 raw/ 或 standardized/ 前綴與 _std 後綴）；依『相關 / 重要程度』由高到低排序（供必要時取捨用，非播放順序，播放順序由第二段決定）")
 
 
 # ──────────────────────────────────────────────────────────────────────────────

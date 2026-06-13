@@ -1,5 +1,6 @@
 import json
 
+from config.director_config import DIRECTOR_CASTING_POOL_TARGET
 from config.media_processor_config import SUBJECT_CANDIDATE_TOP_N
 from prompt_manager.base_prompt_manager import BasePromptManager, PromptSpec
 from prompt_manager.schemas import (
@@ -208,28 +209,30 @@ class DefaultPromptManager(BasePromptManager):
 
     def get_director_casting_prompt(self, user_prompt, casting_cards, audio_dna,
                                     template_dna=None) -> PromptSpec:
-        """導演選角（兩階段第一段）：從精簡卡片做選材，只輸出要用的素材 id 清單。"""
-        # 1. 角色與職責邊界（只做選材：挑出要用的 id，精準排序 / 時長 / 剪輯 / 混音全留給第二段）
+        """導演選角（兩階段第一段）：從精簡卡片粗篩出一個『候選池』，只輸出 id。"""
+        # 1. 角色與職責邊界（只做粗篩出候選池，最終定剪 / 排序 / 時間軸全留給第二段）
         instruction = (
             "# 角色\n"
-            "你是 AI 電影導演的『選角』大腦。面對一整櫃素材，你只負責一件事：挑出『真正要用』的素材，\n"
-            "輸出它們的 id。精準的排序、時長、剪輯點、裁切、變速、字幕、混音，全部交給後續精修階段在\n"
-            "你選出的這幾支素材上自由發揮——你不需要排順序，也不需要決定時間。\n\n"
+            "你是 AI 電影導演的『選角』大腦。面對一整櫃素材，你只負責一件事：粗篩出一個『候選池』——\n"
+            "把『有機會用到』的素材都留下、只剔除明顯不適合的，輸出它們的 id。最終要用哪些、怎麼排、\n"
+            "精準剪輯點 / 裁切 / 變速 / 字幕 / 混音，全部交給後續精修階段在這個池子裡自由發揮。\n"
+            "⚠️ 你是『粗篩』不是『定剪』：寧可多留、不要早剪——把抉擇權留給更強的精修階段。\n\n"
             "# 最高指導原則\n"
             "【User Overrides Everything】使用者指令是絕對最高準則：要求的風格 / 主題 / 節奏，必須蓋過\n"
             "素材或音樂原本的氛圍來滿足。\n\n"
         )
-        # 2. 選材心法（顧的是『這組素材湊不湊得出一支好片』，不是排順序）
+        # 2. 粗篩心法（顧的是「池子夠不夠用、有沒有誤殺」，不是定剪）
         instruction += (
-            "# 選材心法\n"
-            "1. 品質：優先採用 aes（美學）與 tech（技術畫質）分數高的素材；分數低的捨棄；crop 為\n"
-            "   'not_recommended' 的素材慎用（9:16 直式難裁）。\n"
-            "2. 切題：依使用者指令，對照素材的 cap / transcript_text / event_digest 判斷相關性，只選真正貼題的。\n"
-            "3. 湊得出好片：確保『選出的這組素材』撐得起一支短片——有夠強的開場素材、情緒能用 mood 鋪出\n"
-            "   起落、場景與動作（scene_tags / actions）夠多樣。這些是『選材時要顧到』的條件，不是要你排順序。\n"
-            "4. 數量適中：依【配樂 DNA】的整體長度，選出『大致夠用』的素材量——寧精勿濫，別塞太多也別太少。\n"
-            "5. 複雜影片：event_digest 列出該片內部的多個畫面 beat；只要其中有可用的高潮就選這支素材，\n"
-            "   精準切哪一段由第二段決定。\n\n"
+            "# 粗篩心法\n"
+            f"1. 池子大小：目標保留『約 {DIRECTOR_CASTING_POOL_TARGET} 個』候選素材。素材夠多時就盡量補滿，\n"
+            "   給精修階段充足的選擇空間；寧可多留幾個邊際素材，也不要在這步就砍光。\n"
+            "2. 只剔明顯不適合：剔除『明顯不相關、重複、或品質太差（aes/tech 很低又 crop not_recommended）』的；\n"
+            "   只要『有機會用到』就留著——是否真的用、用哪段，交給第二段。\n"
+            "3. 切題：依使用者指令，對照素材的 cap / transcript_text / event_digest 判斷相關性。\n"
+            "4. 池子要湊得出好片：確保候選池涵蓋夠強的開場素材、情緒（mood）能鋪出起落、場景與動作\n"
+            "   （scene_tags / actions）夠多樣——別讓整池都同一種。\n"
+            "5. 複雜影片：event_digest 顯示片內多個畫面 beat，只要有可用片段就留；精準切哪段由第二段決定。\n"
+            "6. 排序：把『最相關 / 最該用』的排在 selected_ids 前面（供必要時取捨用，不是播放順序）。\n\n"
         )
         # 3. 卡片欄位字典（卡片為精簡縮寫，對齊 ContextCompressor.to_casting_cards 輸出）
         instruction += (
