@@ -355,6 +355,7 @@ class PipVideo(BaseModel):
 _BRIGHTNESS_MIN, _BRIGHTNESS_MAX = primitive_range("brightness")
 _CONTRAST_MIN, _CONTRAST_MAX = primitive_range("contrast")
 _SATURATE_MIN, _SATURATE_MAX = primitive_range("saturate")
+_SEPIA_MIN, _SEPIA_MAX = primitive_range("sepia")
 _BLUR_MIN, _BLUR_MAX = primitive_range("blur")
 _GRAYSCALE_MIN, _GRAYSCALE_MAX = primitive_range("grayscale")
 
@@ -383,6 +384,10 @@ class ClipColor(BaseModel):
     saturate: Optional[float] = Field(
         default=None, ge=_SATURATE_MIN, le=_SATURATE_MAX,
         description="飽和覆寫（留空=沿用 preset；0=灰、1 原樣、>1 更濃）",
+    )
+    sepia: Optional[float] = Field(
+        default=None, ge=_SEPIA_MIN, le=_SEPIA_MAX,
+        description="棕褐覆寫（留空=沿用 preset；0 無、1 全棕褐、偏暖復古）",
     )
     blur: Optional[float] = Field(
         default=None, ge=_BLUR_MIN, le=_BLUR_MAX,
