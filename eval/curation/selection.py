@@ -1,7 +1,10 @@
 """人工選取機制 + 自動 fallback 選取（Strategy）。
 
-- ``SelectionTemplateWriter``：產生 ``selections/<group_id>.txt`` 範本（全部候選預設註解掉），
-  使用者把要保留的那行前面的 ``#`` 拿掉即可；已存在則不覆寫（保住人工編輯）。
+- ``SelectionTemplateWriter``：產生／覆寫 ``selections/<group_id>.txt``。
+  - ``write_if_absent``：產生範本（全部候選預設註解掉），使用者把要保留的那行前面的 ``#`` 拿掉即可；
+    已存在則不覆寫（保住人工編輯）。
+  - ``write_selection``：依指定的選取集合覆寫（被選的行不註解、其餘註解），供互動 server 一鍵存檔用；
+    輸出格式與範本完全相同，因此勾選與手動編輯兩種方式可互換。
 - ``SelectionReader``：讀回未註解的行，取每行第一個 token 當 cache_key。
 - ``AutoFallbackSelector``：無人工選取時，依品質由高到低挑到覆蓋秒數預算為止。
 """
@@ -34,10 +37,33 @@ class SelectionTemplateWriter:
         path.write_text(self._render(group, candidates, target_seconds), encoding="utf-8")
         logger.info("已產生選取範本：%s（編輯後重跑 curate 套用）", path)
 
+    def write_selection(
+        self,
+        path: Path,
+        group: GroupSpec,
+        candidates: list[ClipCandidate],
+        target_seconds: float,
+        selected_keys: set[str],
+    ) -> None:
+        """依指定選取集合覆寫選取檔（被選的行不註解、其餘註解）；供互動 server 存檔用。"""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            self._render(group, candidates, target_seconds, selected_keys), encoding="utf-8"
+        )
+        logger.info("已寫入選取檔：%s（保留 %d 件）", path, len(selected_keys))
+
     def _render(
-        self, group: GroupSpec, candidates: list[ClipCandidate], target_seconds: float
+        self,
+        group: GroupSpec,
+        candidates: list[ClipCandidate],
+        target_seconds: float,
+        selected_keys: set[str] | None = None,
     ) -> str:
-        """組出範本內容（含用法說明與每段提示）。"""
+        """組出選取檔內容（含用法說明與每段提示）。
+
+        ``selected_keys`` 為 None 或空集合時所有候選皆註解（純範本）；否則被選的 cache_key 那行不註解。
+        """
+        selected = selected_keys or set()
         c = SELECTION_COMMENT_PREFIX
         lines = [
             f"{c} 組 {group.group_id}（{group.theme}，scope={group.scope or '-'}）選取檔",
@@ -49,8 +75,10 @@ class SelectionTemplateWriter:
         ]
         for candidate in candidates:
             score = candidate.quality_score if candidate.quality_score is not None else 0.0
+            # 被選的行不加註解前綴；其餘維持註解。行尾資訊一律以 {c} 標註，SelectionReader 取首 token 即可。
+            prefix = "" if candidate.cache_key in selected else f"{c} "
             lines.append(
-                f"{c} {candidate.cache_key}    {c} [{candidate.media_type.value}] "
+                f"{prefix}{candidate.cache_key}    {c} [{candidate.media_type.value}] "
                 f"dur={candidate.duration_sec:.0f}s {candidate.width}x{candidate.height} "
                 f"{candidate.source_platform.value} q={score:.2f}"
             )

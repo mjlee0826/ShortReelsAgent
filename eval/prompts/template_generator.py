@@ -7,15 +7,26 @@ from __future__ import annotations
 
 import random
 
-from ..constants import PROMPT_COMPOSE_MAX_ATTEMPTS
+from ..constants import (
+    CAPTION_ADD,
+    CAPTION_NEGATIVE_MIN_PROMPTS,
+    CAPTION_NO,
+    CAPTION_NONE,
+    PROMPT_COMPOSE_MAX_ATTEMPTS,
+)
 from ..logging_setup import get_logger
 from ..models import GroupSpec, PromptVariant
 from ..seeding import stable_seed
 from .base import PromptGenerator
 from .lexicon import (
+    CAPTION_CHOICES,
+    CAPTION_NEGATIVE_TEMPLATES,
+    CAPTION_TEMPLATES,
     DETAIL_DETAILED,
     DETAIL_LEVEL_ORDER,
     DETAIL_MINIMAL,
+    DETAIL_SPECIFIC,
+    DETAIL_TO_PROMPT_DIFFICULTY,
     DURATION_CHOICES,
     MUSIC_CHOICES,
     PLATFORM_CHOICES,
@@ -44,11 +55,12 @@ class TemplatePromptGenerator(PromptGenerator):
         rng = random.Random(stable_seed(group.group_id + _SEED_SUFFIX))
         lexicon = THEME_LEXICONS.get(group.theme) or generic_lexicon(group.theme)
         levels = self._level_sequence(group.prompt_count)
+        captions = self._caption_sequence(levels, rng)
 
         variants: list[PromptVariant] = []
         seen_texts: set[str] = set()
-        for level in levels:
-            variants.append(self._compose(level, group, lexicon, rng, seen_texts))
+        for level, caption in zip(levels, captions):
+            variants.append(self._compose(level, caption, group, lexicon, rng, seen_texts))
         return variants
 
     @staticmethod
@@ -62,18 +74,33 @@ class TemplatePromptGenerator(PromptGenerator):
             sequence[-1] = DETAIL_DETAILED
         return sequence
 
+    @staticmethod
+    def _caption_sequence(levels: list[str], rng: random.Random) -> list[str]:
+        """對齊 levels 產生字幕標記序列：保證至少一個正面字幕 prompt，量夠時再保證一個負面。
+
+        字幕範本只存在於 specific/detailed 兩級，故只在這些位置指派（其餘維持 none）。
+        """
+        labels = [CAPTION_NONE] * len(levels)
+        capable = [i for i, lv in enumerate(levels) if lv in (DETAIL_SPECIFIC, DETAIL_DETAILED)]
+        if not capable:
+            return labels  # 例如 prompt_count 過小、無 specific/detailed 位置
+        rng.shuffle(capable)  # 決定性洗牌：保證涵蓋但位置不固定
+        labels[capable[0]] = CAPTION_ADD
+        if len(levels) >= CAPTION_NEGATIVE_MIN_PROMPTS and len(capable) >= 2:
+            labels[capable[1]] = CAPTION_NO
+        return labels
+
     def _compose(
         self,
         level: str,
+        caption: str,
         group: GroupSpec,
         lexicon: dict[str, list[str]],
         rng: random.Random,
         seen_texts: set[str],
     ) -> PromptVariant:
         """組出單一 prompt；盡量避免與已產生的重複。"""
-        # 依 scope 把專屬模板併入該詳細度的候選池（無 scope 則照舊）
-        scope_pool = SCOPE_TEMPLATES.get(group.scope or "", {}).get(level, [])
-        templates = TEMPLATES[level] + scope_pool
+        templates = self._templates_for(level, caption, group)
         text = ""
         tone_name = ""
         scenario_name = ""
@@ -91,12 +118,30 @@ class TemplatePromptGenerator(PromptGenerator):
                 "style": rng.choice(STYLE_CHOICES),
                 "music": rng.choice(MUSIC_CHOICES),
                 "platform": rng.choice(PLATFORM_CHOICES),
+                "caption": rng.choice(CAPTION_CHOICES),  # 僅字幕正面範本會用到
             }
             text = self._tidy(template.format(**fields))
             if text not in seen_texts:
                 break
         seen_texts.add(text)
-        return PromptVariant(text=text, detail_level=level, tone=tone_name, scenario=scenario_name)
+        return PromptVariant(
+            text=text,
+            detail_level=level,
+            difficulty=DETAIL_TO_PROMPT_DIFFICULTY[level],  # U 型：兩端難、中間易
+            tone=tone_name,
+            scenario=scenario_name,
+            caption=caption,
+        )
+
+    @staticmethod
+    def _templates_for(level: str, caption: str, group: GroupSpec) -> list[str]:
+        """依字幕標記挑模板池：字幕正面/負面走專用模板，其餘走一般模板＋scope 專屬模板。"""
+        if caption == CAPTION_ADD:
+            return CAPTION_TEMPLATES[level]
+        if caption == CAPTION_NO:
+            return CAPTION_NEGATIVE_TEMPLATES[level]
+        scope_pool = SCOPE_TEMPLATES.get(group.scope or "", {}).get(level, [])
+        return TEMPLATES[level] + scope_pool
 
     @staticmethod
     def _tidy(text: str) -> str:

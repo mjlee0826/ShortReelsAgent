@@ -11,11 +11,16 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from .constants import (
+    CAPTION_NONE,
     DEFAULT_CANDIDATE_MULTIPLIER,
     DEFAULT_IMAGE_NOMINAL_SECONDS,
     DEFAULT_IMAGE_RATIO,
     DEFAULT_TARGET_TOTAL_SECONDS,
+    DIFFICULTY_MEDIUM,
 )
+
+# 難度三軸共用的字面值（與 constants.DIFFICULTY_* 對應；Literal 需直接字面量故在此重列）
+DifficultyLevel = Literal["easy", "medium", "hard"]
 
 
 class SourcePlatform(str, Enum):
@@ -41,6 +46,10 @@ class GroupSpec(BaseModel):
     prompt_count: int = Field(ge=1, description="要生成幾個 user prompt")
     # 聚焦度維度：focused=單一主體（如某杯飲料）、broad=多場景（如一日遊）；None 不分類
     scope: Literal["focused", "broad"] | None = Field(default=None)
+    # 主題難度：把該主題組成連貫敘事的難度（broad 多場景通常較難）；None 不分級
+    topic_difficulty: DifficultyLevel | None = Field(default=None, description="主題敘事難度")
+    # 素材難度：候選素材的雜亂/多樣程度（關鍵字越廣、跨地、影圖越雜越難）；None 不分級
+    asset_difficulty: DifficultyLevel | None = Field(default=None, description="素材難度")
     # 秒數預算：該組需要的素材總秒數（圖片以名目秒數計）；None 時繼承 dataset 預設
     target_total_seconds: float | None = Field(default=None, gt=0)
     # 圖片佔秒數預算的比例（0~1）；None 時繼承 dataset 的 default_image_ratio
@@ -145,8 +154,13 @@ class PromptVariant(BaseModel):
 
     text: str
     detail_level: str = Field(description="詳細度：minimal/light/specific/detailed")
+    # Prompt 難度（U 型，由 detail_level 推導）：minimal/detailed=hard、light=easy、specific=medium。
+    # 給預設值避免讀到舊版 prompts.json 驗證失敗；生成階段必定覆寫為實際值。
+    difficulty: str = Field(default=DIFFICULTY_MEDIUM, description="Prompt 難度：easy/medium/hard")
     tone: str = Field(description="語氣標記")
     scenario: str = Field(description="情境標記")
+    # 字幕軸：none=未提及、add=要字幕/字卡、no_subtitle=明確不要（供 eval 切片比較字幕能力）
+    caption: str = Field(default=CAPTION_NONE, description="字幕標記：none/add/no_subtitle")
 
 
 class CurationSummary(BaseModel):
@@ -165,6 +179,9 @@ class GroupManifest(BaseModel):
     group_id: str
     theme: str
     scope: str | None = None
+    # 三軸難度（評測切片用）：主題與素材難度由 spec 帶入，prompt 難度落在 prompts.json 各筆
+    topic_difficulty: str | None = None
+    asset_difficulty: str | None = None
     clip_count: int
     video_count: int
     image_count: int

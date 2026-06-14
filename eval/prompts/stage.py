@@ -27,7 +27,9 @@ class PromptStage(PipelineStage):
             variants = self._generator.generate(group)
             write_models(context.prompts_json(group), variants)
             covered = sorted({v.detail_level for v in variants})
+            captions = sorted({v.caption for v in variants})
+            difficulties = sorted({v.difficulty for v in variants})
             logger.info(
-                "組 %s：產生 %d 個 prompt（涵蓋詳細度 %s）",
-                group.group_id, len(variants), covered,
+                "組 %s：產生 %d 個 prompt（涵蓋詳細度 %s、難度 %s、字幕 %s）",
+                group.group_id, len(variants), covered, difficulties, captions,
             )

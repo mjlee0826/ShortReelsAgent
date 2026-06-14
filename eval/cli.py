@@ -3,11 +3,13 @@
 子指令：
     fetch    只抓素材（階段 1）
     curate   只策展（階段 2；無人工選取且未加 --fallback 時僅產預覽與範本）
+    serve    起本機互動策展頁（瀏覽器勾選即寫回選取檔；不跑 pipeline，阻塞至 Ctrl-C）
     prompts  只生成 prompt（階段 4；離線）
     package  只打包凍結（階段 5）
     all      依序跑 fetch → curate(自動 fallback) → prompts → package
 
-具體階段在此組裝後注入 ``DatasetBuildPipeline``，避免 pipeline 反向相依各階段。
+pipeline 型子指令的具體階段在此組裝後注入 ``DatasetBuildPipeline``，避免 pipeline 反向相依各階段；
+``serve`` 為長駐 server、非一次性階段，於 ``main`` 直接分派。
 """
 from __future__ import annotations
 
@@ -17,6 +19,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from .config_loader import load_dataset_spec
+from .constants import DEFAULT_SERVE_HOST, DEFAULT_SERVE_PORT
+from .curation.server import run_selection_server
 from .curation.stage import CurateStage
 from .fetch.stage import FetchStage
 from .logging_setup import configure_logging, get_logger
@@ -29,10 +33,11 @@ logger = get_logger(__name__)
 # 子指令名稱
 CMD_FETCH: str = "fetch"
 CMD_CURATE: str = "curate"
+CMD_SERVE: str = "serve"
 CMD_PROMPTS: str = "prompts"
 CMD_PACKAGE: str = "package"
 CMD_ALL: str = "all"
-SUBCOMMANDS: list[str] = [CMD_FETCH, CMD_CURATE, CMD_PROMPTS, CMD_PACKAGE, CMD_ALL]
+SUBCOMMANDS: list[str] = [CMD_FETCH, CMD_CURATE, CMD_SERVE, CMD_PROMPTS, CMD_PACKAGE, CMD_ALL]
 
 # 結束代碼
 _EXIT_OK: int = 0
@@ -73,6 +78,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         action="store_true",
         help="curate 時若無人工選取，改自動依品質挑選覆蓋秒數預算（會明確標示非人工策展）",
     )
+    parser.add_argument(
+        "--host", default=DEFAULT_SERVE_HOST, help="serve 綁定的主機（預設僅本機 localhost）"
+    )
+    parser.add_argument(
+        "--port", type=int, default=DEFAULT_SERVE_PORT, help="serve 監聽的埠號"
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="輸出 DEBUG 等級 log")
     return parser.parse_args(argv)
 
@@ -93,6 +104,11 @@ def main(argv: list[str] | None = None) -> int:
     # all 隱含允許 fallback；單獨 curate 需顯式 --fallback
     allow_fallback = args.fallback or args.command == CMD_ALL
     context = BuildContext(spec=spec, output_dir=output_dir, allow_fallback=allow_fallback)
+
+    # serve 為長駐 server（非一次性階段），單獨分派、阻塞至 Ctrl-C
+    if args.command == CMD_SERVE:
+        run_selection_server(context, args.host, args.port)
+        return _EXIT_OK
 
     try:
         DatasetBuildPipeline(_build_stages(args.command)).run(context)

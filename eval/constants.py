@@ -59,6 +59,14 @@ DEFAULT_IMAGE_RATIO: float = 0.3
 SCOPE_FOCUSED: str = "focused"
 SCOPE_BROAD: str = "broad"
 
+# ──────────────────────────── 難度分級（評測切片用）────────────────────────────
+# 三級刻度，供三軸共用：主題難度（topic）、素材難度（asset）、Prompt 難度（prompt）。
+# 寫進 manifest.json（group 層的 topic/asset）與 prompts.json（每個 prompt 的 difficulty），
+# 評測時可據此比較不同產品在不同難度的主題／素材／Prompt 下的表現。
+DIFFICULTY_EASY: str = "easy"
+DIFFICULTY_MEDIUM: str = "medium"
+DIFFICULTY_HARD: str = "hard"
+
 # ──────────────────────────── 品質評分權重（階段 2）────────────────────────────
 # 三項權重相加須為 1.0
 QUALITY_WEIGHT_RESOLUTION: float = 0.4  # 解析度
@@ -124,6 +132,26 @@ WRITABLE_DIR_MODE: int = 0o755             # 解除凍結重建時暫時用
 PROMPT_GENERATOR_TEMPLATE: str = "template"  # 目前唯一實作的策略名稱
 # 組合 prompt 時為避免重複，最多重抽幾次
 PROMPT_COMPOSE_MAX_ATTEMPTS: int = 8
+
+# 字幕（字卡／畫面文字）軸的標記值；素材為無對白 stock 片，故指畫面上的文字而非語音轉字幕
+CAPTION_NONE: str = "none"           # prompt 未提到字幕
+CAPTION_ADD: str = "add"             # 要求加字幕／字卡／標題
+CAPTION_NO: str = "no_subtitle"      # 明確要求不要字幕（負面控制組）
+# 達此 prompt_count 才額外保證一個「不要字幕」負面 prompt（低於此只保證一個正面字幕 prompt）
+CAPTION_NEGATIVE_MIN_PROMPTS: int = 4
+
+# ──────────────────────────── 互動策展 server（serve 子指令）────────────────────────────
+# 只綁本機回送位址（localhost），不對外開放
+DEFAULT_SERVE_HOST: str = "127.0.0.1"
+DEFAULT_SERVE_PORT: int = 8000
+
+# 路由前綴：靜態媒體、單組互動頁、存檔端點
+SERVER_WORK_ROUTE: str = "/work"      # GET 串流 work_dir 底下的媒體檔
+SERVER_GROUP_ROUTE: str = "/group"    # GET 單組互動勾選頁（/group/<group_id>）
+SERVER_SAVE_ROUTE: str = "/save"      # POST 寫回選取（/save/<group_id>）
+
+# 互動頁前端：checkbox 變動後延遲幾毫秒才自動存檔（debounce，避免每次勾選都打 POST）
+SELECTION_AUTOSAVE_DEBOUNCE_MS: int = 400
 
 # ──────────────────────────── Logging ────────────────────────────
 LOG_FORMAT: str = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"

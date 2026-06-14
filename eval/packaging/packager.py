@@ -111,6 +111,8 @@ class DatasetPackager:
             group_id=group.group_id,
             theme=group.theme,
             scope=group.scope,
+            topic_difficulty=group.topic_difficulty,
+            asset_difficulty=group.asset_difficulty,
             clip_count=len(clip_metadata),
             video_count=video_count,
             image_count=image_count,
