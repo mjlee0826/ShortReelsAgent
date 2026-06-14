@@ -91,6 +91,18 @@ class ClaudeModelManager(BaseModelManager):
             return self._generate_via_tool(prompt, schema, model)
         return self._generate_freetext(prompt, schema, model)
 
+    def _create_message(self, **kwargs):
+        """
+        以 streaming 發出 Messages 請求並回傳組裝完成的 Message（content blocks / stop_reason / usage
+        結構與非串流一致，下游邏輯無須改動）。
+
+        導演 ``max_tokens`` 偏高（adaptive thinking + 整份藍圖共用額度），非串流的 ``messages.create``
+        會被 SDK 以「可能 >10 分鐘需串流」擋下（ValueError）；串流是官方對長請求的建議做法，故導演
+        一律走這條。串流會在 ``get_final_message()`` 阻塞至生成完成，故對呼叫端等同一次同步呼叫。
+        """
+        with self.client.messages.stream(**kwargs) as stream:
+            return stream.get_final_message()
+
     def _generate_via_tool(self, prompt: str, schema: type[BaseModel], model: str) -> str:
         """
         以 tool use 取結構化輸出：schema 當 tool 的 ``input_schema``，模型回傳 SDK 已解析的 dict，
@@ -107,7 +119,7 @@ class ClaudeModelManager(BaseModelManager):
             "description": "提交最終導演剪輯藍圖。務必呼叫本工具、依 input_schema 結構填寫，不要用純文字回覆。",
             "input_schema": schema.model_json_schema(),
         }
-        response = self.client.messages.create(
+        response = self._create_message(
             model=model,
             max_tokens=CLAUDE_DIRECTOR_MAX_TOKENS,
             thinking=_ADAPTIVE_THINKING,
@@ -153,7 +165,7 @@ class ClaudeModelManager(BaseModelManager):
         解析。本方法不掛 ``@synchronized_inference``（由已持鎖的呼叫端直呼）。
         """
         content = f"{prompt}\n\n{schema_to_text(schema)}" if schema is not None else prompt
-        response = self.client.messages.create(
+        response = self._create_message(
             model=model,
             max_tokens=CLAUDE_DIRECTOR_MAX_TOKENS,
             thinking=_ADAPTIVE_THINKING,
