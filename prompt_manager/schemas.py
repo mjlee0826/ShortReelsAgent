@@ -23,6 +23,8 @@ from typing import Optional, Union, get_args, get_origin
 
 from pydantic import BaseModel, Field
 
+from config.color_presets import COLOR_PRESET_NAMES, primitive_range
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 語意詞彙表 (Enum)：取代散落各 prompt 的 magic string，作為唯一合法值來源
@@ -102,12 +104,20 @@ class MusicGenre(str, Enum):
     OTHER = "other"
 
 
-class ClipFilter(str, Enum):
-    """片段 CSS 濾鏡：僅列前端 ClipComponent 真正實作的值（對齊現況，不含假效果）。"""
-    NONE = "none"
-    CINEMATIC = "cinematic"
-    GRAYSCALE = "grayscale"
-    BLUR = "blur"
+# 調色預設名 enum：刻意**動態**由 SSOT (color_presets.json) 的 preset 名建立，
+# 而非手寫成員——如此「新增一個 look = 在 JSON 加一筆」即可，schema / prompt / 前端全自動跟上，
+# 從根拔除過去『濾鏡名手抄四處』的飄移 (對應 docs/editing_capability_roadmap.md 方向三)。
+# 以函式式 Enum API + type=str 等價於 `class ColorPreset(str, Enum)`，供 Gemini response_schema
+# 與 schema_to_text 兩條路徑一致取用。preset 名須為合法 Python 識別字 (用底線、勿用連字號)。
+ColorPreset = Enum(
+    "ColorPreset",
+    {name.upper(): name for name in COLOR_PRESET_NAMES},
+    type=str,
+)
+ColorPreset.__doc__ = "片段調色預設名（動態源自 color_presets.json 的 presets）。"
+
+# 「無調色」預設名 (具名常數，供 ClipColor 預設值以值反查對應 enum 成員，不依賴大寫後的屬性名)
+_COLOR_PRESET_NONE = "none"
 
 
 class TransitionType(str, Enum):
@@ -340,6 +350,50 @@ class PipVideo(BaseModel):
     position: PipPosition = Field(default=PipPosition.TOP_RIGHT, description="子畫面位置")
 
 
+# ── 片段調色 (color grading)：primitive 數值範圍同源於 SSOT (color_presets.json)，供 Field 約束 ──
+# 集中具名，禁 magic number；範圍與 Inspector 滑桿邊界同源，故不會飄移。
+_BRIGHTNESS_MIN, _BRIGHTNESS_MAX = primitive_range("brightness")
+_CONTRAST_MIN, _CONTRAST_MAX = primitive_range("contrast")
+_SATURATE_MIN, _SATURATE_MAX = primitive_range("saturate")
+_BLUR_MIN, _BLUR_MAX = primitive_range("blur")
+_GRAYSCALE_MIN, _GRAYSCALE_MAX = primitive_range("grayscale")
+
+
+class ClipColor(BaseModel):
+    """
+    片段調色設定：引用一個命名 preset，並可微調（覆寫）個別 primitive（照 :class:`PipVideo` 巢狀物件模式）。
+
+    解析規則（前端 render-time）：先取 ``preset`` 的一包 primitive 數值為基底，再以本物件中『有填值』的
+    primitive 逐一覆寫，最後機械式組成 CSS filter。primitive 留空（null）= 沿用 preset 對應值。
+    數值範圍由 Field 依 SSOT 約束，杜絕導演輸出越界值。
+    範例：``{preset: "cinematic", brightness: 0.8}`` = 電影感但再暗一點。
+    """
+    preset: ColorPreset = Field(
+        default=ColorPreset(_COLOR_PRESET_NONE),
+        description="調色預設名：先選一個當整支基調（none 為不調色）",
+    )
+    brightness: Optional[float] = Field(
+        default=None, ge=_BRIGHTNESS_MIN, le=_BRIGHTNESS_MAX,
+        description="亮度覆寫（留空=沿用 preset；1.0 原樣、<1 變暗）",
+    )
+    contrast: Optional[float] = Field(
+        default=None, ge=_CONTRAST_MIN, le=_CONTRAST_MAX,
+        description="對比覆寫（留空=沿用 preset；1.0 原樣、>1 更強烈）",
+    )
+    saturate: Optional[float] = Field(
+        default=None, ge=_SATURATE_MIN, le=_SATURATE_MAX,
+        description="飽和覆寫（留空=沿用 preset；0=灰、1 原樣、>1 更濃）",
+    )
+    blur: Optional[float] = Field(
+        default=None, ge=_BLUR_MIN, le=_BLUR_MAX,
+        description="模糊覆寫（留空=沿用 preset；單位 px、0 不模糊）",
+    )
+    grayscale: Optional[float] = Field(
+        default=None, ge=_GRAYSCALE_MIN, le=_GRAYSCALE_MAX,
+        description="黑白覆寫（留空=沿用 preset；0 彩色、1 全黑白）",
+    )
+
+
 # 字幕垂直位置的合法範圍（0=畫面頂、100=畫面底）；實際會被前端再夾進 safe-area，避免壓到平台 UI。
 _TEXT_VPOS_MIN = 0.0
 _TEXT_VPOS_MAX = 100.0
@@ -395,7 +449,10 @@ class Clip(BaseModel):
     playback_rate: float = Field(default=1.0, description="播放速度（0.5 慢動作、2.0 快轉）；須滿足 (source_end-source_start)/playback_rate = end_at-start_at")
     object_position: str = Field(default="50% 50%", description="裁切定位點，如 '44% 77%'，依主體 bbox 中心計算")
     scale: float = Field(default=1.0, description="縮放比例（1.0 不縮放、1.2 放大20%）")
-    filter: ClipFilter = Field(default=ClipFilter.NONE, description="CSS 濾鏡")
+    color: ClipColor = Field(
+        default_factory=ClipColor,
+        description="調色：引用 preset 當基調 + 可選 primitive 微調（取代舊 filter 欄位）",
+    )
     transition_in: TransitionType = Field(default=TransitionType.NONE, description="進場轉場")
     # 注意：運鏡（motion）刻意不在 LLM 輸出 schema 內。實際運鏡一律由前端引擎依素材 / 配樂節拍自動套用，
     # LLM 無從決策（過去要求它「一律填 auto」等於佔位空轉），故由 DirectorFacade 後端統一補預設 'auto'；

@@ -17,7 +17,7 @@ from director_agent.blueprint import (
     PrepContext,
     TemplateDnaProducer,
 )
-from director_agent.director_facade import DirectorFacade
+from director_agent.director_facade import DirectorFacade, DEFAULT_CLIP_COLOR
 from backend.services.asset_repository import AssetRepository
 from backend.services.stores.project_meta_store import project_meta_store
 from backend.services.stores.snapshot_store import snapshot_store
@@ -490,7 +490,7 @@ class DirectorService:
         if not subtitles:
             enhanced_prompt += " (注意：本影片不需要任何字幕，請讓 text_overlays 保持為空陣列 [])"
         if not filters:
-            enhanced_prompt += " (注意：請不要套用任何濾鏡，filter 欄位請設為 none)"
+            enhanced_prompt += " (注意：請不要套用任何調色，每段 color.preset 請設為 none、且不要填任何 primitive 數值)"
 
         # 用戶上傳的自訂音樂轉絕對路徑(music 分支用);音訊上傳落在 raw/(與其他原始素材同層,不經 standardize)
         user_music_file_path = (
@@ -590,6 +590,14 @@ class DirectorService:
         # prompt 已提示 LLM 輸出空陣列；此處 post-LLM 再硬清一次，確保 LLM 不照做時也不會冒出字幕。
         if not subtitles:
             final_blueprint["text_overlays"] = []
+
+        # --- 6d. 關閉調色：後端強制每段 color 重置為 none（雙保險）---
+        # 同字幕：prompt 已提示，此處 post-LLM 再硬清一次。P3 允許 LLM 自由覆寫 primitive，
+        # 故關閉時須連覆寫值一併抹除（整顆換成 DEFAULT_CLIP_COLOR），確保「啟用調色」關掉時真的零調色。
+        if not filters:
+            for clip in final_blueprint.get("timeline", []):
+                if isinstance(clip, dict):
+                    clip["color"] = dict(DEFAULT_CLIP_COLOR)
 
         self._dump_blueprint(target_dir, final_blueprint)
 

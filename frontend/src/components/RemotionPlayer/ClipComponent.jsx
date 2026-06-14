@@ -1,7 +1,8 @@
 import React from 'react';
 import { Video, OffthreadVideo, Img, useVideoConfig, useCurrentFrame, interpolate, getRemotionEnvironment } from 'remotion';
-import { TRANSITION_FRAMES, FILTER_MAP, PIP_STYLE } from './constants';
+import { TRANSITION_FRAMES, PIP_STYLE } from './constants';
 import { resolveClipMotion, computeMotionStyle } from '../../utils/motion';
+import { resolveColor, buildCssFilter, legacyFilterToColor } from '../../utils/color';
 import { resolveClipAssetUrl, isImageAsset } from '../../utils/assetUrl';
 
 export default function ClipComponent({
@@ -29,8 +30,10 @@ export default function ClipComponent({
     ? interpolate(frame, [0, TRANSITION_FRAMES], [0, 1], { extrapolateRight: 'clamp' })
     : 1;
 
-  // LLM 輸出的語意濾鏡名稱 → 合法 CSS filter 值（對應表集中於 constants.js）
-  const cssFilter = FILTER_MAP[clipData.filter] ?? 'none';
+  // 【調色】clip.color（preset 引用 + 個別覆寫）→ 機械式組成合法 CSS filter；
+  // 舊藍圖每段只有 legacy filter 字串時自動轉成 color，渲染結果不變（向後相容）。
+  const colorSpec = clipData.color ?? legacyFilterToColor(clipData.filter);
+  const cssFilter = buildCssFilter(resolveColor(colorSpec));
 
   // 【自動運鏡】開啟時依 preset + 節拍算逐幀 transform（縮放支點＝主體定位，故推近往主體靠）；
   // 關閉時退回原本的靜態縮放，行為與改動前完全一致（純回歸）。

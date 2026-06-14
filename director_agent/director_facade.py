@@ -10,6 +10,8 @@ DEFAULT_AUTO_MOTION = True
 DEFAULT_AUTO_PUNCH = True
 # 逐段運鏡預設：LLM 不輸出 motion，由後端統一補此值（前端視 'auto' 為依索引自動輪替運鏡）。
 DEFAULT_CLIP_MOTION = "auto"
+# 逐段調色預設：無 color（或舊藍圖只有 legacy filter 字串）時補此值，確保藍圖永遠帶完整 color 欄位。
+DEFAULT_CLIP_COLOR = {"preset": "none"}
 
 
 class DirectorFacade:
@@ -88,6 +90,13 @@ class DirectorFacade:
         for clip in timeline:
             if isinstance(clip, dict):
                 clip.setdefault("motion", DEFAULT_CLIP_MOTION)
+                # 調色向後相容 + 補完整：舊藍圖只有 legacy filter 字串時就地轉成 color 物件；
+                # 兩者皆無則補預設 none。確保輸出永遠是新 schema（color 欄位齊備、不殘留 filter）。
+                if "color" not in clip:
+                    legacy_filter = clip.pop("filter", None)
+                    clip["color"] = (
+                        {"preset": legacy_filter} if legacy_filter else dict(DEFAULT_CLIP_COLOR)
+                    )
 
         final_blueprint = {
             # 運鏡 / 卡點旗標於此初始化（與 fps / 比例同為 render-time 全域設定），

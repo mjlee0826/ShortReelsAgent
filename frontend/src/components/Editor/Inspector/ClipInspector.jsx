@@ -6,14 +6,14 @@ import { FaArrowLeft, FaArrowRight, FaTrashAlt } from 'react-icons/fa';
 import {
   InspectorSection, InspectorBackRow, SliderRow, SelectRow, NumberRow, ReadonlyRow,
 } from './controls';
+import COLOR from '../../../config/colorPresets.json';
 
-// 濾鏡 / 轉場選項（對應 ClipComponent 的 FILTER_MAP 與 schema）
-const FILTER_OPTIONS = [
-  { value: 'none', label: '無' },
-  { value: 'cinematic', label: '電影感' },
-  { value: 'grayscale', label: '黑白' },
-  { value: 'blur', label: '模糊' },
-];
+// 調色 preset 下拉 + 進階 primitive 滑桿皆由 SSOT colorPresets.json 動態產生
+// （與 renderer utils/color.js、後端 schema 同源；新增一個 look 只需改 JSON，此處自動跟上）。
+const PRESET_OPTIONS = Object.entries(COLOR.presetLabels).map(([value, label]) => ({ value, label }));
+const COLOR_PRIMITIVES = COLOR.primitives;
+
+// 轉場選項（對應 schema 與 ClipComponent）
 const TRANSITION_OPTIONS = [
   { value: 'none', label: '無' },
   { value: 'fade', label: '淡入' },
@@ -56,6 +56,7 @@ export default function ClipInspector() {
   const clip = useBlueprintStore((s) => s.blueprint?.timeline?.[clipIndex]);
   const clipCount = useBlueprintStore((s) => s.blueprint?.timeline?.length ?? 0);
   const updateClipField = useBlueprintStore((s) => s.updateClipField);
+  const updateClipColorField = useBlueprintStore((s) => s.updateClipColorField);
   const reorderClips = useBlueprintStore((s) => s.reorderClips);
   const removeClip = useBlueprintStore((s) => s.removeClip);
   const clearSelection = useBlueprintStore((s) => s.clearSelection);
@@ -64,6 +65,15 @@ export default function ClipInspector() {
 
   // 包一層：固定帶入目前片段索引
   const set = (key, value) => updateClipField(clipIndex, key, value);
+  // 調色就地編輯：寫進 clip.color 巢狀物件（preset 切換或個別 primitive 覆寫）
+  const setColor = (key, value) => updateClipColorField(clipIndex, key, value);
+  // 某 primitive 目前生效值：片段覆寫 > 所選 preset 帶的值 > primitive 預設（供進階滑桿顯示）
+  const effectiveColor = (key) => {
+    const override = clip.color?.[key];
+    if (override != null) return override;
+    const presetVal = COLOR.presets[clip.color?.preset]?.[key];
+    return presetVal != null ? presetVal : COLOR_PRIMITIVES[key].default;
+  };
 
   const pip = clip.pip_video;
   const pipSummary = pip?.clip_id ? `${pip.clip_id}（${pip.position || 'top_right'}）` : '無';
@@ -127,9 +137,23 @@ export default function ClipInspector() {
           format={(v) => `${(v ?? DEFAULT_SCALE).toFixed(2)}x`}
         />
         <ReadonlyRow label="定位" value={clip.object_position || '50% 50%'} locked />
-        <SelectRow label="濾鏡" value={clip.filter || 'none'} options={FILTER_OPTIONS} onChange={(v) => set('filter', v)} />
+        <SelectRow label="調色" value={clip.color?.preset || 'none'} options={PRESET_OPTIONS} onChange={(v) => setColor('preset', v)} />
         <SelectRow label="轉場" value={clip.transition_in || 'none'} options={TRANSITION_OPTIONS} onChange={(v) => set('transition_in', v)} />
         <SelectRow label="運鏡" value={clip.motion || 'auto'} options={MOTION_OPTIONS} onChange={(v) => set('motion', v)} />
+      </InspectorSection>
+
+      {/* 進階調色：在 preset 之上逐顆 primitive 微調（對應 P3，人類可細修）；滑桿顯示目前生效值，一拖即成覆寫 */}
+      <InspectorSection title="進階調色" collapsible defaultOpen={false}>
+        {Object.entries(COLOR_PRIMITIVES).map(([key, meta]) => (
+          <SliderRow
+            key={key}
+            label={meta.label}
+            value={effectiveColor(key)}
+            min={meta.min} max={meta.max} step={meta.step}
+            onChange={(v) => setColor(key, v)}
+            format={(v) => `${+Number(v ?? meta.default).toFixed(2)}${meta.unit}`}
+          />
+        ))}
       </InspectorSection>
 
       {/* 音訊 */}

@@ -70,10 +70,18 @@ export function createEditorSlice(set, get) {
       return { blueprint: next, history: pushHistory(state.history, state.blueprint) };
     }),
 
-    // 更新某片段的單一欄位（字幕 / 濾鏡 / 縮放 / 轉場 / 音量 / 裁切數值），不重排
+    // 更新某片段的單一欄位（縮放 / 轉場 / 運鏡 / 音量 / 裁切數值），不重排
     updateClipField: (index, key, value) => get().mutateBlueprint((bp) => ({
       ...bp,
       timeline: bp.timeline.map((clip, i) => (i === index ? { ...clip, [key]: value } : clip)),
+    })),
+
+    // 更新某片段 color 物件的單一欄位（preset 或個別 primitive 微調）；巢狀合併、不動其他欄位。
+    // 走 mutateBlueprint 故推進 Undo、隨快照持久化；color 不存在時補成空物件再寫入（比照 updateGlobalSettingField）。
+    updateClipColorField: (index, key, value) => get().mutateBlueprint((bp) => ({
+      ...bp,
+      timeline: bp.timeline.map((clip, i) =>
+        (i === index ? { ...clip, color: { ...(clip.color || {}), [key]: value } } : clip)),
     })),
 
     // 拖拽期間用：先存一筆 Undo 快照當基準（整段拖拽只記一次，避免洗版 Undo 堆疊）

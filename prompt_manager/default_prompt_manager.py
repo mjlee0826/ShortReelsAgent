@@ -1,5 +1,6 @@
 import json
 
+from config.color_presets import color_vocabulary_text
 from config.director_config import DIRECTOR_CASTING_POOL_TARGET
 from config.media_processor_config import SUBJECT_CANDIDATE_TOP_N
 from prompt_manager.base_prompt_manager import BasePromptManager, PromptSpec
@@ -147,7 +148,9 @@ class DefaultPromptManager(BasePromptManager):
         instruction += (
             "# 工具箱（僅列前端真正支援的能力）\n"
             "- transition_in：硬切用 'none'；情緒 / 場景落差大時用 'fade'（交叉淡入）。\n"
-            "- filter：依氛圍選 'none' / 'cinematic' / 'grayscale' / 'blur'。\n"
+            "- color：先為整支挑一個 preset 當統一基調（整支色調一致＝專業，勿每段亂換）；需要時可覆寫\n"
+            "  個別 primitive 做精修（如『電影感但更暗』＝ preset=cinematic 再把 brightness 調低）。可用值：\n"
+            f"{color_vocabulary_text()}\n"
             "- scale：可放大（如 1.1~1.2）做構圖微調（注意：為靜態縮放，非動態推鏡，勿描述成緩慢推進）。\n"
             "- pip_video：需畫中畫時疊加另一畫面，position 僅支援 'top_right' / 'bottom_left'。\n"
             "- reason：每個片段請『先』在 reason 寫下導演決策考量（選材 / 轉場 / 變速 / 混音），再填其餘參數。\n\n"

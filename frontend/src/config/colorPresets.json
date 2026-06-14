@@ -1,0 +1,22 @@
+{
+  "_doc": "調色能力的唯一事實來源(SSOT)。renderer(utils/color.js)/Inspector/後端 schema/導演 prompt 四方共讀此檔。新增一個 look = 在 presets 加一筆資料即可,毋須改任何程式。對應 docs/editing_capability_roadmap.md 方向三。",
+  "primitives": {
+    "contrast":   { "css": "contrast",   "unit": "",   "min": 0.5, "max": 1.5, "step": 0.05, "default": 1.0, "label": "對比", "desc": "對比(1.0原樣,>1更強烈)" },
+    "saturate":   { "css": "saturate",   "unit": "",   "min": 0.0, "max": 2.0, "step": 0.05, "default": 1.0, "label": "飽和", "desc": "飽和度(0=灰,1原樣,>1更濃)" },
+    "brightness": { "css": "brightness", "unit": "",   "min": 0.5, "max": 1.5, "step": 0.05, "default": 1.0, "label": "亮度", "desc": "亮度(1.0原樣,<1變暗,>1變亮)" },
+    "blur":       { "css": "blur",       "unit": "px", "min": 0.0, "max": 10.0, "step": 0.5, "default": 0.0, "label": "模糊", "desc": "高斯模糊(px,0=不模糊)" },
+    "grayscale":  { "css": "grayscale",  "unit": "",   "min": 0.0, "max": 1.0, "step": 0.05, "default": 0.0, "label": "黑白", "desc": "黑白程度(0=彩色,1=全黑白)" }
+  },
+  "presets": {
+    "none": {},
+    "cinematic": { "contrast": 1.1, "saturate": 0.85, "brightness": 0.9 },
+    "grayscale": { "grayscale": 1.0 },
+    "blur": { "blur": 4.0 }
+  },
+  "presetLabels": {
+    "none": "無",
+    "cinematic": "電影感",
+    "grayscale": "黑白",
+    "blur": "模糊"
+  }
+}

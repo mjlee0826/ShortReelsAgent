@@ -21,13 +21,8 @@ export const ADJACENCY_THRESHOLD_SECONDS = 0.1;
  */
 export const PREMOUNT_LEAD_SECONDS = 1;
 
-/** LLM 輸出的語意濾鏡名稱 → 合法 CSS filter 值（集中管理，避免散落於元件）。 */
-export const FILTER_MAP = {
-  cinematic: 'contrast(1.1) saturate(0.85) brightness(0.9)',
-  grayscale: 'grayscale(1)',
-  blur: 'blur(4px)',
-  none: 'none',
-};
+// 註：調色（filter）已升級為「primitive + 命名 preset」資料驅動模型，唯一來源為
+// src/config/colorPresets.json，組裝邏輯見 src/utils/color.js（取代原本寫死的 FILTER_MAP）。
 
 /** 畫中畫（PiP）子畫面的版面常數（避免散落 magic number 於 inline style）。 */
 export const PIP_STYLE = {
@@ -40,7 +35,7 @@ export const PIP_STYLE = {
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
-// 字幕（TextOverlay）相關常數：集中管理，渲染端只做機械式組裝（比照 FILTER_MAP）。
+// 字幕（TextOverlay）相關常數：集中管理，渲染端只做機械式組裝（比照 utils/color.js 的調色組裝）。
 // ──────────────────────────────────────────────────────────────────────────────
 
 /**
