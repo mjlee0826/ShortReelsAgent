@@ -18,10 +18,14 @@ PIXABAY_LICENSE: str = "Pixabay Content License"
 
 # ──────────────────────────── API 端點與分頁 ────────────────────────────
 PEXELS_SEARCH_URL: str = "https://api.pexels.com/videos/search"
+PEXELS_PHOTO_SEARCH_URL: str = "https://api.pexels.com/v1/search"
 PIXABAY_SEARCH_URL: str = "https://pixabay.com/api/videos/"
+PIXABAY_IMAGE_SEARCH_URL: str = "https://pixabay.com/api/"
 
-# Pexels 取直式影片的官方參數值（orientation=portrait）
+# Pexels 取直式（影片/圖片皆適用）的官方參數值（orientation=portrait）
 PEXELS_PORTRAIT_ORIENTATION: str = "portrait"
+# Pixabay 圖片搜尋只取照片（排除向量圖/插畫）
+PIXABAY_IMAGE_TYPE_PHOTO: str = "photo"
 
 # 各平台單頁筆數上限（官方限制）
 PEXELS_MAX_PER_PAGE: int = 80
@@ -29,7 +33,7 @@ PIXABAY_MAX_PER_PAGE: int = 200
 # 實際每次搜尋要求的單頁筆數（會被各 adapter clamp 到平台上限）
 SEARCH_PAGE_SIZE: int = 80
 # 單一 keyword 最多翻幾頁（避免秒數預算湊不滿時無限翻頁）
-MAX_SEARCH_PAGES_PER_KEYWORD: int = 5
+MAX_SEARCH_PAGES_PER_KEYWORD: int = 6
 
 # ──────────────────────────── 素材篩選門檻（階段 1）────────────────────────────
 MIN_CLIP_DURATION_SEC: float = 3.0   # 時長下限（秒）
@@ -42,9 +46,18 @@ TARGET_ASPECT_RATIO: float = 9.0 / 16.0
 
 # ──────────────────────────── 秒數預算（抓取/策展）────────────────────────────
 # 各組未指定 target_total_seconds 時的 dataset 層級預設值（秒）
-DEFAULT_TARGET_TOTAL_SECONDS: float = 60.0
+DEFAULT_TARGET_TOTAL_SECONDS: float = 90.0
 # 候選池要抓到「秒數預算 × 此倍數」才停（多抓留給策展挑選）
-DEFAULT_CANDIDATE_MULTIPLIER: float = 2.0
+DEFAULT_CANDIDATE_MULTIPLIER: float = 2.5
+
+# 圖片以「名目秒數」計入同一個秒數預算（一張照片在 reel 裡定格播放約幾秒）
+DEFAULT_IMAGE_NOMINAL_SECONDS: float = 3.0
+# 圖片佔秒數預算的預設比例（其餘為影片）；各組可用 image_ratio 覆寫
+DEFAULT_IMAGE_RATIO: float = 0.3
+
+# 素材組「聚焦度」維度：focused=單一主體、broad=多場景
+SCOPE_FOCUSED: str = "focused"
+SCOPE_BROAD: str = "broad"
 
 # ──────────────────────────── 品質評分權重（階段 2）────────────────────────────
 # 三項權重相加須為 1.0
@@ -96,6 +109,7 @@ SELECTION_COMMENT_PREFIX: str = "#"        # 選取檔的註解符號
 
 # ──────────────────────────── 檔案與命名 ────────────────────────────
 DEFAULT_VIDEO_EXT: str = ".mp4"
+DEFAULT_IMAGE_EXT: str = ".jpg"
 DEFAULT_THUMBNAIL_EXT: str = ".jpg"
 PARTIAL_SUFFIX: str = ".part"              # 下載中暫存檔尾碼（原子寫）
 CLIP_NAME_PREFIX: str = "clip_"            # 策展後片段命名前綴

@@ -1,53 +1,70 @@
 # ShortReels 評測 dataset 範例 spec（可直接試跑）
 #
 # 說明：
-# - theme 為中文，用於 prompt 生成（須與 eval/prompts/lexicon.py 的主題鍵一致才會套用專屬詞庫；
+# - theme 為中文，用於 prompt 生成（與 eval/prompts/lexicon.py 的主題鍵一致才會套用專屬詞庫；
 #   未收錄的主題會自動用通用詞庫，仍切合主題）。
 # - keywords 為 API 搜尋關鍵字，建議用英文（Pexels/Pixabay 以英文檢索效果較佳）。
-# - target_total_seconds 為該組「秒數預算」：抓取會湊到預算 × candidate_multiplier 的候選池，
-#   策展（人工或自動 fallback）則挑到覆蓋預算為止。未填則繼承 default_target_total_seconds。
-# - target_clip_count 為選填的片段數上限/提示（主要驅動是秒數預算）。
+# - scope：focused=單一主體（如某杯飲料）、broad=多場景（如一日遊）；會寫進 manifest 並影響 prompt。
+# - target_total_seconds 為該組「秒數預算」：影片＋圖片一起算（圖片以名目秒數計）。抓取會湊到
+#   預算 × candidate_multiplier 的候選池；策展（人工或自動 fallback）挑到覆蓋預算為止。
+# - image_ratio：該組圖片佔秒數預算的比例（選填，覆寫 default_image_ratio）。
 
 dataset_version: v1
 output_dir: eval/_build
 
-# 啟用的來源平台（需設定對應環境變數：PEXELS_API_KEY / PIXABAY_API_KEY）
+# 啟用的來源平台（需設定 PEXELS_API_KEY / PIXABAY_API_KEY；影片與圖片都會抓）
 sources:
   - pexels
   - pixabay
 
-# 各組未指定 target_total_seconds 時的預設秒數預算（秒）
-default_target_total_seconds: 60
-# 候選池目標 = 秒數預算 × 此倍數（多抓留給策展挑選）
-candidate_multiplier: 2.0
+# 各組未指定時的預設值
+default_target_total_seconds: 90    # 秒數預算（秒）
+default_image_ratio: 0.3            # 圖片佔秒數預算的比例（其餘為影片）
+image_nominal_seconds: 3.0          # 一張圖片計入秒數預算的名目秒數
+candidate_multiplier: 2.5           # 候選池目標 = 秒數預算 × 此倍數（多抓留給策展）
 
 groups:
+  # ───── 多樣 broad：多場景，考驗把雜亂素材組織成敘事 ─────
+  - group_id: tokyo_trip
+    theme: 東京一日遊
+    scope: broad
+    keywords: [tokyo street, shibuya crossing, japanese street food, tokyo train station, japanese temple, tokyo night]
+    target_total_seconds: 120
+    prompt_count: 6
+
   - group_id: beach_day
     theme: 海邊一日遊
-    keywords: [beach, ocean waves, sunset beach, seaside]
-    target_total_seconds: 60
+    scope: broad
+    keywords: [beach, ocean waves, sunset beach, seaside, surfing]
+    target_total_seconds: 90
     prompt_count: 6
 
-  - group_id: cafe
-    theme: 咖啡廳
-    keywords: [coffee shop, latte art, cafe interior, barista]
-    target_total_seconds: 60
+  - group_id: night_city_walk
+    theme: 城市夜散步
+    scope: broad
+    keywords: [city night, neon street, night market, city lights, crosswalk night]
+    target_total_seconds: 90
     prompt_count: 6
 
-  - group_id: city_walk
-    theme: 城市散步
-    keywords: [city street, urban walk, night city, crosswalk]
+  # ───── 聚焦 focused：單一主體，考驗從相似鏡頭做出節奏與變化 ─────
+  - group_id: signature_drink
+    theme: 特調飲料
+    scope: focused
+    keywords: [iced coffee pouring, cocktail closeup, bubble tea, drink splash, soda pouring]
     target_total_seconds: 60
+    image_ratio: 0.4          # 單品照片很適合，這組多放一點圖片
     prompt_count: 6
 
-  - group_id: food
-    theme: 美食
-    keywords: [food closeup, street food, cooking, dessert]
-    target_total_seconds: 60
+  - group_id: latte_art
+    theme: 拉花咖啡
+    scope: focused
+    keywords: [latte art, coffee pouring, espresso closeup, barista pour]
+    target_total_seconds: 45
     prompt_count: 6
 
-  - group_id: pets
-    theme: 寵物
-    keywords: [cat, dog, puppy playing, kitten]
+  - group_id: cat_daily
+    theme: 貓咪日常
+    scope: focused
+    keywords: [cat closeup, kitten playing, cat yawning, cat paws]
     target_total_seconds: 60
     prompt_count: 6

@@ -46,7 +46,9 @@ class DurationRangePredicate(ClipPredicate):
     reason = "時長超出範圍"
 
     def accepts(self, candidate: ClipCandidate) -> bool:
-        """時長範圍判定。"""
+        """時長範圍判定（只對影片生效；圖片以名目秒數計入，不受時長範圍限制）。"""
+        if candidate.is_image:
+            return True
         return MIN_CLIP_DURATION_SEC <= candidate.duration_sec <= MAX_CLIP_DURATION_SEC
 
 

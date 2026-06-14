@@ -20,6 +20,7 @@ from .lexicon import (
     MUSIC_CHOICES,
     PLATFORM_CHOICES,
     SCENARIO_CHOICES,
+    SCOPE_TEMPLATES,
     STYLE_CHOICES,
     TEMPLATES,
     THEME_LEXICONS,
@@ -70,11 +71,14 @@ class TemplatePromptGenerator(PromptGenerator):
         seen_texts: set[str],
     ) -> PromptVariant:
         """組出單一 prompt；盡量避免與已產生的重複。"""
+        # 依 scope 把專屬模板併入該詳細度的候選池（無 scope 則照舊）
+        scope_pool = SCOPE_TEMPLATES.get(group.scope or "", {}).get(level, [])
+        templates = TEMPLATES[level] + scope_pool
         text = ""
         tone_name = ""
         scenario_name = ""
         for _ in range(PROMPT_COMPOSE_MAX_ATTEMPTS):
-            template = rng.choice(TEMPLATES[level])
+            template = rng.choice(templates)
             tone_name, tone_prefix = rng.choice(TONE_CHOICES)
             scenario_name, scenario_phrase = rng.choice(SCENARIO_CHOICES)
             fields = {

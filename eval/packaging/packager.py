@@ -36,6 +36,7 @@ from ..models import (
     DatasetManifest,
     GroupManifest,
     GroupSpec,
+    MediaType,
     PromptVariant,
 )
 from ..pipeline import BuildContext
@@ -104,10 +105,15 @@ class DatasetPackager:
             logger.warning("組 %s：找不到 prompts（請先執行 prompts 階段）", group.group_id)
 
         summary = self._read_summary(context, group)
+        video_count = sum(1 for m in clip_metadata if m.media_type is MediaType.VIDEO)
+        image_count = sum(1 for m in clip_metadata if m.media_type is MediaType.IMAGE)
         return GroupManifest(
             group_id=group.group_id,
             theme=group.theme,
+            scope=group.scope,
             clip_count=len(clip_metadata),
+            video_count=video_count,
+            image_count=image_count,
             total_seconds=summary.total_seconds,
             prompt_count=len(prompts),
             curation_mode=summary.curation_mode,

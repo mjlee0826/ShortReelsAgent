@@ -41,11 +41,15 @@ class QualityScorer:
         aspect_deviation = abs(candidate.aspect_ratio - TARGET_ASPECT_RATIO)
         aspect_score = max(0.0, 1.0 - aspect_deviation / TARGET_ASPECT_RATIO)
 
-        # 時長以高斯型在甜蜜區附近給高分，偏離越遠越低
+        if candidate.is_image:
+            # 圖片無時長概念：只用解析度 + aspect，權重重新正規化
+            weight_sum = self._w_resolution + self._w_aspect
+            return (self._w_resolution * resolution_score + self._w_aspect * aspect_score) / weight_sum
+
+        # 影片：時長以高斯型在甜蜜區附近給高分，偏離越遠越低
         duration_score = math.exp(
             -(((candidate.duration_sec - QUALITY_IDEAL_DURATION_SEC) / QUALITY_DURATION_SPREAD_SEC) ** 2)
         )
-
         return (
             self._w_resolution * resolution_score
             + self._w_aspect * aspect_score

@@ -40,20 +40,18 @@ class SelectionTemplateWriter:
         """組出範本內容（含用法說明與每段提示）。"""
         c = SELECTION_COMMENT_PREFIX
         lines = [
-            f"{c} 組 {group.group_id}（{group.theme}）選取檔",
-            f"{c} 秒數預算：{target_seconds:.0f}s",
-            f"{c} 用法：把要保留的片段那一行最前面的「{c} 」刪掉即可；可保留任意段數。",
-            f"{c} 候選已依品質由高到低排序；行尾為各段資訊（dur=時長、cum=由上而下累計時長）。",
-            f"{c} 若完全不編輯，使用 `curate --fallback` 或 `all` 會自動依品質挑到覆蓋秒數預算。",
+            f"{c} 組 {group.group_id}（{group.theme}，scope={group.scope or '-'}）選取檔",
+            f"{c} 秒數預算：{target_seconds:.0f}s（圖片以名目秒數計）",
+            f"{c} 用法：把要保留的那一行最前面的「{c} 」刪掉即可；影片與圖片可混選，留任意件數。",
+            f"{c} 候選已依品質由高到低排序；行尾為各件資訊（[類型] dur=名目/時長）。",
+            f"{c} 若完全不編輯，`curate --fallback` 或 `all` 會自動依品質與圖片佔比挑齊。",
             c,
         ]
-        cumulative = 0.0
         for candidate in candidates:
-            cumulative += candidate.duration_sec
             score = candidate.quality_score if candidate.quality_score is not None else 0.0
             lines.append(
-                f"{c} {candidate.cache_key}    {c} dur={candidate.duration_sec:.0f}s "
-                f"cum={cumulative:.0f}s {candidate.width}x{candidate.height} "
+                f"{c} {candidate.cache_key}    {c} [{candidate.media_type.value}] "
+                f"dur={candidate.duration_sec:.0f}s {candidate.width}x{candidate.height} "
                 f"{candidate.source_platform.value} q={score:.2f}"
             )
         return "\n".join(lines) + "\n"
@@ -77,20 +75,27 @@ class SelectionReader:
 
 
 class AutoFallbackSelector:
-    """自動 fallback 選取：依品質由高到低挑到覆蓋秒數預算。"""
+    """自動 fallback 選取：影片與圖片各依品質由高到低挑到覆蓋對應秒數預算。"""
 
     def select(
-        self, candidates: list[ClipCandidate], target_seconds: float
+        self, candidates: list[ClipCandidate], target_seconds: float, image_ratio: float
     ) -> list[ClipCandidate]:
-        """挑選片段直到累計時長 ≥ 秒數預算（或候選用盡）。"""
-        ordered = sorted(
-            candidates, key=lambda c: c.quality_score or 0.0, reverse=True
-        )
+        """依圖片佔比把秒數預算拆成影片/圖片目標，各自挑到覆蓋目標後合併。"""
+        video_target = target_seconds * (1.0 - image_ratio)
+        image_target = target_seconds * image_ratio
+        videos = [c for c in candidates if not c.is_image]
+        images = [c for c in candidates if c.is_image]
+        return self._take_until(videos, video_target) + self._take_until(images, image_target)
+
+    @staticmethod
+    def _take_until(items: list[ClipCandidate], target_seconds: float) -> list[ClipCandidate]:
+        """依品質由高到低挑到累計時長覆蓋 target（target<=0 則不挑）。"""
+        ordered = sorted(items, key=lambda c: c.quality_score or 0.0, reverse=True)
         chosen: list[ClipCandidate] = []
         total = 0.0
         for candidate in ordered:
-            chosen.append(candidate)
-            total += candidate.duration_sec
             if total >= target_seconds:
                 break
+            chosen.append(candidate)
+            total += candidate.duration_sec
         return chosen

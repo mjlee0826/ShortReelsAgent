@@ -1,8 +1,8 @@
-"""階段 1 主流程：以「秒數預算」有意識地抓素材。
+"""階段 1 主流程：以「秒數預算 + 圖片佔比」有意識地抓影片與圖片。
 
-對每組：跨來源 × 關鍵字 × 分頁持續累積通過硬篩的候選並下載，直到候選池總時長達
-``秒數預算 × candidate_multiplier`` 才停（仍有翻頁上限保護）。可重複執行：已下載者不重抓，
-若候選池已滿足預算則整組跳過 API 呼叫。
+對每組：把秒數預算 S 依 image_ratio 拆成影片預算與圖片預算，分別用影片來源與圖片來源把兩個候選池
+各自湊到「對應預算 × candidate_multiplier」才停（仍有翻頁上限保護）。可重複執行：已下載者不重抓，
+某池已滿足預算則跳過該池的 API 呼叫。
 """
 from __future__ import annotations
 
@@ -12,18 +12,22 @@ from ..constants import MAX_SEARCH_PAGES_PER_KEYWORD, SEARCH_PAGE_SIZE
 from ..http_client import RetryingHttpClient
 from ..jsonio import read_models, write_models
 from ..logging_setup import get_logger
-from ..models import ClipCandidate, GroupSpec
+from ..models import ClipCandidate, GroupSpec, MediaType
 from ..pipeline import BuildContext, PipelineStage
-from ..sources.base import VideoSource
-from ..sources.factory import VideoSourceFactory
+from ..sources.base import MediaSource
+from ..sources.factory import MediaSourceFactory
 from .downloader import ClipDownloader, FetchIndex
 from .filters import ClipFilter
 
 logger = get_logger(__name__)
 
+# log 用的中文類型標籤
+_LABEL_VIDEO: str = "影片"
+_LABEL_IMAGE: str = "圖片"
+
 
 class FetchStage(PipelineStage):
-    """階段 1：抓素材。"""
+    """階段 1：抓素材（影片 + 圖片）。"""
 
     name = "fetch（階段 1：抓素材）"
 
@@ -34,23 +38,35 @@ class FetchStage(PipelineStage):
         self._downloader = ClipDownloader(self._http)
 
     def run(self, context: BuildContext) -> None:
-        """對每組執行秒數預算驅動的抓取。"""
-        sources = VideoSourceFactory.create_all(context.spec.sources, self._http)
+        """為每組分別抓影片與圖片到各自預算。"""
+        nominal = context.spec.image_nominal_seconds
+        video_sources = MediaSourceFactory.create_for(
+            context.spec.sources, [MediaType.VIDEO], self._http, image_nominal_seconds=nominal
+        )
+        image_sources = MediaSourceFactory.create_for(
+            context.spec.sources, [MediaType.IMAGE], self._http, image_nominal_seconds=nominal
+        )
         for group in context.spec.groups:
-            self._fetch_group(context, group, sources)
+            self._fetch_group(context, group, video_sources, image_sources)
 
     def _fetch_group(
-        self, context: BuildContext, group: GroupSpec, sources: list[VideoSource]
+        self,
+        context: BuildContext,
+        group: GroupSpec,
+        video_sources: list[MediaSource],
+        image_sources: list[MediaSource],
     ) -> None:
-        """抓單一組到秒數預算。"""
-        target_seconds = context.resolved_target_seconds(group)
-        budget = target_seconds * context.spec.candidate_multiplier
+        """抓單一組：影片池 + 圖片池各湊到預算。"""
+        target = context.resolved_target_seconds(group)
+        ratio = context.spec.resolved_image_ratio(group)
+        multiplier = context.spec.candidate_multiplier
+        video_budget = target * (1.0 - ratio) * multiplier
+        image_budget = target * ratio * multiplier
 
         candidates_dir = context.candidates_dir(group)
         thumbnails_dir = context.thumbnails_dir(group)
         candidates_dir.mkdir(parents=True, exist_ok=True)
         thumbnails_dir.mkdir(parents=True, exist_ok=True)
-
         index = FetchIndex.load(context.fetch_index_json(group))
 
         # 載入既有候選（可重複執行：保留先前已下載且檔案仍在者）
@@ -58,58 +74,55 @@ class FetchStage(PipelineStage):
         for candidate in read_models(context.candidates_json(group), ClipCandidate):
             if candidate.local_path and Path(candidate.local_path).is_file():
                 accumulated[candidate.cache_key] = candidate
-        current_seconds = sum(c.duration_sec for c in accumulated.values())
-
-        if current_seconds >= budget:
-            logger.info(
-                "組 %s：候選池已滿足秒數預算（%.0f/%.0f s），跳過抓取",
-                group.group_id, current_seconds, budget,
-            )
-            return
 
         logger.info(
-            "組 %s：開始抓取，目標候選秒數 %.0f s（預算 %.0f s × %.1f；起始 %.0f s）",
-            group.group_id, budget, target_seconds, context.spec.candidate_multiplier, current_seconds,
+            "組 %s（scope=%s）：影片預算 %.0f s、圖片預算 %.0f s（秒數預算 %.0f × 倍數 %.1f，圖片佔比 %.0f%%）",
+            group.group_id, group.scope or "-", video_budget, image_budget, target, multiplier, ratio * 100,
         )
 
-        current_seconds = self._collect_until_budget(
-            group, sources, accumulated, current_seconds, budget, candidates_dir, thumbnails_dir, index
+        self._collect_pool(
+            group, _LABEL_VIDEO, video_sources, MediaType.VIDEO,
+            accumulated, video_budget, candidates_dir, thumbnails_dir, index,
+        )
+        self._collect_pool(
+            group, _LABEL_IMAGE, image_sources, MediaType.IMAGE,
+            accumulated, image_budget, candidates_dir, thumbnails_dir, index,
         )
 
         write_models(context.candidates_json(group), list(accumulated.values()))
 
-        if current_seconds < budget:
-            logger.warning(
-                "組 %s：未湊滿候選秒數預算（%.0f/%.0f s）；關鍵字或 API 結果可能不足，"
-                "策展時仍會盡量覆蓋秒數預算 %.0f s",
-                group.group_id, current_seconds, budget, target_seconds,
-            )
+        video_seconds = self._pool_seconds(accumulated, MediaType.VIDEO)
+        image_seconds = self._pool_seconds(accumulated, MediaType.IMAGE)
         logger.info(
-            "組 %s：抓取完成，候選 %d 段、總時長 %.0f s",
-            group.group_id, len(accumulated), current_seconds,
+            "組 %s：抓取完成，影片 %.0f/%.0f s、圖片 %.0f/%.0f s，共 %d 件",
+            group.group_id, video_seconds, video_budget, image_seconds, image_budget, len(accumulated),
         )
 
-    def _collect_until_budget(
+    def _collect_pool(
         self,
         group: GroupSpec,
-        sources: list[VideoSource],
+        label: str,
+        sources: list[MediaSource],
+        media_type: MediaType,
         accumulated: dict[str, ClipCandidate],
-        current_seconds: float,
         budget: float,
         candidates_dir: Path,
         thumbnails_dir: Path,
         index: FetchIndex,
-    ) -> float:
-        """跨來源/關鍵字/分頁累積候選並下載，達預算即停；回傳最終累積秒數。"""
-        # 可選的片段數上限（若 spec 有設）
-        max_clips = group.target_clip_count
+    ) -> None:
+        """把某一媒體類型的候選池湊到 budget（跨來源/關鍵字/分頁）。"""
+        if budget <= 0 or not sources:
+            return
+        seconds = self._pool_seconds(accumulated, media_type)
+        if seconds >= budget:
+            logger.info("組 %s：%s池已滿足（%.0f/%.0f s），跳過", group.group_id, label, seconds, budget)
+            return
+
         for page in range(1, MAX_SEARCH_PAGES_PER_KEYWORD + 1):
             for source in sources:
                 for keyword in group.keywords:
-                    if current_seconds >= budget:
-                        return current_seconds
-                    if max_clips is not None and len(accumulated) >= max_clips:
-                        return current_seconds
+                    if seconds >= budget:
+                        return
                     try:
                         results = source.search(keyword, page=page, page_size=SEARCH_PAGE_SIZE)
                     except Exception as exc:  # 單一來源/關鍵字失敗不阻斷其他
@@ -118,42 +131,50 @@ class FetchStage(PipelineStage):
                             source.platform.value, keyword, page, exc,
                         )
                         continue
-                    current_seconds = self._download_accepted(
-                        results, accumulated, current_seconds, budget,
-                        candidates_dir, thumbnails_dir, index, group,
+                    seconds = self._download_accepted(
+                        group, label, results, accumulated, seconds, budget,
+                        candidates_dir, thumbnails_dir, index,
                     )
-        return current_seconds
+        if seconds < budget:
+            logger.warning(
+                "組 %s：%s池未湊滿（%.0f/%.0f s）；關鍵字或 API 結果可能不足",
+                group.group_id, label, seconds, budget,
+            )
 
     def _download_accepted(
         self,
+        group: GroupSpec,
+        label: str,
         results: list[ClipCandidate],
         accumulated: dict[str, ClipCandidate],
-        current_seconds: float,
+        seconds: float,
         budget: float,
         candidates_dir: Path,
         thumbnails_dir: Path,
         index: FetchIndex,
-        group: GroupSpec,
     ) -> float:
         """對單頁結果做硬篩、去重、下載並累積秒數；回傳更新後秒數。"""
         for candidate in self._filter.filter(results):
             if candidate.cache_key in accumulated:
                 continue
-            if group.target_clip_count is not None and len(accumulated) >= group.target_clip_count:
-                break
             try:
                 downloaded = self._downloader.ensure_downloaded(
                     candidate, candidates_dir=candidates_dir, thumbnails_dir=thumbnails_dir, index=index
                 )
-            except Exception as exc:  # 單段下載失敗就跳過
+            except Exception as exc:  # 單件下載失敗就跳過
                 logger.warning("下載失敗，略過 %s：%s", candidate.cache_key, exc)
                 continue
             accumulated[downloaded.cache_key] = downloaded
-            current_seconds += downloaded.duration_sec
+            seconds += downloaded.duration_sec
             logger.info(
-                "組 %s：候選秒數 %.0f/%.0f s（+%.0fs %s）",
-                group.group_id, current_seconds, budget, downloaded.duration_sec, downloaded.cache_key,
+                "組 %s：%s候選 %.0f/%.0f s（+%.0fs %s）",
+                group.group_id, label, seconds, budget, downloaded.duration_sec, downloaded.cache_key,
             )
-            if current_seconds >= budget:
+            if seconds >= budget:
                 break
-        return current_seconds
+        return seconds
+
+    @staticmethod
+    def _pool_seconds(accumulated: dict[str, ClipCandidate], media_type: MediaType) -> float:
+        """統計累積候選中某媒體類型的總秒數（圖片以名目秒數計）。"""
+        return sum(c.duration_sec for c in accumulated.values() if c.media_type is media_type)

@@ -77,6 +77,7 @@ class GroupCurator:
         """由候選組出寫入 dataset 的 metadata。"""
         return ClipMetadata(
             clip_name=clip_name,
+            media_type=candidate.media_type,
             source_platform=candidate.source_platform,
             original_video_id=candidate.video_id,
             page_url=candidate.page_url,
