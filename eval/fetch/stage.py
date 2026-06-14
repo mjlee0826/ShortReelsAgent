@@ -70,8 +70,12 @@ class FetchStage(PipelineStage):
         index = FetchIndex.load(context.fetch_index_json(group))
 
         # 載入既有候選（可重複執行：保留先前已下載且檔案仍在者）
+        # 先把路徑重建為當前機器（在抓取機上等同無作用；_build 被搬動過才會自我修復）
         accumulated: dict[str, ClipCandidate] = {}
-        for candidate in read_models(context.candidates_json(group), ClipCandidate):
+        existing = context.localized_candidates(
+            group, read_models(context.candidates_json(group), ClipCandidate)
+        )
+        for candidate in existing:
             if candidate.local_path and Path(candidate.local_path).is_file():
                 accumulated[candidate.cache_key] = candidate
 

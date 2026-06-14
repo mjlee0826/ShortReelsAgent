@@ -28,7 +28,7 @@ from .constants import (
     WORK_DIRNAME,
 )
 from .logging_setup import get_logger
-from .models import DatasetSpec, GroupSpec
+from .models import ClipCandidate, DatasetSpec, GroupSpec
 
 logger = get_logger(__name__)
 
@@ -115,6 +115,29 @@ class BuildContext:
     def resolved_target_seconds(self, group: GroupSpec) -> float:
         """該組實際採用的秒數預算。"""
         return self.spec.resolved_target_seconds(group)
+
+    def localized_candidates(
+        self, group: GroupSpec, candidates: list[ClipCandidate]
+    ) -> list[ClipCandidate]:
+        """把候選的本機路徑重建為「當前機器」的實際路徑（跨機器可攜）。
+
+        candidates.json 內存的 local_path/thumbnail_path 是「抓取當下那台機器」的絕對路徑；
+        一旦把整個 _build 搬到別台機器（例如在 Leibniz 抓、下載回桌機），這些絕對路徑就失效，
+        導致 serve/preview/curate 全部找不到檔案。這裡只取原路徑的「檔名」，套回當前 context 的
+        candidates/thumbnails 目錄，讓檔案定位與「抓取機器、路徑前綴、甚至 group 改名」無關
+        （檔名由 downloader 以 platform_type_id 決定性命名，必落在對應目錄）。
+        """
+        candidates_dir = self.candidates_dir(group)
+        thumbnails_dir = self.thumbnails_dir(group)
+        localized: list[ClipCandidate] = []
+        for candidate in candidates:
+            update: dict[str, str] = {}
+            if candidate.local_path:
+                update["local_path"] = str(candidates_dir / Path(candidate.local_path).name)
+            if candidate.thumbnail_path:
+                update["thumbnail_path"] = str(thumbnails_dir / Path(candidate.thumbnail_path).name)
+            localized.append(candidate.model_copy(update=update) if update else candidate)
+        return localized
 
 
 class PipelineStage(ABC):

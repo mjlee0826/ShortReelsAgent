@@ -47,6 +47,8 @@ class CurateStage(PipelineStage):
         if not candidates:
             logger.warning("組 %s：找不到候選（請先執行 fetch），略過", group.group_id)
             return
+        # 重建為當前機器的路徑：跨機器下載 _build 後，candidates.json 內的絕對路徑已失效
+        candidates = context.localized_candidates(group, candidates)
 
         target_seconds = context.resolved_target_seconds(group)
         image_ratio = context.spec.resolved_image_ratio(group)

@@ -72,6 +72,8 @@ class _SelectionServer(ThreadingHTTPServer):
     def ordered_candidates(self, group: GroupSpec) -> list[ClipCandidate]:
         """讀回該組候選、評分後依品質由高到低排序（與互動頁一致）。"""
         candidates = read_models(self.context.candidates_json(group), ClipCandidate)
+        # 重建為當前機器的路徑：candidates.json 可能是在別台機器抓的，絕對路徑在此不適用
+        candidates = self.context.localized_candidates(group, candidates)
         scored = self.scorer.annotate(candidates)
         return sorted(scored, key=lambda c: c.quality_score or 0.0, reverse=True)
 
