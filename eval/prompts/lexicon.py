@@ -34,16 +34,22 @@ TEMPLATES: dict[str, list[str]] = {
         "{tone}幫我把這些{theme}的影片剪成一支短片",
         "{tone}{theme}的素材幫我剪一下",
         "{tone}這批{theme}的片段幫我湊成一支短影音",
+        "{tone}這些{theme}的影片幫我隨便剪成一支就好",
+        "{tone}{theme}的片段，幫我快速做成一支短影音",
     ],
     DETAIL_LIGHT: [
         "{tone}幫我把{theme}的影片剪成適合{platform}的短片，{scenario}",
         "{tone}想用這些{theme}的素材做一支短影音放到{platform}，{scenario}",
         "{tone}幫我把{theme}的片段剪得順一點，{scenario}就好",
+        "{tone}幫我把{theme}的素材剪成一支短片放{platform}，{scenario}，順順的就好",
+        "{tone}這些{theme}想做成短影音貼到{platform}，{scenario}",
     ],
     DETAIL_SPECIFIC: [
         "{tone}想把{theme}的片段剪成{duration}的短影音，走{style}，配{music}的音樂",
         "{tone}幫我把這些{theme}素材剪成{duration}、{style}的影片，音樂用{music}的",
         "{tone}這批{theme}的影片幫我做成{duration}短片，風格{style}，節奏配{music}",
+        "{tone}幫我把{theme}剪成{duration}、走{style}的短片，配{music}的音樂，給{platform}用",
+        "{tone}這批{theme}想剪成{duration}短影音：{style}風格、{music}配樂",
     ],
     DETAIL_DETAILED: [
         "{tone}這批{theme}的素材順序是亂的，幫我重新排好剪成{duration}的短片："
@@ -52,6 +58,8 @@ TEMPLATES: dict[str, list[str]] = {
         "先用{hook}開場，色調走{style}，音樂{music}，轉場順一點，{scenario}",
         "{tone}想要一支{duration}的{theme}短影音：用{hook}當開頭，{style}風格，"
         "{music}配樂，把重複的片段拿掉，{scenario}",
+        "{tone}{theme}的素材有點亂，幫我剪成{duration}適合{platform}的成品："
+        "{hook}開場、{style}調色、{music}配樂，模糊或重複的拿掉，{scenario}",
     ],
 }
 
@@ -60,40 +68,63 @@ SCOPE_TEMPLATES: dict[str, dict[str, list[str]]] = {
     SCOPE_FOCUSED: {
         DETAIL_LIGHT: [
             "{tone}幫我把這些{theme}的鏡頭剪成一支聚焦的短片，多放幾個{subject}的角度，{scenario}",
+            "{tone}這些都是{theme}，幫我挑幾顆{subject}剪成一支特寫短片放{platform}，{scenario}",
         ],
         DETAIL_SPECIFIC: [
             "{tone}這些都是{theme}的素材，幫我剪成{duration}的特寫短片，主角就是它，風格{style}、配{music}音樂",
+            "{tone}全部是{theme}，幫我剪成{duration}的單品短片：多給{subject}的特寫，{style}、配{music}",
         ],
         DETAIL_DETAILED: [
             "{tone}全部都是{theme}，幫我挑最好看的幾顆剪成{duration}：用{hook}開場，"
             "多放不同角度的{subject}特寫，{style}風格、{music}配樂，重複或晃動的剔除，{scenario}",
+            "{tone}這支主角只有{theme}：用{hook}開場，{subject}的特寫換不同角度排出節奏，"
+            "剪成{duration}、{style}、配{music}，糊掉或重複的拿掉，{scenario}",
         ],
     },
     SCOPE_BROAD: {
         DETAIL_LIGHT: [
             "{tone}這批{theme}有好幾個場景，幫我串成一支有故事感的短片放到{platform}，{scenario}",
+            "{tone}{theme}場景蠻多的，幫我串成一支順順的短片放{platform}，{scenario}",
         ],
         DETAIL_SPECIFIC: [
             "{tone}{theme}的素材場景很雜，幫我排成{duration}的短片，走{style}、配{music}，場景之間轉場要順",
+            "{tone}{theme}有不同場景，幫我排成{duration}有節奏的一支：{style}、配{music}，從{hook}帶出整段",
         ],
         DETAIL_DETAILED: [
             "{tone}{theme}的素材是不同場景、順序也亂，幫我重排成{duration}有起承轉合的一支："
             "{hook}開場，{style}風格、{music}配樂，把重複的拿掉，{scenario}",
+            "{tone}{theme}橫跨好幾個場景又是亂序，幫我重排成{duration}的一支：用{hook}開場帶氣氛，"
+            "場景之間轉場順一點，{style}、配{music}，畫質差的剔除，{scenario}",
         ],
     },
 }
 
 # ──────────────────────────── 通用詞庫（跨主題）────────────────────────────
-DURATION_CHOICES: list[str] = ["15 秒", "30 秒", "45 秒左右", "一分鐘以內"]
+DURATION_CHOICES: list[str] = ["15 秒", "20 秒", "30 秒", "40 秒", "45 秒左右", "一分鐘以內", "一分鐘左右"]
 STYLE_CHOICES: list[str] = [
     "電影感調色",
     "清新明亮的風格",
     "復古濾鏡",
     "日系小清新",
     "高對比的質感",
+    "暖色底片感",
+    "黑白質感",
+    "Vlog 手持感",
+    "ins 風淡雅",
+    "賽博龐克霓虹",
 ]
-MUSIC_CHOICES: list[str] = ["輕快", "抒情", "熱血", "Lo-fi 慵懶", "節奏感強"]
-PLATFORM_CHOICES: list[str] = ["IG Reels", "TikTok", "YouTube Shorts"]
+MUSIC_CHOICES: list[str] = [
+    "輕快",
+    "抒情",
+    "熱血",
+    "Lo-fi 慵懶",
+    "節奏感強",
+    "chill 電子",
+    "鋼琴純音樂",
+    "city pop",
+    "輕快口哨",
+]
+PLATFORM_CHOICES: list[str] = ["IG Reels", "TikTok", "YouTube Shorts", "小紅書", "Facebook Reels"]
 
 # 語氣：(標記, 句首前綴)；前綴可為空字串（隨興）
 TONE_CHOICES: list[tuple[str, str]] = [
@@ -101,6 +132,8 @@ TONE_CHOICES: list[tuple[str, str]] = [
     ("禮貌", "麻煩你，"),
     ("急迫", "趕時間，"),
     ("興奮", "超期待這支成品！"),
+    ("猶豫", "其實我不太確定，"),
+    ("專業", "依品牌調性，"),
 ]
 
 # 情境：(標記, 句中用語)
@@ -109,6 +142,9 @@ SCENARIO_CHOICES: list[tuple[str, str]] = [
     ("紀念", "想留個紀念"),
     ("分享朋友", "想分享給朋友"),
     ("投稿", "要拿去投稿"),
+    ("品牌宣傳", "要當品牌宣傳"),
+    ("回顧", "想做個回顧"),
+    ("開箱", "要配開箱片"),
 ]
 
 # ──────────────────────────── 各主題專屬詞庫 ────────────────────────────
@@ -154,6 +190,31 @@ THEME_LEXICONS: dict[str, dict[str, list[str]]] = {
     "貓咪日常": {
         "subjects": ["貓咪特寫", "貓咪舔毛", "貓咪伸懶腰", "肉球", "尾巴擺動", "打呵欠"],
         "hooks": ["歪頭看鏡頭的畫面", "打呵欠的特寫", "伸懶腰的瞬間"],
+    },
+    # ── v3 新增（3 broad 多場景 + 3 focused 單一主體）──
+    "健行登山": {
+        "subjects": ["山稜線", "登山步道", "雲海", "森林小徑", "攻頂的身影", "回望山谷"],
+        "hooks": ["登頂看到雲海的瞬間", "陽光穿過樹林的畫面", "回頭俯瞰整片山谷"],
+    },
+    "居家料理": {
+        "subjects": ["切菜特寫", "下鍋爆香", "翻炒的鑊氣", "擺盤完成", "熱湯冒煙", "備料的雙手"],
+        "hooks": ["食材下鍋爆香的瞬間", "起鍋擺盤的特寫", "熱氣冒出來的畫面"],
+    },
+    "健身房日常": {
+        "subjects": ["深蹲", "舉重", "跑步機", "拉繩訓練", "汗水特寫", "鏡子前的動作"],
+        "hooks": ["槓鈴舉起的瞬間", "汗水滴下的特寫", "完成最後一組的瞬間"],
+    },
+    "烘焙甜點": {
+        "subjects": ["麵團揉製", "擠花", "出爐的瞬間", "糖粉灑落", "切開蛋糕", "巧克力淋醬"],
+        "hooks": ["蛋糕出爐的瞬間", "糖粉灑下的畫面", "巧克力淋上的特寫"],
+    },
+    "多肉植物": {
+        "subjects": ["多肉特寫", "葉片紋理", "排列的盆栽", "澆水的水珠", "換盆的雙手", "窗台的光"],
+        "hooks": ["水珠滑過葉片的瞬間", "陽光灑在多肉上的畫面", "整排盆栽的俯視"],
+    },
+    "水族箱": {
+        "subjects": ["魚群游動", "水草搖曳", "氣泡上升", "餵食的瞬間", "魚的特寫", "光線穿過水面"],
+        "hooks": ["魚群轉向的瞬間", "氣泡上升的特寫", "光線穿過水草的畫面"],
     },
 }
 

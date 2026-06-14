@@ -13,6 +13,8 @@ dataset_version: v1
 output_dir: eval/_build
 
 # 啟用的來源平台（需設定 PEXELS_API_KEY / PIXABAY_API_KEY；影片與圖片都會抓）
+# 抓取時兩家平台「公平分配＋補滿」輪流取用：每個池先讓各來源各湊約 1/N，再用全部來源補到預算，
+# 因此影片與圖片都會混入 Pixabay（不會被先查到的 Pexels 一次塞滿）。
 sources:
   - pexels
   - pixabay
@@ -30,21 +32,21 @@ groups:
     scope: broad
     keywords: [tokyo street, shibuya crossing, japanese street food, tokyo train station, japanese temple, tokyo night]
     target_total_seconds: 120
-    prompt_count: 6
+    prompt_count: 8
 
   - group_id: beach_day
     theme: 海邊一日遊
     scope: broad
     keywords: [beach, ocean waves, sunset beach, seaside, surfing]
     target_total_seconds: 90
-    prompt_count: 6
+    prompt_count: 8
 
   - group_id: night_city_walk
     theme: 城市夜散步
     scope: broad
     keywords: [city night, neon street, night market, city lights, crosswalk night]
     target_total_seconds: 90
-    prompt_count: 6
+    prompt_count: 8
 
   # ───── 聚焦 focused：單一主體，考驗從相似鏡頭做出節奏與變化 ─────
   - group_id: signature_drink
@@ -53,18 +55,64 @@ groups:
     keywords: [iced coffee pouring, cocktail closeup, bubble tea, drink splash, soda pouring]
     target_total_seconds: 60
     image_ratio: 0.4          # 單品照片很適合，這組多放一點圖片
-    prompt_count: 6
+    prompt_count: 8
 
   - group_id: latte_art
     theme: 拉花咖啡
     scope: focused
     keywords: [latte art, coffee pouring, espresso closeup, barista pour]
     target_total_seconds: 45
-    prompt_count: 6
+    prompt_count: 8
 
   - group_id: cat_daily
     theme: 貓咪日常
     scope: focused
     keywords: [cat closeup, kitten playing, cat yawning, cat paws]
     target_total_seconds: 60
-    prompt_count: 6
+    prompt_count: 8
+
+  # ───── v3 新增 broad：多場景敘事 ─────
+  - group_id: mountain_hike
+    theme: 健行登山
+    scope: broad
+    keywords: [mountain hiking, hiking trail, summit view, forest trail, sea of clouds]
+    target_total_seconds: 120
+    prompt_count: 8
+
+  - group_id: home_cooking
+    theme: 居家料理
+    scope: broad
+    keywords: [home cooking, chopping vegetables, stir fry pan, plating food, kitchen cooking]
+    target_total_seconds: 90
+    prompt_count: 8
+
+  - group_id: gym_workout
+    theme: 健身房日常
+    scope: broad
+    keywords: [gym workout, weight lifting, squat exercise, treadmill running, dumbbell]
+    target_total_seconds: 90
+    prompt_count: 8
+
+  # ───── v3 新增 focused：單一主體多角度 ─────
+  - group_id: baking_dessert
+    theme: 烘焙甜點
+    scope: focused
+    keywords: [baking dessert, cake decorating, piping cream, oven baking, chocolate dessert]
+    target_total_seconds: 60
+    image_ratio: 0.4          # 甜點成品照很適合，這組多放一點圖片
+    prompt_count: 8
+
+  - group_id: potted_plant
+    theme: 多肉植物
+    scope: focused
+    keywords: [succulent closeup, potted plants, watering plants, indoor plants, plant leaves]
+    target_total_seconds: 45
+    image_ratio: 0.4          # 多肉單品照素材豐富
+    prompt_count: 8
+
+  - group_id: aquarium_fish
+    theme: 水族箱
+    scope: focused
+    keywords: [aquarium fish, fish tank, swimming fish, tropical fish, underwater bubbles]
+    target_total_seconds: 60
+    prompt_count: 8

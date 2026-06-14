@@ -110,7 +110,12 @@ class FetchStage(PipelineStage):
         thumbnails_dir: Path,
         index: FetchIndex,
     ) -> None:
-        """把某一媒體類型的候選池湊到 budget（跨來源/關鍵字/分頁）。"""
+        """把某一媒體類型的候選池湊到 budget：先讓各來源公平分配、再用全部來源補滿。
+
+        分兩輪確保每個平台都被取用（否則先被查到的來源會一次塞滿預算，其餘平台永遠輪不到）：
+        - 第一輪（公平分配）：第 i 個來源各自把池子補到累計份額 ``budget × (i+1) / 來源數``。
+        - 第二輪（補滿）：若某來源素材不足致未達預算，再用全部來源補到 budget。
+        """
         if budget <= 0 or not sources:
             return
         seconds = self._pool_seconds(accumulated, media_type)
@@ -118,11 +123,48 @@ class FetchStage(PipelineStage):
             logger.info("組 %s：%s池已滿足（%.0f/%.0f s），跳過", group.group_id, label, seconds, budget)
             return
 
+        # 第一輪：每個來源各自補到「累計公平份額」，讓兩家平台都被納入
+        source_count = len(sources)
+        for order, source in enumerate(sources):
+            fair_target = budget * (order + 1) / source_count
+            self._fill_pool(
+                group, label, [source], media_type, accumulated, fair_target,
+                candidates_dir, thumbnails_dir, index,
+            )
+
+        # 第二輪：補滿（各池已達標時此呼叫會即時返回、不再打 API）
+        seconds = self._fill_pool(
+            group, label, sources, media_type, accumulated, budget,
+            candidates_dir, thumbnails_dir, index,
+        )
+        if seconds < budget:
+            logger.warning(
+                "組 %s：%s池未湊滿（%.0f/%.0f s）；關鍵字或 API 結果可能不足",
+                group.group_id, label, seconds, budget,
+            )
+
+    def _fill_pool(
+        self,
+        group: GroupSpec,
+        label: str,
+        sources: list[MediaSource],
+        media_type: MediaType,
+        accumulated: dict[str, ClipCandidate],
+        target: float,
+        candidates_dir: Path,
+        thumbnails_dir: Path,
+        index: FetchIndex,
+    ) -> float:
+        """以指定來源把候選池補到 ``target`` 秒（跨關鍵字/分頁）；回傳補完後的池秒數。"""
+        seconds = self._pool_seconds(accumulated, media_type)
+        if seconds >= target or not sources:
+            return seconds
+
         for page in range(1, MAX_SEARCH_PAGES_PER_KEYWORD + 1):
             for source in sources:
                 for keyword in group.keywords:
-                    if seconds >= budget:
-                        return
+                    if seconds >= target:
+                        return seconds
                     try:
                         results = source.search(keyword, page=page, page_size=SEARCH_PAGE_SIZE)
                     except Exception as exc:  # 單一來源/關鍵字失敗不阻斷其他
@@ -132,14 +174,10 @@ class FetchStage(PipelineStage):
                         )
                         continue
                     seconds = self._download_accepted(
-                        group, label, results, accumulated, seconds, budget,
+                        group, label, results, accumulated, seconds, target,
                         candidates_dir, thumbnails_dir, index,
                     )
-        if seconds < budget:
-            logger.warning(
-                "組 %s：%s池未湊滿（%.0f/%.0f s）；關鍵字或 API 結果可能不足",
-                group.group_id, label, seconds, budget,
-            )
+        return seconds
 
     def _download_accepted(
         self,
@@ -148,7 +186,7 @@ class FetchStage(PipelineStage):
         results: list[ClipCandidate],
         accumulated: dict[str, ClipCandidate],
         seconds: float,
-        budget: float,
+        target: float,
         candidates_dir: Path,
         thumbnails_dir: Path,
         index: FetchIndex,
@@ -168,9 +206,9 @@ class FetchStage(PipelineStage):
             seconds += downloaded.duration_sec
             logger.info(
                 "組 %s：%s候選 %.0f/%.0f s（+%.0fs %s）",
-                group.group_id, label, seconds, budget, downloaded.duration_sec, downloaded.cache_key,
+                group.group_id, label, seconds, target, downloaded.duration_sec, downloaded.cache_key,
             )
-            if seconds >= budget:
+            if seconds >= target:
                 break
         return seconds
 
