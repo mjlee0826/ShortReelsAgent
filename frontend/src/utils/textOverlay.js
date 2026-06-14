@@ -11,7 +11,7 @@
  * - 時間軸排版：assignTextOverlayLanes（重疊字幕 lane-stacking，僅編輯顯示用）。
  */
 import { interpolate, Easing } from 'remotion';
-import { SUBTITLE_FONT_FAMILY } from './fonts';
+import { SUBTITLE_FONT_FAMILY } from './fonts.js';
 import {
   SAFE_AREA,
   SUBTITLE_SIZE_MAP,
@@ -23,7 +23,7 @@ import {
   SUBTITLE_BOX_PADDING,
   SUBTITLE_MAX_WIDTH_PCT,
   SUBTITLE_ANIM_FRAMES,
-} from '../components/RemotionPlayer/constants';
+} from '../components/RemotionPlayer/constants.js';
 
 // ── 具名常數（禁 magic number）──────────────────────────────────────────────
 /** 字幕各欄位的安全可讀預設（與後端 TextOverlay schema 預設對齊；Inspector 也引用，避免重複定義飄移）。 */

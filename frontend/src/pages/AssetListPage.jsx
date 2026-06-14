@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { FaArrowLeft, FaExclamationCircle, FaImages } from 'react-icons/fa';
 import useProjectStore from '../store/useProjectStore';
@@ -7,9 +7,11 @@ import useAssetSelection from '../hooks/useAssetSelection';
 import AppHeader from '../components/AppHeader/AppHeader';
 import AssetGrid from '../components/AssetGrid/AssetGrid';
 import AssetDetailModal from '../components/AssetGrid/AssetDetailModal';
+import AssetSummaryBar from '../components/AssetGrid/AssetSummaryBar';
 import BulkActionBar from '../components/AssetGrid/BulkActionBar';
 import SelectionToolbar from '../components/AssetGrid/SelectionToolbar';
 import ProgressOverlay from '../components/AssetGrid/ProgressOverlay';
+import { summarizeAssets } from '../components/AssetGrid/assetSummary';
 import { IconButton, Spinner, EmptyState } from '../components/ui';
 
 /**
@@ -50,6 +52,9 @@ export default function AssetListPage() {
 
   // 詳情彈窗對應的素材（以 relpath 身分查找）；供彈窗取顯示檔名與縮圖後備
   const detailAsset = detailPath ? assets.find((a) => a.path === detailPath) : null;
+
+  // 素材統計（照片數 / 影片數 / 影片總時長）：素材清單變動才重算，供統計列呈現
+  const summary = useMemo(() => summarizeAssets(assets), [assets]);
 
   // 提示已透過 initialError 帶入；此處只清掉 history state，避免重整 / 返回時殘留同一則提示
   useEffect(() => {
@@ -112,6 +117,15 @@ export default function AssetListPage() {
           <>
             {/* 進度條（工作進行中才顯示）*/}
             <ProgressOverlay visible={jobRunning} done={progress.done} total={progress.total} />
+
+            {/* 素材統計列：照片數 / 影片數 / 影片總時長（有素材才顯示）*/}
+            {assets.length > 0 && (
+              <AssetSummaryBar
+                imageCount={summary.imageCount}
+                videoCount={summary.videoCount}
+                totalVideoDuration={summary.totalVideoDuration}
+              />
+            )}
 
             {/* 工具列：選取模式顯示情境列，否則顯示預設列（同位置、等高，切換不跳動）*/}
             {selectionMode ? (

@@ -32,3 +32,13 @@ try:
     )
 except ValueError:
     DIRECTOR_CASTING_POOL_TARGET = _CASTING_POOL_TARGET_DEFAULT
+
+# ── source_end 溢位的 deterministic 修補容差 (ClipDurationRepairer) ───────────────
+# 導演（LLM）常把 source_end 四捨五入到數位小數（如把 1.6666666666666667 寫成 1.6667），
+# 使其「超出」素材物理時長一個次毫秒的量；這純屬捨入雜訊，素材本就沒有那一格可放，夾回物理
+# 長度即可，毫無視覺影響。低於此容差的溢位於 Critic 驗證『之前』被就地夾回，省下本可確定修掉的
+# 捨入誤差所觸發的反思往返；超過此容差才視為導演真的要了不存在的片段，保留原值交由 Critic
+# 標錯、退回重寫。值取 0.05s：對「捨入到 2 位小數」最壞的 0.005s 仍留 10× 餘裕，且 ≤ 既有
+# playback_rate 一致性檢查的 0.1s 容差，故夾回造成的時長變動永遠落在該檢查容差內，不會反倒
+# 製造新的 Critic 錯誤。
+SOURCE_END_OVERFLOW_REPAIR_TOLERANCE_SECONDS = 0.05

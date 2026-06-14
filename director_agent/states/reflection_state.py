@@ -1,20 +1,23 @@
 from director_agent.states.base_state import BaseState
 from director_agent.critic.critic_manager import CriticManager
 from director_agent.critic.clip_id_repairer import ClipIdRepairer
+from director_agent.critic.clip_duration_repairer import ClipDurationRepairer
 
 class ReflectionState(BaseState):
     """
     狀態：自我反思與糾錯 (Self-Reflection)。
     將草稿送交 Critic 審查。若有錯，產生 Error Prompt 並退回前一狀態重寫；
     若無錯或達到重試上限，則結束流程。
-    驗證前先跑 deterministic 的 clip_id 修補，把 raw/standardized 混淆等可唯一反查的身分錯誤就地校正，
-    避免本可確定修掉的錯誤白白觸發一次反思往返。
+    驗證前先跑 deterministic 修補：先以 basename stem 反查校正 clip_id（raw/standardized 混淆），
+    再把 source_end 的捨入溢位夾回素材物理時長，避免本可確定修掉的錯誤白白觸發一次反思往返。
     """
     def __init__(self):
         # 實例化審查委員會 (包含所有實作的 Validator)
         self.critic = CriticManager()
         # deterministic clip_id 修補器：驗證前先以 basename stem 反查校正 raw/standardized 混淆
         self.repairer = ClipIdRepairer()
+        # deterministic source_end 修補器：驗證前把捨入造成的微幅超界夾回素材物理時長
+        self.duration_repairer = ClipDurationRepairer()
         # 設定最大迭代次數，避免 API 無限扣款
         self.max_retries = 3
 
@@ -38,6 +41,13 @@ class ReflectionState(BaseState):
             if repairs:
                 print(f"🔧 [Repair] 自動校正 {len(repairs)} 個 clip_id（basename stem 反查）：")
                 for fix in repairs:
+                    print(f"   - {fix}")
+            # clip_id 修妥後再夾回 source_end 的捨入溢位：把微幅超出素材物理時長者就地夾回，
+            # 省下本可確定修掉的捨入誤差所觸發的反思往返（大幅超界仍留給下方 Critic 標錯）
+            duration_repairs = self.duration_repairer.repair(draft, assets)
+            if duration_repairs:
+                print(f"🔧 [Repair] 自動夾回 {len(duration_repairs)} 個 source_end 捨入溢位：")
+                for fix in duration_repairs:
                     print(f"   - {fix}")
             # 呼叫責任鏈進行物理與邏輯驗證
             errors = self.critic.validate_all(draft, assets)

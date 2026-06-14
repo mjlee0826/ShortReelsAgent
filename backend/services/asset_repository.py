@@ -36,7 +36,7 @@ from config.app_config import (
     STANDARDIZED_SUBDIR,
 )
 from config.media_formats import NEEDS_STANDARDIZE_EXTENSIONS
-from media_processor.pipeline.context import derive_media_kind
+from media_processor.pipeline.context import MediaKind, derive_media_kind
 
 # project_meta.json 內逐檔策略 / dirty 相關欄位鍵(具名常數,避免散落 magic string)
 # 鍵一律為素材身分 relpath(如 raw/photo.jpg),與 status / metadata / blueprint clip_id 全程一致
@@ -51,6 +51,9 @@ META_KEY_LAST_MODIFIED = "last_modified"
 
 # 素材尚未被 Phase 1 分析過(全狀態檔內查無此檔)時的 UI 狀態
 ASSET_STATUS_UNPROCESSED = "unprocessed"
+
+# Phase 1 metadata 內影片時長(秒)欄位鍵;對齊 media_processor VideoMetadata.duration
+METADATA_KEY_DURATION = "duration"
 
 # 後端對外位址改用 config.app_config.DEFAULT_BACKEND_URL(見頂部 import),消除散落的同字面量
 
@@ -82,6 +85,8 @@ class AssetView(BaseModel):
     status: str                              # unprocessed | success | rejected | error
     strategy: str = AssetStrategy.SIMPLE.value
     dirty: bool = False                      # 策略已變更、待下次「開始生成」重跑
+    # 影片時長(秒);取自 Phase 1 success metadata,僅 success 影片有值(圖片 / 未分析影片為 None)
+    duration: Optional[float] = None
     technical_score: Optional[float] = None
     reason: Optional[str] = None             # rejected 時的原因(技術分過低)
     error: Optional[str] = None              # error 時的錯誤訊息
@@ -154,6 +159,18 @@ class AssetRepository:
         return {rec["file"]: rec for rec in records if rec.get("file")}
 
     @staticmethod
+    def _extract_video_duration(record: Optional[dict], media_kind: MediaKind) -> Optional[float]:
+        """
+        從 Phase 1 metadata 紀錄取影片時長(秒);非影片 / 無紀錄 / 缺欄位皆回 None。
+
+        僅 success 影片有 metadata,故未分析 / rejected / error 影片自然回 None(統計時以 0 計)。
+        """
+        if media_kind != MediaKind.VIDEO or not record:
+            return None
+        raw = (record.get("metadata") or {}).get(METADATA_KEY_DURATION)
+        return float(raw) if isinstance(raw, (int, float)) else None
+
+    @staticmethod
     def _resolve_default_strategy(user_id: str) -> str:
         """
         取得使用者全域預設策略,作為「未逐檔設定」素材的 fallback。
@@ -177,6 +194,8 @@ class AssetRepository:
         strategies = meta.get(META_KEY_ASSET_STRATEGIES, {})
         dirty_set = set(meta.get(META_KEY_DIRTY_ASSETS, []))
         status_map = self._read_status_map(project_dir)
+        # success 完整 metadata(含影片時長);供統計列算「影片總時長」,只讀一次整批共用
+        metadata_map = self._read_metadata_map(project_dir)
         # 未逐檔設定的素材顯示「全域預設策略」(逐檔明確設定仍優先);整批共用同一個值,只讀一次設定
         default_strategy = self._resolve_default_strategy(user_id)
 
@@ -204,6 +223,7 @@ class AssetRepository:
                 status=status_entry.get("status", ASSET_STATUS_UNPROCESSED),
                 strategy=strategies.get(relpath, default_strategy),
                 dirty=relpath in dirty_set,
+                duration=self._extract_video_duration(metadata_map.get(relpath), media_kind),
                 technical_score=status_entry.get("technical_score"),
                 reason=status_entry.get("reason"),
                 error=status_entry.get("error"),
