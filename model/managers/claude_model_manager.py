@@ -81,38 +81,26 @@ class ClaudeModelManager(BaseModelManager):
         """
         導演藍圖生成：one-shot 生成，回傳 JSON 字串（與 ``GeminiModelManager`` 同契約）。
 
-        模型由 ``CLAUDE_DIRECTOR_MODEL`` 決定（預設 Opus 4.8，env 可切 Sonnet 做省錢 A/B）。主路徑走
-        **tool use**：把 schema 當 tool 的 ``input_schema``，模型回傳 SDK 已解析的 dict，由我方
-        ``json.dumps`` 成字串維持契約——如此**不再手 parse 模型自由文字**，根除漏逗號類解析失敗，且
-        tool-use 對複雜 schema 的容忍度遠高於 native structured output（後者 schema 太複雜會 400）。
-        ``DIRECTOR_USE_TOOL_USE=False`` 或無 schema 時回退「自由文字 + schema_to_text」舊路徑；下游
-        ``SchedulingState`` 一律以 robust parser 解析。例外往上拋（由 job / service 層處理）。
+        模型由 ``CLAUDE_DIRECTOR_MODEL`` 決定（預設 Opus 4.8）。主路徑走 **tool use**：schema 當 tool 的
+        ``input_schema``，模型回傳 SDK 已解析的 dict，由我方 ``json.dumps`` 成字串——不再手 parse 自由
+        文字，根除漏逗號類失敗，且對複雜 schema 容忍度遠高於 native structured output。
+        ``DIRECTOR_USE_TOOL_USE=False`` 或無 schema 時走自由文字 + schema_to_text。例外往上拋。
         """
         model = CLAUDE_DIRECTOR_MODEL
-        # 主路徑：tool use（結構化、回 parsed dict，根除手 parse 文字的漏逗號失敗）
         if schema is not None and DIRECTOR_USE_TOOL_USE:
             return self._generate_via_tool(prompt, schema, model)
-        # 回退路徑：自由文字 + schema_to_text（schema_to_text 已含「只輸出 JSON、不要 markdown」指示）
-        content = f"{prompt}\n\n{schema_to_text(schema)}" if schema is not None else prompt
-        response = self.client.messages.create(
-            model=model,
-            max_tokens=CLAUDE_DIRECTOR_MAX_TOKENS,
-            thinking=_ADAPTIVE_THINKING,
-            messages=[{"role": "user", "content": content}],
-        )
-        # 記錄 token 用量（Phase 4）；reflection 重試會多次呼叫、各自累加
-        self._record(response, model)
-        return self._extract_text(response)
+        return self._generate_freetext(prompt, schema, model)
 
     def _generate_via_tool(self, prompt: str, schema: type[BaseModel], model: str) -> str:
         """
-        以 tool use 取結構化輸出：schema 當 tool 的 ``input_schema``，模型回傳 SDK 已解析的 dict
-        （不再由我方手 parse 自由文字 JSON），再 ``json.dumps`` 回字串維持與 Gemini 對稱的契約。
+        以 tool use 取結構化輸出：schema 當 tool 的 ``input_schema``，模型回傳 SDK 已解析的 dict，
+        再 ``json.dumps`` 回字串維持與 Gemini 對稱的契約。
 
-        adaptive thinking 開啟時 ``tool_choice`` 只能 ``auto``（無法強制特定 tool）；單一 tool + 描述中
-        明確要求呼叫，模型實務上幾乎必呼叫。萬一未呼叫（改吐文字）則退回抽文字，交由下游
-        ``parse_json_lenient`` 兜底，不致整批失敗。本方法不掛 ``@synchronized_inference``：由已持鎖的
-        ``generate_director_plan`` 直呼，避免非重入鎖二次取用。
+        adaptive thinking 開啟時 ``tool_choice`` 只能 ``auto``（無法強制特定 tool）。每次都印一行觀測
+        日誌（stop_reason / blocks / used_tool）以便確認模型是否真的呼叫了 tool。模型未呼叫 tool 時：
+        有文字就退回文字交下游容錯；連文字都空（常見於 max_tokens 在 thinking 階段就耗盡）則以自由文字
+        路徑同輪救援一次，避免空草稿白白觸發整輪重生。本方法不掛 ``@synchronized_inference``：由已持鎖
+        的 ``generate_director_plan`` 直呼，避免非重入鎖二次取用。
         """
         tool = {
             "name": _BLUEPRINT_TOOL_NAME,
@@ -127,16 +115,51 @@ class ClaudeModelManager(BaseModelManager):
             tool_choice={"type": "auto"},  # 開 thinking 時不能強制特定 tool，只能 auto
             messages=[{"role": "user", "content": prompt}],
         )
-        # 記錄 token 用量（Phase 4）；reflection 重試會多次呼叫、各自累加
-        self._record(response, model)
-        # 取第一個 tool_use block 的 input（SDK 已解析為 dict）；dump 回字串維持「回傳 JSON 字串」契約
+        self._record(response, model)  # 記錄 token 用量（Phase 4）
+
+        # 觀測性：印出 stop_reason 與各 block 型別，據此判斷模型有沒有真的呼叫 tool
         tool_input = next(
             (block.input for block in response.content if block.type == "tool_use"),
             None,
         )
+        print(
+            f"[Claude Director] stop_reason={response.stop_reason} "
+            f"blocks={[block.type for block in response.content]} "
+            f"used_tool={tool_input is not None}"
+        )
         if tool_input is not None:
             return json.dumps(tool_input, ensure_ascii=False)
-        # 模型未呼叫 tool（罕見）→ 退回文字，交給下游 parse_json_lenient 容錯
+
+        # 模型未呼叫 tool：先給可行動診斷（最常見是 thinking 把 max_tokens 耗盡 → 來不及呼叫 tool）
+        if response.stop_reason == "max_tokens":
+            print(
+                "[Claude Director] ⚠️ 輸出被 max_tokens 截斷（adaptive thinking + tool 輸出超過上限），"
+                "模型來不及產出 tool 呼叫 → 調高 CLAUDE_DIRECTOR_MAX_TOKENS"
+            )
+        # 有文字 → 交下游容錯解析；連文字都空 → 以自由文字路徑同輪救援一次（避免空草稿觸發整輪重生）
+        text = self._extract_text(response)
+        if text.strip():
+            return text
+        print(
+            f"[Claude Director] ⚠️ 未呼叫 {_BLUEPRINT_TOOL_NAME} 且無文字輸出"
+            f"（stop_reason={response.stop_reason}）→ 以自由文字路徑救援重試一次"
+        )
+        return self._generate_freetext(prompt, schema, model)
+
+    def _generate_freetext(self, prompt: str, schema: type[BaseModel] | None, model: str) -> str:
+        """
+        自由文字 + ``schema_to_text`` 生成路徑（``DIRECTOR_USE_TOOL_USE=False``、無 schema、或 tool use
+        無輸出時的救援）。schema_to_text 已含「只輸出 JSON、不要 markdown」指示，下游以 robust parser
+        解析。本方法不掛 ``@synchronized_inference``（由已持鎖的呼叫端直呼）。
+        """
+        content = f"{prompt}\n\n{schema_to_text(schema)}" if schema is not None else prompt
+        response = self.client.messages.create(
+            model=model,
+            max_tokens=CLAUDE_DIRECTOR_MAX_TOKENS,
+            thinking=_ADAPTIVE_THINKING,
+            messages=[{"role": "user", "content": content}],
+        )
+        self._record(response, model)  # 記錄 token 用量（Phase 4）
         return self._extract_text(response)
 
     @staticmethod

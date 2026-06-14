@@ -183,8 +183,10 @@ DIRECTOR_PROVIDER = os.getenv("DIRECTOR_PROVIDER", DIRECTOR_PROVIDER_CLAUDE).str
 
 # Claude 導演模型（預設 Opus 4.8，品質優先）；env 可切 claude-sonnet-4-6 做省錢 A/B。
 CLAUDE_DIRECTOR_MODEL = os.getenv("CLAUDE_MODEL_DIRECTOR", "claude-opus-4-8")
-# 單次導演生成的輸出上限（含 adaptive thinking token）；截斷時（stop_reason=max_tokens）調高此值。
-CLAUDE_DIRECTOR_MAX_TOKENS = _read_int_env("CLAUDE_DIRECTOR_MAX_TOKENS", 16000)
+# 單次導演生成的輸出上限（**含 adaptive thinking token**）；截斷時（stop_reason=max_tokens）調高此值。
+# tool use 下：thinking + 整份藍圖 tool 輸出都吃這個額度，16000 對 60 秒多片段藍圖偏緊（thinking 可能
+# 就把額度耗盡、來不及呼叫 tool → 回應全空），故預設提到 32000；仍不夠可再以 env 調高（注意勿超過模型上限）。
+CLAUDE_DIRECTOR_MAX_TOKENS = _read_int_env("CLAUDE_DIRECTOR_MAX_TOKENS", 32000)
 # Claude 導演是否走 tool use（input_schema + 回 parsed dict，根除自由文字手寫 JSON 的解析失敗）。
 # 預設開啟；設 false 則回退「自由文字 + schema_to_text」舊路徑（A/B 或排查 tool use 問題用）。
 DIRECTOR_USE_TOOL_USE = _read_bool_env("DIRECTOR_USE_TOOL_USE", True)
