@@ -1,0 +1,53 @@
+# ShortReels 評測 dataset 範例 spec（可直接試跑）
+#
+# 說明：
+# - theme 為中文，用於 prompt 生成（須與 eval/prompts/lexicon.py 的主題鍵一致才會套用專屬詞庫；
+#   未收錄的主題會自動用通用詞庫，仍切合主題）。
+# - keywords 為 API 搜尋關鍵字，建議用英文（Pexels/Pixabay 以英文檢索效果較佳）。
+# - target_total_seconds 為該組「秒數預算」：抓取會湊到預算 × candidate_multiplier 的候選池，
+#   策展（人工或自動 fallback）則挑到覆蓋預算為止。未填則繼承 default_target_total_seconds。
+# - target_clip_count 為選填的片段數上限/提示（主要驅動是秒數預算）。
+
+dataset_version: v1
+output_dir: eval/_build
+
+# 啟用的來源平台（需設定對應環境變數：PEXELS_API_KEY / PIXABAY_API_KEY）
+sources:
+  - pexels
+  - pixabay
+
+# 各組未指定 target_total_seconds 時的預設秒數預算（秒）
+default_target_total_seconds: 60
+# 候選池目標 = 秒數預算 × 此倍數（多抓留給策展挑選）
+candidate_multiplier: 2.0
+
+groups:
+  - group_id: beach_day
+    theme: 海邊一日遊
+    keywords: [beach, ocean waves, sunset beach, seaside]
+    target_total_seconds: 60
+    prompt_count: 6
+
+  - group_id: cafe
+    theme: 咖啡廳
+    keywords: [coffee shop, latte art, cafe interior, barista]
+    target_total_seconds: 60
+    prompt_count: 6
+
+  - group_id: city_walk
+    theme: 城市散步
+    keywords: [city street, urban walk, night city, crosswalk]
+    target_total_seconds: 60
+    prompt_count: 6
+
+  - group_id: food
+    theme: 美食
+    keywords: [food closeup, street food, cooking, dessert]
+    target_total_seconds: 60
+    prompt_count: 6
+
+  - group_id: pets
+    theme: 寵物
+    keywords: [cat, dog, puppy playing, kitten]
+    target_total_seconds: 60
+    prompt_count: 6
