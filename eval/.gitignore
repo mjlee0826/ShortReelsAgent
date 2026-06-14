@@ -1,2 +1,5 @@
 # 產物（下載素材、策展中間檔、凍結 dataset）不進版控
 _build/
+
+# 實際金鑰檔不進版控（只保留 .env.example）
+.env

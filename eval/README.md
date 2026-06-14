@@ -18,14 +18,22 @@
 poetry install          # 或 poetry add pyyaml requests（已執行過）
 ```
 
-## 環境變數（抓素材才需要）
+## 金鑰設定（抓素材才需要）
 
-```bash
-export PEXELS_API_KEY=你的_pexels_key
-export PIXABAY_API_KEY=你的_pixabay_key
-```
+兩種方式擇一（CLI 啟動時會自動載入 `.env`）：
 
-> `prompts` 與 `package` 階段**不需網路/金鑰**。
+- **`.env`（建議）**：把 `eval/.env.example` 複製成 `eval/.env` 填入金鑰即可。
+  ```bash
+  cp eval/.env.example eval/.env   # 然後編輯 eval/.env
+  ```
+  會自動載入 `eval/.env` 與專案根的 `.env`；`eval/.env` 已被 gitignore，不會進版控。
+- **export**：
+  ```bash
+  export PEXELS_API_KEY=你的_pexels_key
+  export PIXABAY_API_KEY=你的_pixabay_key
+  ```
+
+> 已 export 的環境變數優先於 `.env`。`prompts` 與 `package` 階段**不需網路/金鑰**。
 
 ## 設定檔
 

@@ -14,6 +14,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from .config_loader import load_dataset_spec
 from .curation.stage import CurateStage
 from .fetch.stage import FetchStage
@@ -35,6 +37,15 @@ SUBCOMMANDS: list[str] = [CMD_FETCH, CMD_CURATE, CMD_PROMPTS, CMD_PACKAGE, CMD_A
 # 結束代碼
 _EXIT_OK: int = 0
 _EXIT_ERROR: int = 1
+
+
+def _load_env_files() -> None:
+    """載入 .env 金鑰：先讀執行目錄（專案根）的 .env，再讀 eval/.env（與 .env.example 同處）。
+
+    已存在於環境（例如先前 export）的變數優先，不會被 .env 覆蓋。
+    """
+    load_dotenv()  # cwd / 專案根的 .env（若有）
+    load_dotenv(Path(__file__).resolve().parent / ".env")  # eval/.env
 
 
 def _build_stages(command: str) -> list[PipelineStage]:
@@ -70,6 +81,7 @@ def main(argv: list[str] | None = None) -> int:
     """CLI 進入點；回傳結束代碼。"""
     args = _parse_args(argv)
     configure_logging(verbose=args.verbose)
+    _load_env_files()  # 讓 PEXELS_API_KEY / PIXABAY_API_KEY 可由 .env 提供
 
     try:
         spec = load_dataset_spec(args.config)
