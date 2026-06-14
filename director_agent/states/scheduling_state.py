@@ -1,9 +1,8 @@
-import json
-import re
 from director_agent.states.base_state import BaseState
 from model.managers.director_provider import get_director_manager
 from prompt_manager.prompt_factory import PromptFactory
 from prompt_manager.task_mode import TaskMode
+from shared.json_utils import parse_json_lenient
 
 class SchedulingState(BaseState):
     
@@ -65,21 +64,13 @@ class SchedulingState(BaseState):
 
     def _parse_json_response(self, text: str):
         """
-        解析導演藍圖 JSON。
+        解析導演藍圖 JSON：委派共用容錯解析器 :func:`parse_json_lenient`（DRY）。
 
-        response_schema 已保證輸出為合法 JSON object(DirectorBlueprint 結構)，故優先直接
-        ``json.loads``；僅在極端情況(schema 未生效 / 被 markdown 包裹)才退回寬鬆的大括號抓取，
-        維持容錯不致整批失敗。
+        tool use / response_schema 路徑下 ``text`` 恆為合法 JSON、第一層即命中；僅 Claude 未走
+        tool use 的自由文字退路才需後續分層（去圍欄 / 擷取 / json-repair）兜底，避免單一漏逗號
+        讓整份草稿報廢（→ 空草稿 → ReflectionState 整輪重生）。失敗時保留原本的索引式除錯日誌。
         """
-        try:
-            return json.loads(text)
-        except (json.JSONDecodeError, TypeError):
-            pass
-        # fallback：schema 未生效時，寬鬆抓取第一個 JSON object
-        try:
-            match = re.search(r'\{.*\}', text, re.DOTALL)
-            if match:
-                return json.loads(match.group(0))
-        except Exception as e:
-            print(f"[JSON Parse Error] 草稿解析失敗: {e}")
-        return {}
+        result = parse_json_lenient(text, default={})
+        if not result:
+            print(f"[JSON Parse Error] 草稿解析失敗（已嘗試容錯）；文字前 120 字：{text[:120]!r}")
+        return result

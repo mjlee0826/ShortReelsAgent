@@ -50,6 +50,7 @@ __all__ = [
     "DIRECTOR_PROVIDER_GEMINI",
     "CLAUDE_DIRECTOR_MODEL",
     "CLAUDE_DIRECTOR_MAX_TOKENS",
+    "DIRECTOR_USE_TOOL_USE",
     # Qwen
     "QWEN_MODEL_ID",
     "QWEN_PROCESSOR_ID",
@@ -184,6 +185,9 @@ DIRECTOR_PROVIDER = os.getenv("DIRECTOR_PROVIDER", DIRECTOR_PROVIDER_CLAUDE).str
 CLAUDE_DIRECTOR_MODEL = os.getenv("CLAUDE_MODEL_DIRECTOR", "claude-opus-4-8")
 # 單次導演生成的輸出上限（含 adaptive thinking token）；截斷時（stop_reason=max_tokens）調高此值。
 CLAUDE_DIRECTOR_MAX_TOKENS = _read_int_env("CLAUDE_DIRECTOR_MAX_TOKENS", 16000)
+# Claude 導演是否走 tool use（input_schema + 回 parsed dict，根除自由文字手寫 JSON 的解析失敗）。
+# 預設開啟；設 false 則回退「自由文字 + schema_to_text」舊路徑（A/B 或排查 tool use 問題用）。
+DIRECTOR_USE_TOOL_USE = _read_bool_env("DIRECTOR_USE_TOOL_USE", True)
 
 
 # Qwen 量化策略（QWEN_QUANT_MODE）已於 config.media_processor_config 解析（含 env 覆寫），上方 import

@@ -28,9 +28,7 @@ BaseModelManager：執行緒安全的多 GPU Singleton 基底類別。
 同一槽位的多執行緒會序列化排隊（由 ``@synchronized_inference`` 透過 :meth:`inference_guard` 保證），
 跨槽位 / 跨 device 則允許併發（受 L2 GpuGate 策略控制）。
 """
-import re
 import gc
-import json
 import time
 import threading
 import functools
@@ -41,6 +39,7 @@ from typing import Callable, Iterator
 from config.media_processor_config import OOM_RETRY_MAX_ATTEMPTS, OOM_RETRY_BACKOFF_SEC
 from model.infra.gpu_gate import GpuGate, BinaryGate, NO_PRIORITY
 from model.infra.resource_wait_clock import ResourceWaitClock
+from shared.json_utils import parse_json_lenient
 
 
 # 預設槽位 id：呼叫端未指定時用此值，向後相容既有「一卡一 instance」配置
@@ -371,22 +370,14 @@ class BaseModelManager(ABC):
 
     def _parse_json_output(self, text: str) -> dict:
         """
-        共用強健 JSON 解析器：
-        自動移除 Markdown 程式碼圍欄，再萃取第一個完整的 JSON 物件。
+        共用強健 JSON 解析器：委派 :func:`parse_json_lenient`（去圍欄 / 擷取 / json-repair 容錯，DRY）。
+
+        本地 Qwen 走自由文字輸出，偶有 markdown 圍欄、贅字或小語法錯；解析不出 JSON 物件時退回
+        領域 fallback（把整段文字當 caption），維持原行為、不讓單筆素材分析整批失敗。
         """
-        try:
-            cleaned = text.strip()
-            if "```json" in cleaned:
-                cleaned = cleaned.split("```json")[-1].split("```")[0].strip()
-            elif "```" in cleaned:
-                parts = cleaned.split("```")
-                cleaned = parts[1].strip() if len(parts) > 1 else cleaned
-
-            match = re.search(r'\{.*\}', cleaned, re.DOTALL)
-            if match:
-                return json.loads(match.group(0))
-
-            return {"caption": cleaned}
-        except Exception as e:
-            print(f"[JSON Parse Error] 解析失敗: {e}")
-            return {"caption": "Unknown action"}
+        parsed = parse_json_lenient(text, default=None)
+        if isinstance(parsed, dict):
+            return parsed
+        # 解析不出 JSON 物件 → 視整段文字為 caption（維持原領域 fallback）
+        caption = (text or "").strip() or "Unknown action"
+        return {"caption": caption}
