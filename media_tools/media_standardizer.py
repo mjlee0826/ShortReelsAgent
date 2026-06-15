@@ -6,8 +6,19 @@ from functools import partial
 
 from config.app_config import STANDARDIZED_MARKER
 from config.media_formats import HEIC_IMAGE_EXTENSIONS, TRANSCODE_VIDEO_EXTENSIONS
-from config.media_processor_config import STANDARDIZE_MAX_LONG_SIDE, STANDARDIZE_MAX_WORKERS
+from config.media_processor_config import (
+    STANDARDIZE_MAX_LONG_SIDE,
+    STANDARDIZE_MAX_WORKERS,
+    STANDARDIZE_USE_NVENC,
+)
 from media_tools.ffmpeg_adapter import FFmpegAdapter
+from media_tools.video_encode_strategy import (
+    NvencEncodeStrategy,
+    VideoEncodeStrategy,
+    VideoFilterSpec,
+    X264EncodeStrategy,
+    common_output_args,
+)
 
 # 一律轉檔的視訊容器副檔名（非 .mp4：含 iPhone .mov HEVC 與其他非網頁友善容器）／HEIC 圖片副檔名
 # 改由 config.media_formats 提供單一來源（asset_repository 顯示層隱藏未標準化原始檔時共用同一份）
@@ -48,6 +59,25 @@ class MediaStandardizer:
         # 定義支援預覽的副檔名
         self.web_safe_video_ext = ".mp4"
         self.web_safe_image_ext = ".jpg"
+        # 影片編碼後端的嘗試順序（主後端 + 可選回退）：依設定挑選一次，全程共用
+        self._encode_strategies = self._select_encode_strategies()
+
+    def _select_encode_strategies(self) -> list[VideoEncodeStrategy]:
+        """
+        決定影片編碼後端的嘗試順序（Strategy 選擇 + 失敗回退鏈）。
+
+        預設只用 CPU 的 libx264。設定 ``STANDARDIZE_USE_NVENC`` 且 ffmpeg 確實 build 了 h264_nvenc
+        時，改以 NVENC 為主、libx264 為回退——如此 NVENC 執行期失敗（session 滿／驅動問題）時，
+        ``_convert_to_h264`` 仍能逐檔退回 CPU，不致整批失敗。設了旗標卻無 h264_nvenc 則印警告後走 CPU。
+        """
+        x264 = X264EncodeStrategy()
+        if not STANDARDIZE_USE_NVENC:
+            return [x264]
+        if self.ffmpeg.supports_encoder(NvencEncodeStrategy.ENCODER_NAME):
+            print("🚀 [Standardizer] 啟用 NVENC 硬體編碼（失敗自動回退 libx264）")
+            return [NvencEncodeStrategy(), x264]
+        print("⚠️ [Standardizer] 已設定 STANDARDIZE_USE_NVENC，但此 ffmpeg 無 h264_nvenc，回退 libx264")
+        return [x264]
 
     def standardize_folder(self, input_dir: str, output_dir: str):
         """
@@ -143,55 +173,29 @@ class MediaStandardizer:
             return bool(codec) and codec not in _WEB_SAFE_VIDEO_CODECS
         return False
 
-    def _build_video_filter(self, input_path: str) -> str:
+    def _is_hdr_source(self, input_path: str) -> bool:
         """
-        依來源色彩特性挑選 ffmpeg -vf 濾鏡鏈（Strategy：HDR 來源才做 tonemap，SDR/未標記走輕量縮放）。
+        來源是否為『真 HDR』（transfer 為 HLG/PQ，見 _HDR_TRANSFER_CHARACTERISTICS）。
 
-        共同尾段（兩條路徑都會做）：
-          - scale=L:L:decrease:divisible_by=2：把長邊壓到 STANDARDIZE_MAX_LONG_SIDE（4K→1080p box），
-            `decrease` 只縮不放，原本就 ≤ 上限的素材保留原樣；順便讓 H.264 profile 降階，避免 Remotion 在
-            4K 高碼率下頻繁 seek 時 Chromium decoder 撐不住而觸發 PIPELINE_ERROR_DISCONNECTED。
-            長邊上限與 _needs_video_standardize 的閘控門檻同源（STANDARDIZE_MAX_LONG_SIDE），避免漂移。
-          - format=yuv420p：最終降成 8-bit yuv420p。
-
-        色彩前段（兩條路徑的差異）：
-          - 真 HDR 來源（HLG/PQ，見 _HDR_TRANSFER_CHARACTERISTICS）：iPhone 12+ 預設拍 HEVC + HLG
-            (BT.2020) 10-bit HDR。若只把畫面降 8-bit，輸出 mp4 的 color atom 仍殘留 BT.2020/HLG，配
-            8-bit 像素成矛盾組合，Chromium decoder 會拋 PIPELINE_ERROR_DISCONNECTED。故走 zscale+tonemap
-            真正的 HDR→SDR 路徑（依賴 libzimg；colorspace 濾鏡不支援 HLG transfer）：
-              1. zscale t=linear:npl=100：HLG/PQ → 線性光，HDR 峰值校正到 SDR 100 nits
-              2. format=gbrpf32le：切到浮點 GBR，tonemap 必要的中介格式
-              3. zscale p=bt709：色域從 BT.2020 換到 BT.709
-              4. tonemap=hable:desat=0：用 Hable 演算法把高光壓進 SDR 範圍，不自動降飽和
-              5. zscale t=bt709:m=bt709:r=tv：套 BT.709 transfer/matrix/TV-range
-          - 其餘來源（bt709 等 SDR，或 color_transfer 讀回空字串的『未標記』來源，例如純 SDR 的 4K .mp4）：
-            **不可**走 zscale t=linear——untagged 來源無輸入 transfer 可錨定，zscale 會以
-            "no path between colorspaces" (code 3074) 失敗。直接縮放即可，輸出端的
-            -color_primaries/-color_trc/-colorspace bt709（見 _convert_to_h264）會補上正確的 color atom；
-            同時省去 SDR 來源無謂的浮點色域往返與其品質損失。
+        供編碼策略決定濾鏡走 HDR→SDR 的 zscale+tonemap 還是輕量縮放。讀不到 transfer（未標記色彩，
+        如純 SDR 的 4K .mp4）一律視為非 HDR：untagged 來源若誤走 zscale t=linear，會因無輸入 transfer
+        可錨定而以 "no path between colorspaces" (code 3074) 對每一影格失敗。
         """
-        scale_and_pack = (
-            f"scale={STANDARDIZE_MAX_LONG_SIDE}:{STANDARDIZE_MAX_LONG_SIDE}"
-            ":force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p"
-        )
-        transfer = self.ffmpeg.probe_color_transfer(input_path)
-        if transfer in _HDR_TRANSFER_CHARACTERISTICS:
-            return (
-                "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,"
-                "tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,"
-                f"{scale_and_pack}"
-            )
-        return scale_and_pack
+        return self.ffmpeg.probe_color_transfer(input_path) in _HDR_TRANSFER_CHARACTERISTICS
 
     def _convert_to_h264(self, input_path: str, output_path: str) -> bool:
         """
         呼叫 FFmpeg 進行標準 H.264/AAC 轉檔（Web-safe + Remotion 友善 + HDR→SDR 正規化）。
 
-        原子寫入：ffmpeg 先寫到同目錄下的「非媒體副檔名」中途檔，全部寫完（含 +faststart 的
-        moov 搬移 pass）後才以 ``os.replace`` 原子改名成最終 ``_std.mp4``。如此 reader（縮圖 /
-        asset-detail / 瀏覽器 <video>）只會看到「尚未出現」或「完整檔」，不會 probe 到半成品而噴
-        ``moov atom not found``；轉檔中途崩潰（如共用機 OOM）也只留下可被覆蓋的中途檔，不會污染
-        最終身分而被 idempotent 檢查永久跳過。中途檔放同一目錄確保 rename 在同一檔案系統內為原子操作。
+        編碼後端走 Strategy（libx264 / NVENC，見 _select_encode_strategies）：依序嘗試後端鏈，任一
+        成功即原子改名收工；NVENC 執行期失敗（session 滿／驅動問題）時自動回退 libx264，逐檔降級而
+        不整批失敗。回退重試沿用同一中途檔（ffmpeg ``-y`` 覆寫前次半成品）。
+
+        原子寫入：ffmpeg 先寫到同目錄下的「非媒體副檔名」中途檔，全部寫完（含 +faststart 的 moov 搬移
+        pass）後才以 ``os.replace`` 原子改名成最終 ``_std.mp4``。如此 reader（縮圖 / asset-detail /
+        瀏覽器 <video>）只會看到「尚未出現」或「完整檔」，不會 probe 到半成品而噴 ``moov atom not
+        found``；轉檔中途崩潰（如共用機 OOM）也只留下可被覆蓋的中途檔，不會污染最終身分而被 idempotent
+        檢查永久跳過。中途檔放同一目錄確保 rename 在同一檔案系統內為原子操作。
         """
         output_dir = os.path.dirname(output_path)
         # 中途檔：非媒體副檔名 + 不含 {raw_stem}_std 標記，確保轉檔進行中既不被列入素材清單，
@@ -200,39 +204,49 @@ class MediaStandardizer:
             prefix=".tmp_convert_", suffix=_TEMP_OUTPUT_SUFFIX, dir=output_dir
         )
         os.close(fd)  # ffmpeg 會自行開檔寫入（-y 覆蓋 mkstemp 建立的空檔），此處只需檔名
+
+        # 來源色彩特性只 probe 一次，供後端鏈共用（HDR→走 tonemap、SDR/未標記→走輕量縮放）
+        spec = VideoFilterSpec(
+            is_hdr=self._is_hdr_source(input_path),
+            max_long_side=STANDARDIZE_MAX_LONG_SIDE,
+        )
+        # 依後端鏈逐一嘗試：主後端成功即收工；NVENC 失敗則回退下一後端（libx264）
+        for strategy in self._encode_strategies:
+            if self._run_ffmpeg_convert(strategy, spec, input_path, temp_path):
+                # 轉檔完整成功才原子改名成最終身分：同目錄 rename 為原子操作，reader 不會看到半成品
+                os.replace(temp_path, output_path)
+                return True
+
+        # 所有後端皆失敗：清掉中途檔，避免殘留垃圾；最終 _std.mp4 從未出現，idempotent 重跑時會自動重轉
+        self._remove_quietly(temp_path)
+        return False
+
+    def _run_ffmpeg_convert(
+        self,
+        strategy: VideoEncodeStrategy,
+        spec: VideoFilterSpec,
+        input_path: str,
+        temp_path: str,
+    ) -> bool:
+        """
+        以指定編碼後端執行單次 ffmpeg 轉檔，成功回 True、失敗回 False（不拋例外，供回退鏈判斷）。
+
+        指令由策略組裝：輸入端硬解旗標（``-i`` 前）+ ``-vf`` 濾鏡鏈 + 視訊編碼參數，再接與後端無關的
+        共同輸出參數（CFR、BT.709 標記、AAC、faststart、mp4 muxer，見 common_output_args）。失敗（含
+        NVENC 不可用／session 滿）僅印警告且**不**清中途檔——回退後端會以 ``-y`` 覆寫同一檔，全部失敗
+        才由 _convert_to_h264 統一清理。
+        """
+        args = (
+            ["ffmpeg", "-y", *strategy.input_args(spec), "-i", input_path,
+             "-vf", strategy.build_video_filter(spec)]
+            + strategy.codec_args()
+            + common_output_args(_MP4_MUXER, temp_path)
+        )
         try:
-            subprocess.run(
-                [
-                    "ffmpeg", "-y", "-i", input_path,
-                    # 色彩處理 + 解析度上限：濾鏡鏈依『來源是否為真 HDR』分流（見 _build_video_filter）。
-                    # HDR 來源走 zscale+tonemap 做 HDR→SDR；SDR/未標記來源走輕量縮放，避免 untagged 來源
-                    # 因 zscale 找不到輸入 transfer 而以 "no path between colorspaces" 失敗。
-                    "-vf", self._build_video_filter(input_path),
-                    "-c:v", "libx264",
-                    # CFR：把 iPhone 慣用的 VFR 拉成 CFR，避免 Remotion 因時序錯亂解碼失敗
-                    # （沿用 source 平均 FPS，不硬寫數值，60 fps 慢動作素材也不會被砍掉一半畫面）
-                    "-fps_mode", "cfr",
-                    # 強制輸出端 metadata 也標 BT.709，搭配上面的濾鏡，確保色彩空間從像素到 atom 完全一致
-                    "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709",
-                    "-c:a", "aac", "-b:a", "128k",
-                    # +faststart：把 moov atom 移到檔頭，Remotion 透過 Chromium seek 中段時
-                    # 才不會因為先抓不到索引而觸發 PIPELINE_ERROR_DISCONNECTED
-                    "-movflags", "+faststart",
-                    # 中途檔副檔名非 .mp4，需顯式指定 mp4 muxer，否則 ffmpeg 無法從副檔名推斷容器
-                    "-f", _MP4_MUXER,
-                    temp_path
-                ],
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE
-            )
-            # 轉檔完整成功才原子改名成最終身分：同目錄 rename 為原子操作，reader 不會看到半成品
-            os.replace(temp_path, output_path)
+            subprocess.run(args, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             return True
         except subprocess.CalledProcessError as e:
-            # 失敗時清掉中途檔，避免殘留垃圾；最終 _std.mp4 從未出現，idempotent 重跑時會自動重轉
-            self._remove_quietly(temp_path)
-            print(f"   ❌ 影片轉檔失敗: {e.stderr.decode(errors='replace')}")
+            print(f"   ⚠️ 影片轉檔失敗（{strategy.name}）: {e.stderr.decode(errors='replace')}")
             return False
 
     @staticmethod

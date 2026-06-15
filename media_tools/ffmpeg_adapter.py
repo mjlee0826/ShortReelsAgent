@@ -26,6 +26,35 @@ class FFmpegAdapter:
     所有 subprocess 呼叫集中在此，其他模組不直接執行 ffmpeg 指令。
     """
 
+    def __init__(self) -> None:
+        """初始化配接器；編碼器支援度查詢結果以此快取，避免每檔重複 spawn ffmpeg。"""
+        # 編碼器名稱 -> 是否被目前 ffmpeg build 支援（supports_encoder 的記憶化快取）
+        self._encoder_support_cache: dict[str, bool] = {}
+
+    def supports_encoder(self, encoder_name: str) -> bool:
+        """
+        檢查目前 ffmpeg build 是否含指定編碼器（如 'h264_nvenc'）。
+
+        以 ``ffmpeg -encoders`` 輸出做名稱比對，供 MediaStandardizer 決定能否啟用 NVENC 硬體編碼。
+        查詢結果以實例快取（記憶化），避免每檔重複 spawn ffmpeg。無 ffmpeg／查詢失敗時回 False
+        （安全降級為「不支援」，呼叫端自動改用 CPU 編碼）。
+        """
+        if encoder_name in self._encoder_support_cache:
+            return self._encoder_support_cache[encoder_name]
+        supported = False
+        try:
+            result = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-encoders"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+            if result.returncode == 0:
+                supported = encoder_name in result.stdout.decode(errors="replace")
+        except OSError:
+            supported = False
+        self._encoder_support_cache[encoder_name] = supported
+        return supported
+
     def _run(
         self,
         args: list[str],

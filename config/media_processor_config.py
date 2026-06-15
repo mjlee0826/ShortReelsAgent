@@ -33,16 +33,39 @@ INFERENCE_MAX_SHORT_SIDE = 720
 # 與 .mp4 是否需轉檔的閘控門檻（已合規的 1080p 不重編碼，避免世代品質損失與上傳延遲）。
 STANDARDIZE_MAX_LONG_SIDE = 1920
 
+# ── 影片轉檔編碼參數 (VideoEncodeStrategy) ────────────────────────────────────
+# 標準化輸出是「給 Remotion 吃的中間檔」而非最終交付，畫質用 veryfast 已綽綽有餘；相較預設的
+# medium 約快 3–5×，代價僅檔案大 ~10–20%（中間檔放本地，體積無所謂）。CRF 走固定品質（非固定
+# 碼率），讓簡單畫面自動省碼率。兩者皆具名常數，避免散落 magic number。
+STANDARDIZE_X264_PRESET = "veryfast"
+STANDARDIZE_X264_CRF = "23"
+# 每一支 libx264 編碼程序的執行緒上限：搭配 STANDARDIZE_MAX_WORKERS 控制總緒數，避免在 40 緒/80 緒
+# 的雙路 Xeon 上 worker × libx264 自動多緒互相超賣（threads × workers ≲ 實體緒數較理想）。
+STANDARDIZE_X264_THREADS = "8"
+# 輸出音訊碼率（AAC）：人聲/環境音的標準化中間檔 128k 已足夠透明。
+STANDARDIZE_AUDIO_BITRATE = "128k"
+
+# ── NVENC 硬體編碼（選用後路；VideoEncodeStrategy）────────────────────────────
+# 預設關閉、走 CPU（libx264）：標準化發生在攝取階段，此時 40 核 CPU 多半閒置，而 GPU 才是 ML
+# 推論的稀缺資源；CPU 路徑也最簡單可靠。遇超大批 4K、CPU 扛不住時，設 STANDARDIZE_USE_NVENC=1
+# 改用 RTX 30 系的 NVENC ASIC（獨立編碼晶片，幾乎不吃 CUDA 算力/VRAM，不與推論互搶）。
+# 若 ffmpeg 未 build h264_nvenc，或 NVENC 執行期失敗（session 滿/驅動問題），自動回退 libx264。
+STANDARDIZE_USE_NVENC = os.environ.get("STANDARDIZE_USE_NVENC", "0").strip().lower() in ("1", "true", "yes")
+# h264_nvenc 的 preset（p1 最快～p7 最慢；p4 為速度/品質的均衡點）與固定品質值（-cq，語意近 CRF）。
+STANDARDIZE_NVENC_PRESET = "p4"
+STANDARDIZE_NVENC_CQ = "23"
+
 # ── 音訊暫存檔驗證 (AbstractVideoProcessor) ──────────────────────────────────
 # ffmpeg 對靜音影片輸出幾乎空的 wav，小於此 bytes 視為無效音訊
 MINIMUM_AUDIO_FILE_BYTES = 1000
 
 # ── 素材標準化並行度 (MediaStandardizer.standardize_folder) ─────────────────────
 # 標準化的重活都在 ffmpeg / PIL 子行程（subprocess 阻塞時釋放 GIL，故用 thread 即可真正並行，
-# 不需 multiprocess 的 pickle / spawn 開銷）。並行度刻意設「上限」避免共用機（Leibniz）CPU/RAM
-# 超賣：libx264 單檔本就吃滿多核，過高的並行只會互搶核心 + 墊高記憶體峰值。預設保守給 4，
+# 不需 multiprocess 的 pickle / spawn 開銷）。並行度設「上限」避免 CPU/RAM 超賣。本機為雙路
+# Xeon 4316（40 實體核 / 80 緒），搭配每檔 STANDARDIZE_X264_THREADS=8，預設 8 workers ≈ 64 緒，
+# 仍留餘裕（threads × workers ≲ 實體緒數）；舊預設 4 對 40 核嚴重低估、僅用約 1/10 CPU。
 # 可由 env STANDARDIZE_MAX_WORKERS 覆寫；壞字串視為未設定，回退預設值以保證啟動穩定。
-_STANDARDIZE_MAX_WORKERS_DEFAULT = 4
+_STANDARDIZE_MAX_WORKERS_DEFAULT = 8
 try:
     STANDARDIZE_MAX_WORKERS = max(
         1, int(os.environ.get("STANDARDIZE_MAX_WORKERS", _STANDARDIZE_MAX_WORKERS_DEFAULT))
