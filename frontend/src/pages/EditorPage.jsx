@@ -1,8 +1,7 @@
 import React, { useEffect, useLayoutEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { FaSpinner } from 'react-icons/fa';
 import AppHeader from '../components/AppHeader/AppHeader';
-import SetupView from '../components/Editor/SetupView';
 import Workbench from '../components/Editor/Workbench';
 import useBlueprintStore from '../store/useBlueprintStore';
 import useProjectStore from '../store/useProjectStore';
@@ -13,22 +12,26 @@ import { apiService } from '../services/api.service';
 const AUTOSAVE_DEBOUNCE_MS = 1000;
 
 /**
- * EditorPage：編輯器頁的兩階段殼層。
+ * EditorPage：編輯器頁殼層（單一工作台版）。
  *
- * 依 blueprint 是否存在條件渲染（不新增路由）：
+ * 不再分「生成前 / 生成後」兩頁——一律渲染 Workbench（未生成時為等待劇本的空台、Pilot 對話預設開著，
+ * 初次生成直接於對話框下指令）：
  *   - 載入既有藍圖中 → 載入動畫
- *   - 尚未生成 → SetupView（聚焦的生成前畫面）
- *   - 已有藍圖 → Workbench（AI 粗剪 + 人工精修工作台）
- * 進入時自動向後端讀回上次生成的藍圖；另負責「素材未分析」的守門跳轉。
+ *   - 其餘 → Workbench（AI 粗剪 + 人工精修工作台）
+ * 專案身分改由網址 /projects/:projectId/editor 帶入（比照素材頁），進入時自動向後端讀回上次生成的
+ * 藍圖；另負責「素材未分析」的守門跳轉。
  */
 export default function EditorPage() {
+  const { projectId } = useParams();
   const navigate = useNavigate();
   const blueprint = useBlueprintStore((s) => s.blueprint);
   const isLoadingBlueprint = useBlueprintStore((s) => s.isLoadingBlueprint);
   const loadSavedBlueprint = useBlueprintStore((s) => s.loadSavedBlueprint);
   const redirectToAssetsProject = useBlueprintStore((s) => s.redirectToAssetsProject);
   const clearAssetsRedirect = useBlueprintStore((s) => s.clearAssetsRedirect);
-  const currentProjectName = useProjectStore((s) => s.currentProject?.name);
+  const currentProject = useProjectStore((s) => s.currentProject);
+  const currentProjectName = currentProject?.name;
+  const selectProject = useProjectStore((s) => s.selectProject);
   const isProcessing = useBlueprintStore((s) => s.isProcessing);
   const persistBlueprint = useBlueprintStore((s) => s.persistBlueprint);
   // 進行中生成的 WS 訂閱狀態 / 回呼（Observer Pattern 前端側）
@@ -38,8 +41,17 @@ export default function EditorPage() {
   const attachGeneration = useBlueprintStore((s) => s.attachGeneration);
   const connect = useProgressSocket(onGenerationEvent, onGenerationClosed);
 
+  // 由網址參數同步當前專案：直接重整 /projects/:projectId/editor 時 store 尚未選定，
+  // 以 projectId 補選（display_name 後備為 projectId，比照素材頁）。由總覽頁正常進入時 name 已相符、
+  // 不會覆蓋既有 display_name；selectProject 內會重置 blueprint store，故僅在不相符時觸發避免誤清。
+  useEffect(() => {
+    if (projectId && currentProjectName !== projectId) {
+      selectProject({ name: projectId, display_name: projectId });
+    }
+  }, [projectId, currentProjectName, selectProject]);
+
   // 進入編輯器（或切換專案）時，若記憶體無 blueprint 就向後端讀回上次生成的結果。
-  // 用 useLayoutEffect：在瀏覽器繪製前就把 isLoadingBlueprint 設起，避免閃過 SetupView。
+  // 用 useLayoutEffect：在瀏覽器繪製前就把 isLoadingBlueprint 設起，避免閃過空台工作台。
   // 依賴含 blueprint：可化解 selectProject 非同步 reset 與本效果的競態（reset 後 blueprint 變 null 會再觸發）。
   useLayoutEffect(() => {
     if (currentProjectName && !blueprint) loadSavedBlueprint(currentProjectName);
@@ -89,10 +101,8 @@ export default function EditorPage() {
           <FaSpinner className="animate-spin text-accent text-5xl mb-4" />
           <p className="text-ink-muted text-sm tracking-wide">正在載入專案影片…</p>
         </div>
-      ) : blueprint ? (
-        <Workbench />
       ) : (
-        <SetupView />
+        <Workbench />
       )}
     </div>
   );

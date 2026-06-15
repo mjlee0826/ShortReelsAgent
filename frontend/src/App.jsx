@@ -58,7 +58,7 @@ export default function App() {
         <Route path="/callback" element={<CallbackPage />} />
         <Route path="/"         element={<AuthGuard><ProjectDashboard /></AuthGuard>} />
         <Route path="/projects/:projectId/assets" element={<AuthGuard><AssetListPage /></AuthGuard>} />
-        <Route path="/editor"   element={<AuthGuard><EditorPage /></AuthGuard>} />
+        <Route path="/projects/:projectId/editor" element={<AuthGuard><EditorPage /></AuthGuard>} />
         <Route path="/settings" element={<AuthGuard><SettingsPage /></AuthGuard>} />
         {/* 未知路徑一律導回首頁 */}
         <Route path="*"         element={<Navigate to="/" replace />} />

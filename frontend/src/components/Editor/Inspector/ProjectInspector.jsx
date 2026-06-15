@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import useBlueprintStore from '../../../store/useBlueprintStore';
 import { InspectorSection, ReadonlyRow, ToggleRow } from './controls';
 import { Button } from '../../ui';
-import { FaSyncAlt, FaCog } from 'react-icons/fa';
+import { FaSyncAlt, FaCog, FaMagic } from 'react-icons/fa';
 
 // 輸出規格（與 VideoPlayer 的 composition 尺寸一致，固定值）
 const OUTPUT_RESOLUTION = '1080 × 1920';
@@ -24,6 +24,7 @@ const DEFAULT_AUTO_PUNCH = true;
  */
 export default function ProjectInspector({ onRequestRegenerate }) {
   const global = useBlueprintStore((s) => s.blueprint?.global_settings);
+  const hasBlueprint = useBlueprintStore((s) => !!s.blueprint);
   const updateGlobalSettingField = useBlueprintStore((s) => s.updateGlobalSettingField);
   const navigate = useNavigate();
 
@@ -45,29 +46,41 @@ export default function ProjectInspector({ onRequestRegenerate }) {
       </InspectorSection>
 
       {/* 運鏡：兩個 render-time 視覺開關，即時切換、預覽立即重算（免重新生成）。
-          卡點從屬於自動運鏡——運鏡關閉時整支無逐幀運動，卡點無從疊加，故置灰不可點。 */}
-      <InspectorSection title="運鏡">
-        <ToggleRow
-          label="啟用自動運鏡"
-          checked={autoMotion}
-          onChange={(v) => updateGlobalSettingField('auto_motion', v)}
-          hint="Ken Burns 推近 / 拉遠 / 平移，朝主體緩慢運鏡"
-        />
-        <ToggleRow
-          label="節拍卡點 Punch"
-          checked={autoMotion && autoPunch}
-          disabled={!autoMotion}
-          onChange={(v) => updateGlobalSettingField('auto_punch', v)}
-          hint={autoMotion ? '踩配樂重拍的瞬間放大脈衝（需配樂含節拍）' : '需先啟用自動運鏡'}
-        />
-      </InspectorSection>
+          卡點從屬於自動運鏡——運鏡關閉時整支無逐幀運動，卡點無從疊加，故置灰不可點。
+          尚無藍圖（空台）時無影片可套用，故整段隱藏，避免顯示按了沒反應的開關。 */}
+      {hasBlueprint && (
+        <InspectorSection title="運鏡">
+          <ToggleRow
+            label="啟用自動運鏡"
+            checked={autoMotion}
+            onChange={(v) => updateGlobalSettingField('auto_motion', v)}
+            hint="Ken Burns 推近 / 拉遠 / 平移，朝主體緩慢運鏡"
+          />
+          <ToggleRow
+            label="節拍卡點 Punch"
+            checked={autoMotion && autoPunch}
+            disabled={!autoMotion}
+            onChange={(v) => updateGlobalSettingField('auto_punch', v)}
+            hint={autoMotion ? '踩配樂重拍的瞬間放大脈衝（需配樂含節拍）' : '需先啟用自動運鏡'}
+          />
+        </InspectorSection>
+      )}
 
+      {/* 依藍圖狀態切換：空台時為「初次生成」主行動、已有藍圖時為「重新生成 / 變更設定」 */}
       <div className="p-5">
-        <Button variant="secondary" size="md" fullWidth leftIcon={<FaSyncAlt size={12} />} onClick={onRequestRegenerate}>
-          重新生成 / 變更設定
+        <Button
+          variant={hasBlueprint ? 'secondary' : 'primary'}
+          size="md"
+          fullWidth
+          leftIcon={hasBlueprint ? <FaSyncAlt size={12} /> : <FaMagic size={12} />}
+          onClick={onRequestRegenerate}
+        >
+          {hasBlueprint ? '重新生成 / 變更設定' : '初次生成影片'}
         </Button>
         <p className="text-xs text-ink-faint mt-2.5 leading-relaxed">
-          字幕 / 濾鏡總開關、配樂策略與導演指令的變更需 AI 重新生成。
+          {hasBlueprint
+            ? '字幕 / 濾鏡總開關、配樂策略與導演指令的變更需 AI 重新生成。'
+            : '設定範本、配樂與導演指令後，讓 AI 導演剪出第一版短影音。'}
         </p>
       </div>
 

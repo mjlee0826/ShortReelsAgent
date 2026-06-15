@@ -73,7 +73,7 @@ const useProjectStore = create((set, get) => ({
     }
   },
 
-  // 選定專案（由元件負責導向 /editor）；同時清除 blueprint store 防止顯示舊資料
+  // 選定專案（由元件負責導向 /projects/:projectId/editor）；同時清除 blueprint store 防止顯示舊資料
   selectProject: (project) => {
     // 動態引入避免循環依賴
     import('./useBlueprintStore').then(({ default: useBlueprintStore }) => {

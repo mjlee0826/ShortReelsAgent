@@ -14,8 +14,8 @@ const PROMPT_ROWS = 5;
  * GenerationForm：AI 導演生成 / 重新生成的共用表單（DRY）。
  *
  * 收集導演指令、範本網址、配樂策略與字幕 / 濾鏡開關後送出生成。
- * 同時供「初始生成」(SetupView) 與「重新生成」(RegeneratePanel) 使用；
- * 兩者皆屬「重新生成」邊界（需 AI 重新推理），故統一呼叫 submitPrompt(false)。
+ * 屬「重新生成」邊界（需 AI 重新推理），統一呼叫 submitPrompt(false)；目前由 RegeneratePanel 使用
+ *（初始生成已改由工作台的 Pilot 對話直接下指令，不再經本表單）。
  *
  * @param {string} submitLabel 送出按鈕文字
  * @param {boolean} showProject 是否顯示當前專案唯讀列（初始生成顯示、重新生成可省）

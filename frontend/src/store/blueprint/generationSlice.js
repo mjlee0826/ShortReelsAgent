@@ -42,7 +42,7 @@ export function createGenerationSlice(set, get) {
     generationJobId: null,
     // 目前生成階段標籤（由 WS STAGE_* 事件即時更新，供進度面板顯示「下載中 / 聽寫中…」）；閒置為 null
     generationStage: null,
-    // 重新進入編輯器時，向後端讀回既有藍圖的載入中旗標（避免閃過 SetupView）
+    // 重新進入編輯器時，向後端讀回既有藍圖的載入中旗標（避免閃過空台工作台）
     isLoadingBlueprint: false,
     errorMsg: '',
     // 生成因素材未分析失敗時設為該專案名稱：EditorPage 據此跳轉素材頁，跳轉後清空
@@ -60,7 +60,7 @@ export function createGenerationSlice(set, get) {
     /**
      * 重新進入編輯器時，向後端讀回該專案先前生成的藍圖。
      * 已有 blueprint（記憶體仍在 / 正在生成）或正在載入時略過，避免覆蓋當前編輯。
-     * 後端 404（尚未生成過）屬正常情況，靜默維持 SetupView。
+     * 後端 404（尚未生成過）屬正常情況，靜默維持空台工作台。
      * @param {string} folderName 專案資料夾名稱
      */
     loadSavedBlueprint: async (folderName) => {
@@ -81,7 +81,7 @@ export function createGenerationSlice(set, get) {
           isLoadingBlueprint: false,
         });
       } catch (error) {
-        // 404 = 尚未生成過，保持 SetupView；其餘錯誤留下可見軌跡
+        // 404 = 尚未生成過，保持空台工作台；其餘錯誤留下可見軌跡
         if (error.response?.status !== 404) {
           console.warn('[Editor] 載入既有藍圖失敗：', extractErrorMessage(error));
         }
@@ -312,7 +312,7 @@ export function createGenerationSlice(set, get) {
           }));
         }
       } catch {
-        // 尚未落地 / 404：維持現狀（SetupView），不報錯
+        // 尚未落地 / 404：維持現狀（空台工作台），不報錯
       }
     },
   };

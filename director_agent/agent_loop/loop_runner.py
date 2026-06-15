@@ -18,23 +18,47 @@ from director_agent.agent_loop.tools.tool_registry import ToolRegistry
 # 達步數 / 重試上限仍無有效藍圖時，no-tool-use 回合用此 nudge 要模型收斂提交
 _SUBMIT_NUDGE = "請依工作流完成並呼叫 submit_blueprint 提交藍圖。"
 
+# 送回 API 當 input 時，各 block 型別合法的 input 欄位白名單；其餘（如 text block 的
+# parsed_output 等 output-only 欄位）一律剔除，否則 API 回 400 Extra inputs are not permitted。
+_INPUT_BLOCK_FIELDS = {
+    "text": ("type", "text", "citations"),
+    "thinking": ("type", "thinking", "signature"),
+    "redacted_thinking": ("type", "data"),
+    "tool_use": ("type", "id", "name", "input"),
+}
+
+
+def _block_to_input_dict(block) -> dict:
+    """
+    把一個 assistant content block 轉成『可當 API input 重送』的乾淨 dict。
+
+    Anthropic 回應的 block（model_dump 後）會帶 output-only 欄位（如 text block 的 ``parsed_output``），
+    這些欄位不在 input schema 內，原樣回送會 400 ``Extra inputs are not permitted``。故依 block 型別只
+    保留白名單欄位（值為 None 者一併剔除）；thinking 的 ``signature`` 在白名單內，續傳不會 400。
+    """
+    raw = block.model_dump() if hasattr(block, "model_dump") else dict(block)
+    allowed = _INPUT_BLOCK_FIELDS.get(raw.get("type"))
+    if allowed is None:
+        return raw  # 未知型別：保守原樣帶過
+    return {key: raw[key] for key in allowed if raw.get(key) is not None}
+
 
 def _serialize_messages(messages: list) -> list:
     """
     把對話 messages 轉成可 JSON 落地的形式（B2 session 持久化用）。
 
-    assistant 回合的 content 是 Anthropic block 物件（thinking / tool_use / text），以 ``model_dump``
-    轉 dict（thinking 的 signature 等一併保留，續傳必備）；user 回合的 content（字串 / tool_result /
+    assistant 回合的 content 是 Anthropic block 物件（thinking / tool_use / text）或 _loop 已轉好的
+    input dict，一律過 :func:`_block_to_input_dict` 收斂成乾淨 input dict（剔除 parsed_output 等
+    output-only 欄位、保留 thinking 的 signature）；user 回合的 content（字串 / tool_result /
     image dict）本就可序列化，原樣帶過。
     """
     serialized = []
     for message in messages:
         content = message["content"]
         if isinstance(content, list):
-            content = [
-                block.model_dump() if hasattr(block, "model_dump") else block
-                for block in content
-            ]
+            # list 內皆為 block 物件 / input dict（assistant）或 tool_result / image dict（user）；
+            # 一律過 _block_to_input_dict：白名單外型別（tool_result / image）原樣回傳，idempotent。
+            content = [_block_to_input_dict(block) for block in content]
         serialized.append({"role": message["role"], "content": content})
     return serialized
 
@@ -101,8 +125,12 @@ class DirectorAgentLoop:
                 tools=self.registry.anthropic_tools(),
                 on_thinking_delta=on_thinking,
             )
-            # 原樣 append 完整 assistant content（含 thinking + tool_use，續傳必備）
-            messages.append({"role": "assistant", "content": response.content})
+            # append 完整 assistant content（含 thinking + tool_use，續傳必備），但先收斂成乾淨 input
+            # dict：剔除 parsed_output 等 output-only 欄位，否則回送 API 會 400（live 多輪與 resume 一致）
+            messages.append({
+                "role": "assistant",
+                "content": [_block_to_input_dict(b) for b in response.content],
+            })
 
             tool_uses = [b for b in response.content if getattr(b, "type", "") == "tool_use"]
             if not tool_uses:

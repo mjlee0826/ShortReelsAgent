@@ -16,8 +16,8 @@ export const MUSIC_STRATEGY = {
 /** 「不加配樂」策略值（呼叫端常需單獨比對是否顯示上傳欄位）。 */
 export const MUSIC_NONE = MUSIC_STRATEGY.NONE;
 
-/** 預設配樂策略。 */
-export const MUSIC_STRATEGY_DEFAULT = MUSIC_STRATEGY.SEARCH_COPYRIGHT;
+/** 預設配樂策略：免費音源（Jamendo CC 授權），避免發布平台因版權靜音 / 下架。 */
+export const MUSIC_STRATEGY_DEFAULT = MUSIC_STRATEGY.SEARCH_FREE;
 
 /** 允許上傳的自訂 BGM 副檔名（給 <input accept>）。 */
 export const ALLOWED_AUDIO_ACCEPT = '.mp3,.wav,.m4a,.aac,.flac,.ogg';

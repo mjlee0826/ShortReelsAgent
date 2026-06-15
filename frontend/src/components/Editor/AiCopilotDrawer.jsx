@@ -11,13 +11,14 @@ const DRAWER_WIDTH = 'w-[440px]';
  *
  * 由工作台工具列「💬 AI」切換，從右側滑入、覆蓋於編輯區之上；收合時移出畫面並停用互動。
  * 對話式微調仍走 submitPrompt(true)（重新生成邊界），結果會推進 Undo 快照。內容沿用 ChatBox。
+ * z 層級高於生成遮罩（z-40）：生成中抽屜仍可見，使用者能即時看導演 agentic loop 的思考串流與旁白。
  * @param {boolean} open 是否展開
  * @param {() => void} onClose 收合抽屜
  */
 export default function AiCopilotDrawer({ open, onClose }) {
   return (
     <div
-      className={`absolute top-0 right-0 h-full ${DRAWER_WIDTH} max-w-full bg-surface border-l border-border shadow-2xl z-30 flex flex-col transition-transform duration-300 ${
+      className={`absolute top-0 right-0 h-full ${DRAWER_WIDTH} max-w-full bg-surface border-l border-border shadow-2xl z-50 flex flex-col transition-transform duration-300 ${
         open ? 'translate-x-0' : 'translate-x-full pointer-events-none'
       }`}
     >

@@ -78,7 +78,7 @@ export default function AssetListPage() {
     if (currentProject?.name !== projectId) {
       selectProject({ name: projectId, display_name: displayName });
     }
-    navigate('/editor');
+    navigate(`/projects/${projectId}/editor`);
   }, [currentProject, projectId, displayName, selectProject, navigate]);
 
   return (

@@ -46,7 +46,7 @@ export default function ProjectDashboard() {
 
   const handleOpenProject = (project) => {
     selectProject(project);
-    navigate('/editor');
+    navigate(`/projects/${project.name}/editor`);
   };
 
   // 進入素材管理頁：先選定專案（讓素材頁可取用 display_name），再導向

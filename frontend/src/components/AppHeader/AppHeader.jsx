@@ -25,7 +25,8 @@ export default function AppHeader() {
   const handleSignOut = () => signOut(`${window.location.origin}/login`);
 
   // 僅在編輯器頁、且已選定專案時顯示「管理素材」捷徑，導向該專案的素材審閱頁
-  const showManageAssets = location.pathname === '/editor' && currentProject?.name;
+  // 編輯器路由為 /projects/:projectId/editor，故以結尾比對而非完整路徑等值
+  const showManageAssets = location.pathname.endsWith('/editor') && currentProject?.name;
   const goManageAssets = () => navigate(`/projects/${currentProject.name}/assets`);
 
   const displayName = userInfo?.name || userInfo?.username || userInfo?.email || '使用者';
