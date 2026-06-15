@@ -48,7 +48,7 @@ function ToggleSwitch({ checked, onChange, disabled = false, label }) {
 /**
  * SettingsPage：全域使用者設定頁。
  *
- * 提供兩項偏好：(1) 建立專案後是否自動分析素材、(2) 素材預設分析策略。
+ * 提供三項偏好：(1) 建立專案後是否自動分析素材、(2) 素材預設分析策略、(3) 是否用我的編輯協助改進 AI。
  * 採「變更即存」—— 任一控制項變動即呼叫 store 的 updateSetting 送 PATCH。
  */
 export default function SettingsPage() {
@@ -71,7 +71,7 @@ export default function SettingsPage() {
           </span>
           <div>
             <h1 className="text-2xl font-bold text-ink tracking-tight">設定</h1>
-            <p className="text-sm text-ink-faint mt-0.5">調整素材分析的預設行為</p>
+            <p className="text-sm text-ink-faint mt-0.5">調整素材分析與資料偏好</p>
           </div>
         </div>
 
@@ -120,6 +120,25 @@ export default function SettingsPage() {
                 onChange={(e) => updateSetting({ default_asset_strategy: e.target.value })}
                 hint="套用到「未逐檔指定策略」的素材；個別素材在素材頁的設定仍會優先。"
                 className="max-w-md"
+              />
+            </div>
+
+            {/* 分隔線 */}
+            <div className="border-t border-border" />
+
+            {/* 設定三：偏好資料捕捉（飛輪 opt-out，預設開） */}
+            <div className="flex items-start justify-between gap-6">
+              <div className="min-w-0">
+                <h2 className="text-sm font-medium text-ink">用我的編輯協助改進 AI</h2>
+                <p className="text-xs text-ink-faint mt-1 leading-relaxed">
+                  開啟時（預設），系統會把「AI 原始排版」與「你的編輯」之間的差異記錄成偏好資料，用於改進導演 AI；資料僅存於你自己的專案資料夾、不外傳。關閉後將不再記錄。
+                </p>
+              </div>
+              <ToggleSwitch
+                label="用我的編輯協助改進 AI"
+                checked={settings.preference_capture_enabled}
+                disabled={isSaving}
+                onChange={(next) => updateSetting({ preference_capture_enabled: next })}
               />
             </div>
           </Card>

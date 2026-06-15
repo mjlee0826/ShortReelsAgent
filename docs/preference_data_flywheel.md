@@ -2,7 +2,7 @@
 
 > 本文件記錄「資料飛輪」的構想、可行性與落地步驟。
 > 一句話：**因為我們的輸出是結構化、可編輯的藍圖，使用者每一次編輯都能被捕捉成一筆「AI 排 X → 人改成 Y」的偏好資料；累積後用來訓練我們自己的開源導演模型。**
-> 狀態（更新於 2026-06-15）：🚧 T0 規劃中（捕捉原始資料）／T1、T2 未開始。
+> 狀態（更新於 2026-06-15）：✅ T0–T2 已實作。T0 後端捕捉（AI 原版檔 + `preference_events.json`，best-effort、受全域 opt-out `user_settings.preference_capture_enabled` 控管）；T1 離線資料集 / 評測報告（`tools/preference_flywheel/`）；T2 few-shot 注入導演 prompt（`prompt_manager/preference_few_shot.py`，預設關、待人工策展 `config/preference_few_shot_examples.json`）。
 
 ---
 

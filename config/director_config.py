@@ -42,3 +42,16 @@ except ValueError:
 # playback_rate 一致性檢查的 0.1s 容差，故夾回造成的時長變動永遠落在該檢查容差內，不會反倒
 # 製造新的 Critic 錯誤。
 SOURCE_END_OVERFLOW_REPAIR_TOLERANCE_SECONDS = 0.05
+
+# ── 偏好 few-shot 注入上限 (偏好資料飛輪 T2;見 prompt_manager/preference_few_shot.py) ──
+# 把過往使用者修正當 few-shot 餵進導演 prompt 時的硬性截長,杜絕 prompt 暴長:整份藍圖很大,
+# 故只放「壓縮版欄位 diff」(path: before → after)並以下列具名上限封頂(見
+# docs/preference_data_flywheel.md)。
+# 最多注入幾筆修正範例。
+MAX_FEWSHOT_EXAMPLES = 5
+# 每筆範例最多列幾個被改欄位(超過則截斷,只留最具代表性的前幾項)。
+MAX_FIELDS_PER_EXAMPLE = 6
+# 人工策展的偏好範例檔(與本 config 同目錄);檔缺 / 空 → 不注入,prompt 完全不變(預設關)。
+PREFERENCE_FEW_SHOT_EXAMPLES_PATH = os.path.join(
+    os.path.dirname(__file__), "preference_few_shot_examples.json"
+)

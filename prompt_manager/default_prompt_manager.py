@@ -13,6 +13,7 @@ from prompt_manager.schemas import (
     VideoEventIndexSemantics,
     schema_to_text,
 )
+from prompt_manager.preference_few_shot import build_few_shot_block
 
 
 class DefaultPromptManager(BasePromptManager):
@@ -231,6 +232,12 @@ class DefaultPromptManager(BasePromptManager):
             "影片專屬：dur=時長(秒) / fps / motion=動態強度 / has_speech,lang=語音 / cuts=場景切點 /\n"
             "  audio=逐字稿(transcript.chunks 帶時間戳)與環境音(env) / is_complex=複雜影片 / events=逐段視聽事件(僅複雜影片)。\n\n"
         )
+
+        # 6b. 偏好 few-shot（偏好資料飛輪 T2）：把過往使用者修正當範例餵入，讓導演順著偏好排版。
+        # 僅在初始 / 微調模式注入；糾錯模式(draft_to_fix)聚焦修物理錯誤，不加 few-shot 以免分心。
+        # 預設關——策展檔缺 / 空時 build_few_shot_block 回空字串，instruction 完全不變（零行為變動）。
+        if not draft_to_fix:
+            instruction += build_few_shot_block()
 
         # 7. 注入實際資料
         prompt = (

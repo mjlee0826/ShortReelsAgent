@@ -8,6 +8,7 @@ from config.project_artifacts import (
     PHASE2_TEMPLATE_DNA_FILENAME,
     PHASE3_AUDIO_DNA_FILENAME,
     PHASE4_BLUEPRINT_FILENAME,
+    PHASE4_BLUEPRINT_AI_ORIGINAL_FILENAME,
 )
 from media_processor.pipeline import PipelineRunner, ProgressTracker
 from media_tools.media_standardizer import MediaStandardizer
@@ -21,6 +22,8 @@ from director_agent.director_facade import DirectorFacade, DEFAULT_CLIP_COLOR
 from backend.services.asset_repository import AssetRepository
 from backend.services.stores.project_meta_store import project_meta_store
 from backend.services.stores.snapshot_store import snapshot_store
+from backend.services.stores.preference_event_store import PreferenceEvent, preference_event_store
+from backend.services.stores.user_settings_store import user_settings_store
 from model.infra.usage_ledger import cost_session
 from backend.utils.asset_discovery import (
     PHASE1_METADATA_FILENAME,
@@ -203,6 +206,39 @@ class DirectorService:
         dump_path = os.path.join(target_dir, PHASE4_BLUEPRINT_FILENAME)
         atomic_write_json(dump_path, blueprint)
         print(f"💾 [Dump] 最終劇本藍圖已儲存至 {dump_path}")
+
+    def _capture_preference_data(self, target_dir: str, user_id: str | None, prompt: str,
+                                 before: dict | None, after: dict, is_refinement: bool) -> None:
+        """落地本次生成的偏好事件(偏好資料飛輪 T0;見 docs/preference_data_flywheel.md)。
+
+        best-effort:全段吞錯,捕捉失敗只記一行 warning,**永不**讓資料捕捉中斷正常生成流程。
+        - 尊重使用者全域 opt-out(preference_capture_enabled);關閉則完全不捕捉。
+        - 初始生成額外(覆)寫不可變 AI 原版檔=本次創作的 AI 起點;微調與 autosave 一律不碰它。
+        - 不論初始 / 微調都 append 一筆事件鏈,供離線還原「指令↔修正」與「手動編輯」配對。
+        """
+        try:
+            # 尊重全域 opt-out:關閉則完全不捕捉(user_id 為 None 時無從查設定,視為預設開)
+            if user_id and not user_settings_store.get(user_id).preference_capture_enabled:
+                return
+
+            # 初始生成:(覆)寫不可變 AI 原版=本次創作的 AI 起點;微調不碰它(保留最初版)
+            if not is_refinement:
+                atomic_write_json(
+                    os.path.join(target_dir, PHASE4_BLUEPRINT_AI_ORIGINAL_FILENAME), after
+                )
+
+            # 不論初始 / 微調都記一筆事件鏈(append-only)
+            event = PreferenceEvent(
+                kind="refinement" if is_refinement else "initial",
+                is_refinement=is_refinement,
+                prompt=prompt,
+                before=before,
+                after=after,
+            )
+            preference_event_store.append(target_dir, event)
+            print(f"🌀 [Preference] 已捕捉偏好事件 (kind={event.kind})")
+        except Exception as e:  # noqa: BLE001 - 捕捉失敗絕不可影響生成,僅記 warning
+            print(f"⚠️ [Preference Warning] 偏好捕捉失敗(已略過,不影響生成): {e}")
 
     def _standardize(self, target_dir: str) -> None:
         """
@@ -599,10 +635,26 @@ class DirectorService:
                 if isinstance(clip, dict):
                     clip["color"] = dict(DEFAULT_CLIP_COLOR)
 
+        # 偏好資料飛輪:在最終藍圖覆寫 phase4 之前,先讀舊版當「初始生成」的 before 基準
+        # (微調的 before 改用前端送來的 old_timeline;見 _capture_preference_data)
+        preference_before = old_timeline if is_refinement else read_json_tolerant(
+            os.path.join(target_dir, PHASE4_BLUEPRINT_FILENAME), None
+        )
+
         self._dump_blueprint(target_dir, final_blueprint)
 
         # 更新專案 meta（最後修改時間、素材數量、藍圖狀態）
         self._update_project_meta(target_dir, folder_name)
+
+        # 偏好資料飛輪:落地本次生成的偏好事件(best-effort,永不中斷生成)
+        self._capture_preference_data(
+            target_dir=target_dir,
+            user_id=user_id,
+            prompt=prompt,
+            before=preference_before,
+            after=final_blueprint,
+            is_refinement=is_refinement,
+        )
 
         return {
             "blueprint": final_blueprint,

@@ -1,0 +1,5 @@
+{
+  "_note": "偏好 few-shot 範例(偏好資料飛輪 T2,人工策展)。預設為空=不注入,導演 prompt 完全不變。請從 tools/preference_flywheel 產出的 preference_dataset.jsonl / preference_field_report.md 手挑高品質訊號填入。guidance_lines: 幾行聚合心法(字串陣列)。examples: 壓縮版欄位 diff 範例,每筆 {instruction, changes:[{path, before, after}]}。筆數與每筆欄位數會被 director_config 的 MAX_FEWSHOT_EXAMPLES / MAX_FIELDS_PER_EXAMPLE 截斷。",
+  "guidance_lines": [],
+  "examples": []
+}

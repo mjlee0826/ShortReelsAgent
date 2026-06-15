@@ -27,6 +27,7 @@ class UserSettingsUpdate(BaseModel):
 
     auto_analyze_on_create: Optional[bool] = None
     default_asset_strategy: Optional[str] = None
+    preference_capture_enabled: Optional[bool] = None
 
 
 @router.get("/settings", response_model=UserSettings)

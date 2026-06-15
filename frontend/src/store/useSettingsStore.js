@@ -13,6 +13,7 @@ import { extractErrorMessage } from '../utils/errorMessage';
 const DEFAULT_SETTINGS = {
   auto_analyze_on_create: false,
   default_asset_strategy: 'simple',
+  preference_capture_enabled: true,
 };
 
 const useSettingsStore = create((set, get) => ({

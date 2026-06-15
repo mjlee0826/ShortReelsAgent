@@ -2,10 +2,11 @@
 使用者全域設定儲存庫 (Repository Pattern)。
 
 集中管理 per-user 的全域偏好設定 ``user_settings.json``（存於使用者根目錄
-``{ASSETS_DIR}/{user_id}/``，與各專案的 ``project_meta.json`` 分層）。目前承載兩項偏好：
+``{ASSETS_DIR}/{user_id}/``，與各專案的 ``project_meta.json`` 分層）。目前承載三項偏好：
 
 - ``auto_analyze_on_create``：建立新專案後是否自動分析素材（預設否，讓使用者先逐檔挑策略）。
 - ``default_asset_strategy``：未逐檔設定的素材所套用的全域預設感知策略（simple / complex）。
+- ``preference_capture_enabled``：是否用使用者編輯捕捉偏好資料以改進 AI（飛輪;opt-out，預設開）。
 
 設計沿用 ``ProjectMetaStore`` 的三項保證：**原子寫入**（唯一 temp + ``os.replace``，杜絕 NFS 半寫）、
 **容錯讀取**（缺檔 / 損毀回安全預設，不讓設定頁崩潰）、**交易式更新**（per-path 鎖序列化讀-改-寫，
@@ -35,6 +36,8 @@ _TMP_SUFFIX = ".tmp"
 DEFAULT_AUTO_ANALYZE_ON_CREATE = False
 # 未逐檔設定的素材所套用的全域預設策略：預設 simple（本地 Qwen，快速且免 API 成本）。
 DEFAULT_ASSET_STRATEGY = "simple"
+# 是否用使用者的編輯捕捉偏好資料(飛輪)：預設「開」,採 opt-out;使用者可於設定頁關閉。
+DEFAULT_PREFERENCE_CAPTURE_ENABLED = True
 
 
 class UserSettings(BaseModel):
@@ -44,6 +47,8 @@ class UserSettings(BaseModel):
     auto_analyze_on_create: bool = DEFAULT_AUTO_ANALYZE_ON_CREATE
     # 未逐檔設定素材的全域預設感知策略（"simple" | "complex"）
     default_asset_strategy: str = DEFAULT_ASSET_STRATEGY
+    # 是否用我的編輯捕捉偏好資料以改進 AI（飛輪;opt-out，預設開）
+    preference_capture_enabled: bool = DEFAULT_PREFERENCE_CAPTURE_ENABLED
 
 
 class UserSettingsStore:

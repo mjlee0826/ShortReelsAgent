@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import useBlueprintStore from '../../../store/useBlueprintStore';
 import { InspectorSection, ReadonlyRow, ToggleRow } from './controls';
 import { Button } from '../../ui';
@@ -24,6 +25,7 @@ const DEFAULT_AUTO_PUNCH = true;
 export default function ProjectInspector({ onRequestRegenerate }) {
   const global = useBlueprintStore((s) => s.blueprint?.global_settings);
   const updateGlobalSettingField = useBlueprintStore((s) => s.updateGlobalSettingField);
+  const navigate = useNavigate();
 
   // render-time 視覺旗標：即時切換、預覽立即重算（不需重新生成）
   const autoMotion = global?.auto_motion ?? DEFAULT_AUTO_MOTION;
@@ -66,6 +68,20 @@ export default function ProjectInspector({ onRequestRegenerate }) {
         </Button>
         <p className="text-xs text-ink-faint mt-2.5 leading-relaxed">
           字幕 / 濾鏡總開關、配樂策略與導演指令的變更需 AI 重新生成。
+        </p>
+      </div>
+
+      {/* 偏好資料飛輪小提示：讓使用者知道編輯會用於改進 AI，並提供關閉入口（全域設定） */}
+      <div className="px-5 pb-5 -mt-1">
+        <p className="text-[11px] text-ink-faint/80 leading-relaxed">
+          你的編輯會用於改進 AI ·{' '}
+          <button
+            type="button"
+            onClick={() => navigate('/settings')}
+            className="text-accent hover:underline"
+          >
+            可至設定關閉
+          </button>
         </p>
       </div>
     </div>
