@@ -129,12 +129,34 @@ class FFmpegAdapter:
         讀取失敗（無 ffprobe／無視訊串流／檔案損壞）時回空字串，由呼叫端視為『不確定』安全降級
         （不因偶發讀取失敗而誤判成需轉檔）。
         """
+        return self._probe_stream_entry(input_path, "codec_name")
+
+    def probe_color_transfer(self, input_path: str) -> str:
+        """
+        以 ffprobe 讀取第一條視訊串流的『色彩轉移特性 (transfer characteristics)』
+        （小寫，如 'bt709'、'arib-std-b67'(HLG)、'smpte2084'(PQ)）。
+
+        供 MediaStandardizer 判斷來源是否為『真 HDR』：只有 HLG/PQ 來源才需要走 zscale+tonemap
+        的 HDR→SDR 重映射。SDR——尤其是『未標記色彩 (untagged)』的來源——若誤走該路徑，zscale
+        因找不到輸入 transfer 可錨定，會對每一影格以 "no path between colorspaces" (code 3074)
+        失敗。讀不到（無 ffprobe／無視訊串流／來源根本未標記 transfer）時回空字串，由呼叫端視為
+        『非 HDR』安全降級（走輕量縮放路徑，不做 tonemap）。
+        """
+        return self._probe_stream_entry(input_path, "color_transfer")
+
+    def _probe_stream_entry(self, input_path: str, entry: str) -> str:
+        """
+        以 ffprobe 讀取第一條視訊串流的單一字串欄位（轉小寫），供各 probe_* 共用的私有樣板。
+
+        集中 ffprobe 呼叫與例外處理，避免每個 probe_* 重複相同樣板（DRY）。讀取失敗
+        （無 ffprobe／無視訊串流／檔案損壞／串流無此欄位）一律回空字串，由各呼叫端依語意安全降級。
+        """
         try:
             result = subprocess.run(
                 [
                     "ffprobe", "-v", "quiet",
                     "-select_streams", "v:0",
-                    "-show_entries", "stream=codec_name",
+                    "-show_entries", f"stream={entry}",
                     "-print_format", "json",
                     input_path,
                 ],
@@ -146,7 +168,7 @@ class FFmpegAdapter:
             streams = json.loads(result.stdout).get("streams", [])
             if not streams:
                 return ""
-            return str(streams[0].get("codec_name", "")).lower()
+            return str(streams[0].get(entry, "")).lower()
         except (json.JSONDecodeError, OSError, KeyError):
             return ""
 

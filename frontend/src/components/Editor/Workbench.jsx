@@ -33,17 +33,19 @@ export default function Workbench() {
   const redo = useBlueprintStore((s) => s.redo);
 
   const [showRegenerate, setShowRegenerate] = useState(false);
-  // Pilot 對話預設收合：空台時走工具列「初次生成」表單入口，生成完成後再自動展開供討論。
+  // Pilot 對話預設收合：空台時走工具列「初次生成」表單入口，生成一啟動即自動展開。
   const [showCopilot, setShowCopilot] = useState(false);
 
   // 訂閱 store 轉態以自動展開 Pilot（於 subscribe 回呼設 state，非 effect body 同步呼叫，避免連鎖渲染）：
-  //  ① 生成完成（isProcessing 由 true→false 且已有藍圖）→ 讓使用者接著與 AI 討論微調
-  //  ② 導演中途提問（pendingClarification 由無到有）→ 收合時看不到也無從回答，故展開
-  // 只認「生成完成」而非「讀回磁碟藍圖」（後者 isProcessing 全程 false，不觸發）。
+  //  ① 生成啟動（isProcessing 由 false→true）→ 抽屜 z 階高於生成遮罩，讓使用者即時看導演串流思考
+  //  ② 生成完成（isProcessing 由 true→false 且已有藍圖）→ 讓使用者接著與 AI 討論微調
+  //  ③ 導演中途提問（pendingClarification 由無到有）→ 收合時看不到也無從回答，故展開
+  // 只認轉態邊緣，不認「讀回磁碟藍圖」（後者 isProcessing 全程 false，不觸發）。
   useEffect(() => useBlueprintStore.subscribe((state, prev) => {
+    const generationStarted = !prev.isProcessing && state.isProcessing;
     const generationDone = prev.isProcessing && !state.isProcessing && !!state.blueprint;
     const askedQuestion = !prev.pendingClarification && !!state.pendingClarification;
-    if (generationDone || askedQuestion) setShowCopilot(true);
+    if (generationStarted || generationDone || askedQuestion) setShowCopilot(true);
   }), []);
 
   return (

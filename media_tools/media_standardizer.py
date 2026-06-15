@@ -29,6 +29,11 @@ _TEMP_OUTPUT_SUFFIX = ".mp4.part"
 _TEMP_IMAGE_SUFFIX = ".jpg.part"
 # 中途檔強制以 mp4 muxer 輸出：因副檔名已非 .mp4，ffmpeg 無法從副檔名推斷容器，需顯式指定
 _MP4_MUXER = "mp4"
+# 真正需要 HDR→SDR 色調映射的來源 transfer characteristics：HLG（arib-std-b67）與 PQ（smpte2084）。
+# 只有這兩類才走 zscale+tonemap 的重映射路徑；其餘來源——bt709 等 SDR，或『未標記色彩』的
+# untagged 來源（color_transfer 讀回空字串）——若誤走該路徑，zscale 因找不到輸入 transfer 可
+# 錨定，會以 "no path between colorspaces" (code 3074) 對每一影格失敗，故必須分流到輕量縮放路徑。
+_HDR_TRANSFER_CHARACTERISTICS = frozenset({"arib-std-b67", "smpte2084"})
 # JPEG 輸出品質（HEIC→JPG；具名常數，避免 magic number）
 _JPEG_QUALITY = 95
 
@@ -138,6 +143,46 @@ class MediaStandardizer:
             return bool(codec) and codec not in _WEB_SAFE_VIDEO_CODECS
         return False
 
+    def _build_video_filter(self, input_path: str) -> str:
+        """
+        依來源色彩特性挑選 ffmpeg -vf 濾鏡鏈（Strategy：HDR 來源才做 tonemap，SDR/未標記走輕量縮放）。
+
+        共同尾段（兩條路徑都會做）：
+          - scale=L:L:decrease:divisible_by=2：把長邊壓到 STANDARDIZE_MAX_LONG_SIDE（4K→1080p box），
+            `decrease` 只縮不放，原本就 ≤ 上限的素材保留原樣；順便讓 H.264 profile 降階，避免 Remotion 在
+            4K 高碼率下頻繁 seek 時 Chromium decoder 撐不住而觸發 PIPELINE_ERROR_DISCONNECTED。
+            長邊上限與 _needs_video_standardize 的閘控門檻同源（STANDARDIZE_MAX_LONG_SIDE），避免漂移。
+          - format=yuv420p：最終降成 8-bit yuv420p。
+
+        色彩前段（兩條路徑的差異）：
+          - 真 HDR 來源（HLG/PQ，見 _HDR_TRANSFER_CHARACTERISTICS）：iPhone 12+ 預設拍 HEVC + HLG
+            (BT.2020) 10-bit HDR。若只把畫面降 8-bit，輸出 mp4 的 color atom 仍殘留 BT.2020/HLG，配
+            8-bit 像素成矛盾組合，Chromium decoder 會拋 PIPELINE_ERROR_DISCONNECTED。故走 zscale+tonemap
+            真正的 HDR→SDR 路徑（依賴 libzimg；colorspace 濾鏡不支援 HLG transfer）：
+              1. zscale t=linear:npl=100：HLG/PQ → 線性光，HDR 峰值校正到 SDR 100 nits
+              2. format=gbrpf32le：切到浮點 GBR，tonemap 必要的中介格式
+              3. zscale p=bt709：色域從 BT.2020 換到 BT.709
+              4. tonemap=hable:desat=0：用 Hable 演算法把高光壓進 SDR 範圍，不自動降飽和
+              5. zscale t=bt709:m=bt709:r=tv：套 BT.709 transfer/matrix/TV-range
+          - 其餘來源（bt709 等 SDR，或 color_transfer 讀回空字串的『未標記』來源，例如純 SDR 的 4K .mp4）：
+            **不可**走 zscale t=linear——untagged 來源無輸入 transfer 可錨定，zscale 會以
+            "no path between colorspaces" (code 3074) 失敗。直接縮放即可，輸出端的
+            -color_primaries/-color_trc/-colorspace bt709（見 _convert_to_h264）會補上正確的 color atom；
+            同時省去 SDR 來源無謂的浮點色域往返與其品質損失。
+        """
+        scale_and_pack = (
+            f"scale={STANDARDIZE_MAX_LONG_SIDE}:{STANDARDIZE_MAX_LONG_SIDE}"
+            ":force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p"
+        )
+        transfer = self.ffmpeg.probe_color_transfer(input_path)
+        if transfer in _HDR_TRANSFER_CHARACTERISTICS:
+            return (
+                "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,"
+                "tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,"
+                f"{scale_and_pack}"
+            )
+        return scale_and_pack
+
     def _convert_to_h264(self, input_path: str, output_path: str) -> bool:
         """
         呼叫 FFmpeg 進行標準 H.264/AAC 轉檔（Web-safe + Remotion 友善 + HDR→SDR 正規化）。
@@ -159,23 +204,10 @@ class MediaStandardizer:
             subprocess.run(
                 [
                     "ffmpeg", "-y", "-i", input_path,
-                    # 色彩空間正規化 + 解析度上限：iPhone 12+ 預設拍 HEVC + HLG (BT.2020) 10-bit HDR，
-                    # 若只是 -pix_fmt yuv420p 把畫面降成 8-bit，輸出 mp4 的 color atom 仍會殘留 BT.2020/HLG，
-                    # 配上 8-bit 像素就成矛盾組合，Chromium decoder 會直接拋 PIPELINE_ERROR_DISCONNECTED。
-                    # zscale + tonemap 走真正的 HDR→SDR 路徑（依賴 libzimg；colorspace 濾鏡不支援 HLG transfer）：
-                    #   1. zscale t=linear:npl=100：HLG/PQ → 線性光，HDR 峰值校正到 SDR 100 nits
-                    #   2. format=gbrpf32le：切到浮點 GBR，tonemap 必要的中介格式
-                    #   3. zscale p=bt709：色域從 BT.2020 換到 BT.709
-                    #   4. tonemap=hable:desat=0：用 Hable 演算法把高光壓進 SDR 範圍，不自動降飽和
-                    #   5. zscale t=bt709:m=bt709:r=tv：套 BT.709 transfer/matrix/TV-range
-                    #   6. scale=1920:1920:decrease:divisible_by=2：把長邊壓到 1920（4K→1080p box），
-                    #      順便讓 H.264 從 high@5.x 退回 4.2，避免 Remotion 在 4K@60 做頻繁 seek 時
-                    #      Chromium decoder 撐不住而觸發 PIPELINE_ERROR_DISCONNECTED；
-                    #      `decrease` 只縮不放，原本就 ≤ 1920 的素材保留原樣
-                    #   7. format=yuv420p：最終降成 8-bit yuv420p
-                    # 對 SDR 來源也安全（BT.709→linear→back 近似 no-op）。
-                    # scale 長邊上限與 _needs_video_standardize 的閘控門檻同源（STANDARDIZE_MAX_LONG_SIDE），避免漂移
-                    "-vf", f"zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,scale={STANDARDIZE_MAX_LONG_SIDE}:{STANDARDIZE_MAX_LONG_SIDE}:force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p",
+                    # 色彩處理 + 解析度上限：濾鏡鏈依『來源是否為真 HDR』分流（見 _build_video_filter）。
+                    # HDR 來源走 zscale+tonemap 做 HDR→SDR；SDR/未標記來源走輕量縮放，避免 untagged 來源
+                    # 因 zscale 找不到輸入 transfer 而以 "no path between colorspaces" 失敗。
+                    "-vf", self._build_video_filter(input_path),
                     "-c:v", "libx264",
                     # CFR：把 iPhone 慣用的 VFR 拉成 CFR，避免 Remotion 因時序錯亂解碼失敗
                     # （沿用 source 平均 FPS，不硬寫數值，60 fps 慢動作素材也不會被砍掉一半畫面）
