@@ -62,7 +62,7 @@ def _failure_result() -> dict:
 
 class GeminiModelManager(BaseModelManager):
     """
-    統一的雲端大腦 (Gemini)：影片語意分析（analyze_media）與 Agentic 導演規劃（generate_director_plan）。
+    統一的雲端大腦 (Gemini)：影片語意分析（analyze_media）與輕量結構化生成（generate_text，如配樂搜尋詞）。
 
     已遷移至 ``google.genai`` 最新架構（google-genai SDK）。
     ``device_id`` 對雲端 API 無意義，``self.device`` 未設置，``_uses_gpu()`` 自動回 False。
@@ -218,44 +218,6 @@ class GeminiModelManager(BaseModelManager):
                     self.client.files.delete(name=video_file.name)
                 except Exception as e:
                     print(f"[Gemini API Warning] 無法刪除雲端暫存檔: {e}")
-
-    @synchronized_inference
-    def generate_director_plan(self, prompt: str, schema: type[BaseModel] | None = None) -> str:
-        """
-        導演藍圖生成：one-shot ``generate_content`` + ``response_schema`` 結構化輸出。
-
-        模型由 per-task 對照表決定（``DIRECTOR_BLUEPRINT`` → 結構化 + 推理強的型號）。
-        改用單次 ``generate_content``（取代舊 Chat Session）：reflection 每次重試本就是獨立呼叫、
-        未用到多輪對話記憶，one-shot 更單純；``schema`` 交給 ``response_schema`` 保證輸出結構合法。
-        """
-        model = self._model_for(TaskMode.DIRECTOR_BLUEPRINT)
-        response = self.client.models.generate_content(
-            model=model,
-            contents=prompt,
-            config=self._build_config(schema),
-        )
-        # 記錄 token 用量(Phase 4);reflection 重試會多次呼叫、各自累加
-        self._record(response, model, TaskMode.DIRECTOR_BLUEPRINT)
-        return response.text
-
-    @synchronized_inference
-    def generate_casting_plan(self, prompt: str, schema: type[BaseModel] | None = None) -> str:
-        """
-        導演選角生成（兩階段第一段）：one-shot ``generate_content`` + ``response_schema`` 結構化輸出。
-
-        對稱於 :meth:`generate_director_plan`，但走 ``DIRECTOR_CASTING`` 的 per-task 模型（預設較輕的
-        Flash）：本階段只做選材、吃精簡卡片、只輸出要用的素材 id，用不到 Pro 等級推理。``schema``
-        交給 ``response_schema`` 保證輸出為合法 ``CastingSelection``。
-        """
-        model = self._model_for(TaskMode.DIRECTOR_CASTING)
-        response = self.client.models.generate_content(
-            model=model,
-            contents=prompt,
-            config=self._build_config(schema),
-        )
-        # 記錄 token 用量(Phase 4;與 scheduling 同階段累加)
-        self._record(response, model, TaskMode.DIRECTOR_CASTING)
-        return response.text
 
     def generate_text(self, mode: TaskMode, prompt: str, schema: type[BaseModel] | None = None) -> str:
         """

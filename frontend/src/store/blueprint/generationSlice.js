@@ -50,6 +50,10 @@ export function createGenerationSlice(set, get) {
 
     // --- 對話歷史紀錄 ---
     chatHistory: [],
+    // 導演 agentic loop 即時思考串流（累積；每次新工具動作清空）；無則空字串
+    liveThinking: '',
+    // 導演 ask_user 待回答（{ question, options }）；非 null 時聊天框送出走 resume（B2）
+    pendingClarification: null,
 
     // ── 編輯器：自動載入既有藍圖 ───────────────────────────────────────────────
 
@@ -103,6 +107,9 @@ export function createGenerationSlice(set, get) {
         return;
       }
 
+      // 初始生成的指令：優先用聊天輸入（對話式入口），否則用表單 userPrompt
+      const initialPrompt = refinementPrompt || state.userPrompt;
+
       // 管理對話紀錄
       if (isRefinement && refinementPrompt) {
         set((prev) => ({
@@ -110,14 +117,14 @@ export function createGenerationSlice(set, get) {
         }));
       } else if (!isRefinement) {
         set({
-          chatHistory: [{ role: 'user', content: `🎬 初始指令：\n${state.userPrompt}` }]
+          chatHistory: [{ role: 'user', content: `🎬 初始指令：\n${initialPrompt}` }]
         });
       }
 
       try {
         const payload = {
           asset_folder_name: folderName,
-          user_prompt: isRefinement ? refinementPrompt : state.userPrompt,
+          user_prompt: isRefinement ? refinementPrompt : initialPrompt,
           template_source: state.templateSource || null,
           enable_subtitles: state.enableSubtitles,
           enable_filters: state.enableFilters,
@@ -166,6 +173,34 @@ export function createGenerationSlice(set, get) {
     attachGeneration: (jobId) => set({ generationJobId: jobId, isProcessing: true, errorMsg: '' }),
 
     /**
+     * B2：使用者回答導演的提問（ask_user）→ 打 /generate/resume 續跑，附掛新 job 的 WS。
+     * @param {string} answer 使用者的回答
+     */
+    submitClarificationAnswer: async (answer) => {
+      if (!answer || !answer.trim()) return;
+      const { default: useProjectStore } = await import('../useProjectStore');
+      const folderName = useProjectStore.getState().currentProject?.name || '';
+      if (!folderName) return;
+      set((prev) => ({
+        pendingClarification: null,
+        isProcessing: true,
+        errorMsg: '',
+        chatHistory: [...prev.chatHistory, { role: 'user', content: `📝 ${answer}` }],
+      }));
+      try {
+        const { job_id: jobId } = await apiService.resumeGeneration(folderName, answer);
+        set({ generationJobId: jobId });
+      } catch (error) {
+        const backendError = extractErrorMessage(error);
+        set((prev) => ({
+          isProcessing: false,
+          errorMsg: `續跑失敗：${backendError}`,
+          chatHistory: [...prev.chatHistory, { role: 'error', content: `❌ 續跑失敗：${backendError}` }],
+        }));
+      }
+    },
+
+    /**
      * WS 進度事件處理（Observer 回呼）：stage 事件更新階段文案；終端事件套用結果 / 報錯並收尾。
      * 結果直接取自 job_finished 的 payload.result（run_workflow 回傳）；重連時 replay buffer 亦補送此事件。
      * @param {object} event 後端 ProgressEvent（event_type / asset_id / stage_name / payload / error）
@@ -174,6 +209,12 @@ export function createGenerationSlice(set, get) {
       const type = event?.event_type;
       if (type === PROGRESS_EVENT.JOB_FINISHED) {
         const result = event?.payload?.result || {};
+        // B2：導演中途提問 → job 結束但無藍圖（status=awaiting_input）；保留 pendingClarification
+        //（由 CLARIFICATION_NEEDED 事件設好），等使用者於聊天框回答後走 resume。
+        if (result.status === 'awaiting_input') {
+          set({ isProcessing: false, generationJobId: null, generationStage: null, liveThinking: '' });
+          return;
+        }
         // AI 結果推進 Undo 快照（可一鍵還原，政策 C 安全網）；時間軸結構可能整個改變，故清空選取避免錯位
         set((prev) => {
           const nextBlueprint = result.blueprint
@@ -187,6 +228,8 @@ export function createGenerationSlice(set, get) {
             isProcessing: false,
             generationJobId: null,
             generationStage: null,
+            liveThinking: '',
+            pendingClarification: null,
             history: result.blueprint ? pushHistory(prev.history, prev.blueprint) : prev.history,
             selection: { ...EMPTY_SELECTION },
             chatHistory: [
@@ -203,11 +246,41 @@ export function createGenerationSlice(set, get) {
           isProcessing: false,
           generationJobId: null,
           generationStage: null,
+          liveThinking: '',
+          pendingClarification: null,
           errorMsg: `生成失敗：${msg}`,
           chatHistory: [
             ...prev.chatHistory,
             { role: 'error', content: `❌ 哎呀，生成失敗了：${msg}` }
           ]
+        }));
+        return;
+      }
+      // 導演 agentic loop：思考串流（累積成「思考中」泡泡）
+      if (type === PROGRESS_EVENT.DIRECTOR_THINKING_DELTA) {
+        const delta = event?.payload?.thinking || '';
+        if (delta) set((prev) => ({ liveThinking: prev.liveThinking + delta }));
+        return;
+      }
+      // 導演 agentic loop：工具呼叫旁白 → 清空 thinking、把「導演做了什麼」記進對話軌跡
+      if (type === PROGRESS_EVENT.DIRECTOR_TOOL_CALL) {
+        const summary = event?.payload?.summary || event?.payload?.tool_name || '';
+        set((prev) => ({
+          liveThinking: '',
+          chatHistory: summary
+            ? [...prev.chatHistory, { role: 'tool', content: `🔧 ${summary}` }]
+            : prev.chatHistory,
+        }));
+        return;
+      }
+      // 導演 agentic loop：中途提問（ask_user）→ 設待回答、把問題顯示在對話
+      if (type === PROGRESS_EVENT.DIRECTOR_CLARIFICATION_NEEDED) {
+        const question = event?.payload?.question || '';
+        const options = event?.payload?.options || [];
+        set((prev) => ({
+          liveThinking: '',
+          pendingClarification: { question, options },
+          chatHistory: [...prev.chatHistory, { role: 'clarification', content: question, options }],
         }));
         return;
       }

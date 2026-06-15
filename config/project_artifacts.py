@@ -47,3 +47,8 @@ PREFERENCE_EVENTS_FILENAME = "preference_events.json"
 # 編輯器具名快照(版本檢查點)落地檔(list,每筆含 id / label / created_at / blueprint),
 # 供編輯器左欄版本清單跨重整還原;與 undo 的線性堆疊互補(見 docs/editor_redesign.md)。
 EDITOR_SNAPSHOTS_FILENAME = "editor_snapshots.json"
+
+# 導演 agentic loop 的「進行中對話狀態」落地檔(B2 suspend/resume):導演呼叫 ask_user 暫停時，把
+# system_prompt / messages(含 thinking·tool_use·已看幀) / 待回 tool_results / 已看範圍 / metadata 修正
+# 等續跑狀態落地;使用者答完由 /generate/resume 載回續跑。生成完成 / 失敗即清除(非長存)。
+AGENT_SESSION_FILENAME = "agent_session.json"

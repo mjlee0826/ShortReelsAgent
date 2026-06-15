@@ -212,3 +212,32 @@ class ProgressTracker:
             error=error,
             payload=payload or {},
         ))
+
+    # ── 導演 agentic loop 認知串流（Phase 4） ─────────────────────────────────
+    def emit_director_thinking_delta(self, thinking_text: str, payload: Optional[dict] = None) -> None:
+        """送出 DIRECTOR_THINKING_DELTA 事件（導演思考 token 串流；前端累積成『思考中』泡泡）。"""
+        self.publish(ProgressEvent(
+            event_type=ProgressEventType.DIRECTOR_THINKING_DELTA,
+            job_id=self._job_id,
+            payload={**(payload or {}), "thinking": thinking_text},
+        ))
+
+    def emit_director_tool_call(
+        self, tool_name: str, summary: str = "", payload: Optional[dict] = None
+    ) -> None:
+        """送出 DIRECTOR_TOOL_CALL 事件（工具呼叫旁白，如『精讀 clip_3 的逐字稿』）。"""
+        self.publish(ProgressEvent(
+            event_type=ProgressEventType.DIRECTOR_TOOL_CALL,
+            job_id=self._job_id,
+            payload={**(payload or {}), "tool_name": tool_name, "summary": summary},
+        ))
+
+    def emit_director_clarification_needed(
+        self, question: str, options: Optional[list] = None, payload: Optional[dict] = None
+    ) -> None:
+        """送出 DIRECTOR_CLARIFICATION_NEEDED 事件（導演提問、暫停生成，等待使用者回答）。"""
+        self.publish(ProgressEvent(
+            event_type=ProgressEventType.DIRECTOR_CLARIFICATION_NEEDED,
+            job_id=self._job_id,
+            payload={**(payload or {}), "question": question, "options": options or []},
+        ))

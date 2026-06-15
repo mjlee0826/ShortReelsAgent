@@ -37,6 +37,7 @@ class MusicDirector:
     def resolve(self, music_strategy: str = MUSIC_STRATEGY_SEARCH_COPYRIGHT,
                 user_music_file: str = None, user_prompt: str = "",
                 asset_mood_summary: str = "",
+                pre_generated_search_query: str = "",
                 tracker: ProgressTracker | None = None) -> dict:
         """
         依配樂意圖解析出 audio_dna；無配樂 / 取得失敗一律回空 dict（呼叫端據此視為「無配樂」）。
@@ -56,8 +57,8 @@ class MusicDirector:
             print("[MusicDirector] ⏩ 策略: 不加配樂")
             return {}
 
-        # 搜尋配樂：先請 Gemini 萃取關鍵字（未指定偏好時參考素材氛圍），再依策略選擇下載來源
-        search_query = self._extract_search_query(user_prompt, asset_mood_summary)
+        # 搜尋配樂：優先用外部傳入的搜尋詞（Stage 1 Claude brief），無則 Gemini 萃取（change_music fallback）
+        search_query = pre_generated_search_query or self._extract_search_query(user_prompt, asset_mood_summary)
 
         if music_strategy == MUSIC_STRATEGY_SEARCH_FREE:
             print(f"[MusicDirector] 🆓 策略: 免費配樂 (Jamendo)，關鍵字: '{search_query}'")

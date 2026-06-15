@@ -44,16 +44,19 @@ class BasePromptManager(ABC):
         """範本分析：範本影片的事件索引 + 音訊轉錄 + 配樂偵測（曲風 / 歌名猜測）"""
 
     @abstractmethod
-    def get_director_blueprint_prompt(self, user_prompt: str, assets: list, audio_dna: dict,
-                                      template_dna: dict = None, previous_timeline: list = None,
-                                      error_prompt: str = "", draft_to_fix: list = None) -> PromptSpec:
-        """導演剪輯藍圖：將素材庫編排成 Remotion 可渲染的 JSON 剪輯藍圖（draft_to_fix 非空時走糾錯模式）"""
+    def get_director_agentic_system_prompt(self, has_template: bool = False,
+                                           is_refinement: bool = False) -> str:
+        """Agentic 導演系統提示（純心法、可快取）：角色 + 工作方式 + 剪輯 / 字幕心法 + 工具箱 + 物理鐵律"""
 
     @abstractmethod
-    def get_director_casting_prompt(self, user_prompt: str, casting_cards: list, audio_dna: dict,
-                                    template_dna: dict = None) -> PromptSpec:
-        """導演選角（兩階段第一段）：從精簡卡片選材，只輸出要用的素材 id（不決定排序 / 時間軸）"""
+    def build_director_agentic_user_message(self, user_prompt, catalog, manifest_text, creative_brief="",
+                                            template_dna=None, previous_timeline=None) -> str:
+        """組 agentic 導演首則 user 訊息：使用者指令 + 創意定錨 + 極輕素材目錄 + 欄位 manifest + 範本 DNA"""
 
     @abstractmethod
     def get_music_search_query_prompt(self, user_prompt: str, asset_mood_summary: str = "") -> PromptSpec:
         """音樂搜尋關鍵字：把使用者需求轉成配樂搜尋詞；asset_mood_summary 提供素材整體氛圍供推測"""
+
+    @abstractmethod
+    def get_music_brief_prompt(self, user_prompt: str, asset_mood_summary: str = "") -> PromptSpec:
+        """Stage 1 創意 brief（Claude）：一次給配樂搜尋詞 search_query + 創意定錨 creative_brief"""

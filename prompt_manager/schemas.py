@@ -328,6 +328,19 @@ class MusicSearchQuery(BaseModel):
     search_query: str = Field(default="", description="配樂搜尋詞：指名歌手歌名 或 英文音樂關鍵字")
 
 
+class MusicBrief(BaseModel):
+    """
+    Stage 1 創意 brief（Claude）：驅動配樂搜尋 + 給導演的創意北極星。
+
+    ``search_query`` 取代原 Gemini 萃取的搜尋詞（指名歌手歌名 或 英文音樂關鍵字）；``creative_brief``
+    一小段情緒 / 風格 / 節奏 / 開場 hook 方向，注入導演首則訊息當創意定錨，讓選曲與剪輯同調。
+    """
+    search_query: str = Field(default="", description="配樂搜尋詞：指名歌手歌名 或 英文音樂關鍵字")
+    creative_brief: str = Field(
+        default="", description="一小段創意定錨：整體情緒 / 視覺風格 / 節奏感 / 開場 hook 方向"
+    )
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # ⑤ 導演剪輯藍圖（Remotion 可渲染 JSON）
 # ──────────────────────────────────────────────────────────────────────────────

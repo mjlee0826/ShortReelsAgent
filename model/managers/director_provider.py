@@ -1,20 +1,14 @@
 """
-Director provider 工廠 (Factory Pattern)：依環境變數回傳 Phase 4 導演藍圖要用的 model manager。
+Director provider 工廠 (Factory Pattern)：回傳 Phase 4 導演 agentic loop 用的 model manager。
 
-讓「導演大腦」能在 Claude（預設）與 Gemini 之間切換做 A/B，呼叫端（``SchedulingState``）零分支。
-兩個 manager 都 duck-type 出 ``.prompt_manager`` 與 ``.generate_director_plan(prompt, schema)``，
-故回傳型別統一標註為基底 ``BaseModelManager``。子模組 import 刻意延遲到分支內，沿用
-``model/managers/__init__.py`` 不 eager re-export 的延遲載入慣例（避免一次拖入兩家 SDK）。
+Phase 4 改造為 Claude agentic tool-use loop（需 ``ClaudeModelManager.stream_director_turn`` 的串流多輪
+能力，Gemini 無對應介面），故 clean cutover 後一律回 Claude；保留本工廠是維持「呼叫端零分支」的接縫，
+日後若有第二家串流導演實作，於此切換即可。子模組 import 延遲到函式內，沿用不 eager 載入 SDK 的慣例。
 """
-from config.model_config import DIRECTOR_PROVIDER, DIRECTOR_PROVIDER_GEMINI
 from model.infra.base_model_manager import BaseModelManager
 
 
 def get_director_manager() -> BaseModelManager:
-    """依 ``DIRECTOR_PROVIDER`` 回傳 director 用的 model manager（預設 Claude）。"""
-    if DIRECTOR_PROVIDER == DIRECTOR_PROVIDER_GEMINI:
-        from model.managers.gemini_model_manager import GeminiModelManager
-        return GeminiModelManager()
-    # 預設（claude，或任何未知值）一律走 Claude
+    """回傳 director agentic loop 用的 model manager（Claude）。"""
     from model.managers.claude_model_manager import ClaudeModelManager
     return ClaudeModelManager()

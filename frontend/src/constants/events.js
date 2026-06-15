@@ -14,6 +14,10 @@ export const PROGRESS_EVENT = {
   STAGE_START: 'stage_start',
   STAGE_FINISH: 'stage_finish',
   STAGE_ERROR: 'stage_error',
+  // 導演 agentic loop（Phase 4）：思考串流 / 工具呼叫旁白 / 中途提問（B2 軟終端）
+  DIRECTOR_THINKING_DELTA: 'director_thinking_delta',
+  DIRECTOR_TOOL_CALL: 'director_tool_call',
+  DIRECTOR_CLARIFICATION_NEEDED: 'director_clarification_needed',
 };
 
 /** 終端事件（收到即代表工作流結束，應主動關閉連線）。 */

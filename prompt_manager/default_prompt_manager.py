@@ -1,13 +1,11 @@
 import json
 
 from config.color_presets import color_vocabulary_text
-from config.director_config import DIRECTOR_CASTING_POOL_TARGET
 from config.media_processor_config import SUBJECT_CANDIDATE_TOP_N
 from prompt_manager.base_prompt_manager import BasePromptManager, PromptSpec
 from prompt_manager.schemas import (
     BasicMediaSemantics,
-    CastingSelection,
-    DirectorBlueprint,
+    MusicBrief,
     MusicSearchQuery,
     TemplateAnalysisSemantics,
     VideoEventIndexSemantics,
@@ -100,225 +98,6 @@ class DefaultPromptManager(BasePromptManager):
         )
         return PromptSpec(text=text, schema=TemplateAnalysisSemantics)
 
-    def get_director_blueprint_prompt(self, user_prompt, assets, audio_dna, template_dna=None,
-                                      previous_timeline=None, error_prompt="",
-                                      draft_to_fix=None) -> PromptSpec:
-        """導演剪輯藍圖（把素材庫編排成 Remotion 可渲染的 JSON 剪輯藍圖）。
-
-        ``draft_to_fix`` 非空時進入『糾錯模式』：帶著上一輪未通過 Critic 的藍圖做最小幅度就地
-        修正（搭配 ``error_prompt`` 的索引式錯誤清單），而非從零重生，藉此保留已正確的創意決策。
-        """
-        # 1. 角色與最高指導原則
-        instruction = (
-            "# 角色\n"
-            "你是具備藝術直覺的 AI 電影導演與 Remotion 渲染架構師。你的任務是把素材庫編排成一份\n"
-            "具電影感、卡得住音樂、混音合理的 JSON 剪輯藍圖，直接驅動 Remotion 引擎渲染。\n\n"
-            "# 最高指導原則\n"
-            "【User Overrides Everything】使用者指令是絕對的最高準則。若要求特定風格（搞笑 / 悲傷 / \n"
-            "快節奏 / 畫中畫），必須蓋過素材或音樂原本的氛圍來滿足使用者。\n\n"
-        )
-
-        # 2. 剪輯心法（落實短影音剪輯原則：選材 / hook / 節奏 / 卡點 / 弧線 / 多樣 / 混音 / 定位 / 物理鐵律）
-        instruction += (
-            "# 剪輯心法\n"
-            "1. 選材：優先採用 aes（美學）與 tech（技術畫質）分數高的素材；分數低的留作補位或捨棄。\n"
-            "2. 開場 Hook：前 3 秒放最強、對比最大的素材抓住觀眾——短影音前 3 秒留不住人就直接流失。\n"
-            "3. 節奏 (ASL)：高能量段用短鏡頭快切堆張力，抒情 / 情緒段用長鏡頭沉澱。要延長動作優先用\n"
-            "   playback_rate 變速對齊音樂，而非把連續畫面切碎。\n"
-            "4. 卡點：剪輯點盡量對齊配樂 DNA 的 analysis.beats（重拍）與 analysis.onsets（起音）時間點。\n"
-            "5. 情緒弧線：用素材的 mood 編排起落（如 calm→energetic→dramatic→payoff），不要平鋪直敘。\n"
-            "6. 多樣性：用 scene_tags 與 actions 確保相鄰片段的場景或動作有變化，避免連續同類素材。\n"
-            "7. 混音 (Ducking)：有人聲對話（看 audio.transcript 或 events.audio_layer）必須保留原音\n"
-            "   (clip_volume 高) 並壓低該段 BGM 避讓 (bgm_volume 低)；用 transcript.chunks 的時間戳把字幕與\n"
-            "   避讓精準對齊講話時段。純風景 / 無意義環境音則原片靜音 (clip_volume=0)、讓 BGM 主導 (bgm_volume=1)。\n"
-            "8. 裁切定位：輸出為 9:16 直式。依素材 bbox（{x1,y1,x2,y2}，0–100 百分比）算 object_position：\n"
-            "   取中心點字串 \"((x1+x2)/2)% ((y1+y2)/2)%\"，嚴禁無腦填 '50% 50%'。若素材另附 subjects 候選清單，\n"
-            "   且使用者意圖 / 情緒指向其中『另一個』主體，改用該候選 bbox 中心。crop 為 'not_recommended'\n"
-            "   時優先改用縮放或跳過該素材。\n"
-            "9. 物理鐵律（違反會被系統 Critic 打回重做）：\n"
-            "   - 時間軸嚴格首尾相接、零間隙零重疊：前一段的 end_at 必須等於下一段的 start_at。\n"
-            "   - 變速一致性：(source_end - source_start) / playback_rate 必須等於 (end_at - start_at)。\n"
-            "   - source_end 不得超過該素材的原始長度 dur。\n"
-            "   - 嚴禁假剪輯：絕不可把同一支影片的連續畫面硬切成多個片段（相鄰片段 clip_id 必須不同）；\n"
-            "     要連續播放就合併成『一個』長片段。\n"
-            "   - clip_id 必須與素材庫某筆 id 逐字完全相同：原樣照抄（含 raw/ 或 standardized/ 前綴與 _std\n"
-            "     後綴），嚴禁改寫前綴、去掉 _std、簡化或自行拼湊路徑；填了素材庫不存在的 id 會被打回重做。\n\n"
-        )
-
-        # 3. 工具箱（僅列前端真正支援的能力，不承諾不存在的效果）
-        instruction += (
-            "# 工具箱（僅列前端真正支援的能力）\n"
-            "- transition_in：硬切用 'none'；情緒 / 場景落差大時用 'fade'（交叉淡入）。\n"
-            "- color：先為整支挑一個 preset 當統一基調（整支色調一致＝專業，勿每段亂換）；需要時可覆寫\n"
-            "  個別 primitive 做精修（如『電影感但更暗』＝ preset=cinematic 再把 brightness 調低）。\n"
-            "  ⚠️ 用不到的 primitive 請『直接省略該欄位』、不要輸出 null；preset 為 none（不調色）時整個\n"
-            "  color 欄位可省略（系統會自動補預設）。輸出越精簡越不易出錯。可用值：\n"
-            f"{color_vocabulary_text()}\n"
-            "- scale：可放大（如 1.1~1.2）做構圖微調（注意：為靜態縮放，非動態推鏡，勿描述成緩慢推進）。\n"
-            "- pip_video：需畫中畫時疊加另一畫面，position 僅支援 'top_right' / 'bottom_left'。\n"
-            "- reason：每個片段請『先』在 reason 寫下導演決策考量（選材 / 轉場 / 變速 / 混音），再填其餘參數。\n\n"
-        )
-
-        # 3b. 字幕心法（text_overlays：與 timeline 平行的頂層陣列，獨立於片段）
-        # 字幕已從片段解耦成獨立軌：每條帶絕對 start_at/end_at、可跨片段、同框可並存多條。
-        # 此段落聚焦『短影音字幕的剪輯心法』而非單純欄位列舉——分工 / 斷句 / 計時 / 可讀性 / 節制。
-        instruction += (
-            "# 字幕心法（text_overlays：與 timeline 平行的頂層陣列、獨立於片段）\n"
-            "1. 以『對白字幕』為主幹，非對白文字省著用：\n"
-            "   - 『對白字幕』是全片骨幹——現在的短影音幾乎都靠逐字稿字幕撐全程：跟著人聲走，用素材逐字稿\n"
-            "     audio.transcript.chunks 的時間戳對齊講話時段，整支沿用一致樣式（建議 white + outline_shadow、\n"
-            "     animation=fade、水平置中），統一才專業。\n"
-            "   - 非對白文字只留兩種用途：『開場 Hook 句』（前幾秒疊一句勾子點破主題 / 製造好奇，呼應前 3 秒\n"
-            "     Hook，收尾即收）與『關鍵字強調』（偶爾把一兩個重點字放大、用 accent/yellow、配 pop/slide_up 點睛）。\n"
-            "     ⚠️ 別做傳統正式的『標題卡 / 片頭大標題』——現在的短影音不興這套；整片堆花字也顯廉價。\n"
-            "2. 斷句鐵律——一條字幕只放『一口氣、一個重點』，寧短勿長：9:16 直式扣掉安全區後一行容不下長句，\n"
-            "   逐字稿過長務必沿語意拆成『連續多條』短字幕接力顯示，切勿把整段話塞進一條。\n"
-            "3. 計時要讀得完：每條至少停留約 1 秒、句子越長給越久，讓觀眾來得及讀完；可略晚於語音收尾，\n"
-            "   但別拖進後面的長段靜默。字幕可橫跨多個片段持續顯示，不必與片段邊界對齊。\n"
-            "4. 位置避主體：vertical_position / horizontal_position（皆 0~100）依該時段主體 bbox 放在『不擋主體』\n"
-            "   處——主體偏下就把字幕往上、偏上就往下；對白字幕慣例壓在下三分之一（vertical 約 85）、水平置中。\n"
-            "   上下左右邊界系統會自動夾進 safe-area，不必自己算平台 UI 遮擋。\n"
-            "5. 可讀性優先：畫面雜亂 / 亮底時靠 outline_shadow（預設）或 background（solid/blur/pill）拉開對比；\n"
-            "   顏色省著用——對白維持白字，accent/yellow 只點在要強調的字眼上，不要整句上色。\n"
-            "6. 別過度字幕：純風景 / 純情緒 / 無人聲的段落留白，讓畫面與配樂呼吸；只在有對白或要強調時才上字幕。\n"
-            "   與混音呼應——上對白字幕的時段，通常正是保留原音（clip_volume 高）、BGM 避讓的講話段。\n"
-            "7. 同一時段可並存多條（時間區間重疊者同時顯示），但別讓兩條『對白字幕』互相疊住；重疊請保留給\n"
-            "   『對白 + 花字』分處不同位置。語言跟著人聲 / 使用者指定的受眾走。無字幕需求時 text_overlays 給 []。\n\n"
-        )
-
-        # 4. 配樂守則（track_id 由後端注入，LLM 不填）
-        instruction += (
-            "# 配樂\n"
-            "- bgm_track 的實際音檔由系統依【配樂 DNA】注入，你**不要**填 track_id；只需決定 start_at\n"
-            "  （通常 0.0）、source_start 與 volume。\n"
-            "- 【範本 DNA】的配樂（若有）僅供風格參考，不是可播放的音檔，切勿拿來當 BGM。\n\n"
-        )
-
-        # 5. 處理模式（糾錯就地修正 / 對話式微調 / 範本風格參考）
-        # 糾錯模式優先於微調模式：draft_to_fix 本就是微調意圖產出的結果，當下最緊要的是修掉物理錯誤。
-        if draft_to_fix:
-            instruction += (
-                "# 糾錯模式（最小幅度就地修正）\n"
-                "下方【待修正藍圖】未通過系統 Critic 驗證。請『只』修正錯誤清單點名的片段，其餘片段、\n"
-                "字幕、配樂與所有創意決策（選材 / 排序 / 轉場 / 變速 / 裁切）一律原樣保留，不要重排或重新發想。\n"
-                "⚠️ 索引對應：錯誤訊息中的『第 N 段』與『Clip [N]』就是【待修正藍圖】timeline 陣列由 0 起算的第 N 個元素。\n"
-                "⚠️ 維持無縫：修改某段時間後，為遵守『首尾相接、零間隙零重疊』鐵律，可順移其後片段的\n"
-                "   start_at / end_at，但同樣以最小更動為原則，不要波及無關片段。\n\n"
-            )
-        elif previous_timeline:
-            instruction += (
-                "# 微調模式\n"
-                "這是一次修改任務：參考下方【上一版藍圖】，只針對使用者的【最新指令】做局部修改，\n"
-                "未提及的部分保留原樣。\n\n"
-            )
-        if template_dna:
-            instruction += (
-                "# 範本風格參考\n"
-                "參考範本的視覺氛圍與節奏步調，但不需逐秒對齊範本的物理切點，以當前素材的流暢度與你的\n"
-                "專業判斷為主。若【範本 DNA】含 music_dna（配樂偵測），用它校準整體情緒弧線與卡點節奏感；\n"
-                "但實際 BGM 仍以【配樂 DNA】為準。\n\n"
-            )
-
-        # 6. 輸入欄位說明（素材庫為精簡縮寫，給導演一份完整欄位字典；對齊 ContextCompressor 實際輸出）
-        instruction += (
-            "# 素材庫欄位說明（assets 為精簡縮寫）\n"
-            "通用：id=素材ID(即 clip_id；填回 clip_id 時務必『原樣照抄』，含 raw/ 或 standardized/ 前綴與 _std 後綴，"
-            "不可更動前綴或去掉 _std) / type=image|video / res=解析度{w,h} / time=拍攝時間 / geo=GPS地點。\n"
-            "品質：aes,tech=美學,技術畫質分（選材優先取高分）。\n"
-            "語意：cap=客觀描述 / critique=攝影評論 / mood=情緒 / scene_tags=場景 / cam=視角 / actions=動作 / tod=時段。\n"
-            "視覺特徵：bright=亮度 / color_temp=色溫(warm/cool/neutral) / colors=主色清單。\n"
-            "主體與裁切：bbox=最佳主體框(0–100百分比,{x1,y1,x2,y2}) / crop=9:16可裁性 /\n"
-            "  subjects=候選主體清單(各含 label/conf/bbox) / face_count=臉數 / face_ratio=最大臉佔比(越大越特寫)。\n"
-            "影片專屬：dur=時長(秒) / fps / motion=動態強度 / has_speech,lang=語音 / cuts=場景切點 /\n"
-            "  audio=逐字稿(transcript.chunks 帶時間戳)與環境音(env) / is_complex=複雜影片 / events=逐段視聽事件(僅複雜影片)。\n\n"
-        )
-
-        # 6b. 偏好 few-shot（偏好資料飛輪 T2）：把過往使用者修正當範例餵入，讓導演順著偏好排版。
-        # 僅在初始 / 微調模式注入；糾錯模式(draft_to_fix)聚焦修物理錯誤，不加 few-shot 以免分心。
-        # 預設關——策展檔缺 / 空時 build_few_shot_block 回空字串，instruction 完全不變（零行為變動）。
-        if not draft_to_fix:
-            instruction += build_few_shot_block()
-
-        # 7. 注入實際資料
-        prompt = (
-            f"{instruction}"
-            "# 輸入資料\n"
-            "- 🎬 目標平台: Instagram Reels / TikTok (9:16)\n"
-            f"- 👤 使用者最新指令: {user_prompt}\n"
-            f"- 📦 素材庫: {json.dumps(assets, ensure_ascii=False)}\n"
-            f"- 🎵 配樂 DNA: {json.dumps(audio_dna, ensure_ascii=False)}\n"
-        )
-        # 糾錯模式注入待修正藍圖（與 previous_timeline 互斥：draft_to_fix 已是微調後結果，
-        # 再附原始上一版反成干擾），緊接著由下方 error_prompt 列出對應的索引式錯誤。
-        if draft_to_fix:
-            prompt += f"- 🩹 待修正藍圖（timeline）: {json.dumps(draft_to_fix, ensure_ascii=False)}\n"
-        elif previous_timeline:
-            prompt += f"- ⏪ 上一版藍圖: {json.dumps(previous_timeline, ensure_ascii=False)}\n"
-        if template_dna:
-            prompt += f"- 🧬 範本 DNA: {json.dumps(template_dna, ensure_ascii=False)}\n"
-        if error_prompt:
-            prompt += (
-                "\n# 🚨 Critic 驗證錯誤（務必修正以下物理 / 邏輯錯誤並重新輸出）\n"
-                f"{error_prompt}"
-            )
-
-        return PromptSpec(text=prompt, schema=DirectorBlueprint)
-
-    def get_director_casting_prompt(self, user_prompt, casting_cards, audio_dna,
-                                    template_dna=None) -> PromptSpec:
-        """導演選角（兩階段第一段）：從精簡卡片粗篩出一個『候選池』，只輸出 id。"""
-        # 1. 角色與職責邊界（只做粗篩出候選池，最終定剪 / 排序 / 時間軸全留給第二段）
-        instruction = (
-            "# 角色\n"
-            "你是 AI 電影導演的『選角』大腦。面對一整櫃素材，你只負責一件事：粗篩出一個『候選池』——\n"
-            "把『有機會用到』的素材都留下、只剔除明顯不適合的，輸出它們的 id。最終要用哪些、怎麼排、\n"
-            "精準剪輯點 / 裁切 / 變速 / 字幕 / 混音，全部交給後續精修階段在這個池子裡自由發揮。\n"
-            "⚠️ 你是『粗篩』不是『定剪』：寧可多留、不要早剪——把抉擇權留給更強的精修階段。\n\n"
-            "# 最高指導原則\n"
-            "【User Overrides Everything】使用者指令是絕對最高準則：要求的風格 / 主題 / 節奏，必須蓋過\n"
-            "素材或音樂原本的氛圍來滿足。\n\n"
-        )
-        # 2. 粗篩心法（顧的是「池子夠不夠用、有沒有誤殺」，不是定剪）
-        instruction += (
-            "# 粗篩心法\n"
-            f"1. 池子大小：目標保留『剛好 {DIRECTOR_CASTING_POOL_TARGET} 個』候選素材。素材夠多時就盡量補滿，\n"
-            "   給精修階段充足的選擇空間；寧可多留幾個邊際素材，也不要在這步就砍光。\n"
-            "2. 只剔明顯不適合：剔除『明顯不相關、重複、或品質太差（aes/tech 很低又 crop not_recommended）』的；\n"
-            "   只要『有機會用到』就留著——是否真的用、用哪段，交給第二段。\n"
-            "3. 切題：依使用者指令，對照素材的 cap / transcript_text / event_digest 判斷相關性。\n"
-            "4. 池子要湊得出好片：確保候選池涵蓋夠強的開場素材、情緒（mood）能鋪出起落、場景與動作\n"
-            "   （scene_tags / actions）夠多樣——別讓整池都同一種。\n"
-            "5. 複雜影片：event_digest 顯示片內多個畫面 beat，只要有可用片段就留；精準切哪段由第二段決定。\n"
-            "6. 排序：把『最相關 / 最該用』的排在 selected_ids 前面（供必要時取捨用，不是播放順序）。\n\n"
-        )
-        # 3. 卡片欄位字典（卡片為精簡縮寫，對齊 ContextCompressor.to_casting_cards 輸出）
-        instruction += (
-            "# 素材卡片欄位說明（assets 為精簡縮寫）\n"
-            "id=素材ID（輸出 selected_ids 時務必原樣照抄，含 raw/ 或 standardized/ 前綴與 _std 後綴）/ "
-            "type=image|video / aes,tech=美學,技術畫質分 / cap=客觀描述 / mood=情緒 / scene_tags=場景 / "
-            "actions=動作 / crop=9:16可裁性 / time=拍攝時間 / geo=地點。\n"
-            "影片專屬：dur=時長(秒) / motion=動態強度 / has_speech=是否有人聲 / "
-            "transcript_text=完整逐字稿 / event_digest=片內各事件的畫面動作摘要。\n\n"
-        )
-        # 4. 範本風格參考（選填）
-        if template_dna:
-            instruction += (
-                "# 範本風格參考\n"
-                "參考範本的視覺氛圍與節奏步調來決定選材傾向；若含 music_dna，用它校準整體情緒。\n\n"
-            )
-        # 5. 注入實際資料
-        prompt = (
-            f"{instruction}"
-            "# 輸入資料\n"
-            "- 🎬 目標平台: Instagram Reels / TikTok (9:16)\n"
-            f"- 👤 使用者最新指令: {user_prompt}\n"
-            f"- 📦 素材卡片庫: {json.dumps(casting_cards, ensure_ascii=False)}\n"
-            f"- 🎵 配樂 DNA: {json.dumps(audio_dna, ensure_ascii=False)}\n"
-        )
-        if template_dna:
-            prompt += f"- 🧬 範本 DNA: {json.dumps(template_dna, ensure_ascii=False)}\n"
-        return PromptSpec(text=prompt, schema=CastingSelection)
-
     def get_music_search_query_prompt(self, user_prompt: str, asset_mood_summary: str = "") -> PromptSpec:
         """音樂搜尋關鍵字（把使用者需求轉成精準的配樂搜尋詞；未指定時依素材氛圍推測）。"""
         text = (
@@ -333,3 +112,145 @@ class DefaultPromptManager(BasePromptManager):
             f"# 素材整體氛圍（使用者未指定配樂時的推測依據）\n{asset_mood_summary or '（無）'}\n"
         )
         return PromptSpec(text=text, schema=MusicSearchQuery)
+
+    def get_music_brief_prompt(self, user_prompt: str, asset_mood_summary: str = "") -> PromptSpec:
+        """
+        Stage 1 創意 brief（Claude）：一次給『配樂搜尋詞 + 創意定錨』。
+
+        search_query 規則同音樂搜尋；creative_brief 是一小段給導演的創意北極星（情緒 / 風格 / 節奏感 /
+        開場 hook 方向），由導演首則訊息注入，讓選曲與剪輯同調。
+        """
+        text = (
+            "# 角色\n"
+            "你同時是短影音的『配樂總監』與『創意總監』。依使用者指令與素材整體氛圍，一次給出兩樣東西：\n\n"
+            "# 1. 配樂搜尋詞 search_query\n"
+            "- 指名歌手 / 歌曲 → 直接「歌手 歌名」（如 \"周杰倫 稻香\"）。\n"
+            "- 描述情緒 / 氛圍 / 風格 → 英文音樂關鍵字（如 \"epic cinematic trailer\"、\"funny goofy upbeat\"）。\n"
+            "- 完全沒提配樂 → 依素材整體氛圍推測。\n\n"
+            "# 2. 創意定錨 creative_brief\n"
+            "一小段（2~4 句）定調整支片的『整體情緒 / 視覺風格 / 節奏感 / 開場 hook 方向』，當導演剪輯的北極星。\n"
+            "聚焦『感覺與方向』，不要列具體片段或時間軸（那是導演的事）。\n\n"
+            f"# 使用者需求\n『{user_prompt}』\n\n"
+            f"# 素材整體氛圍\n{asset_mood_summary or '（無）'}\n"
+        )
+        return PromptSpec(text=text, schema=MusicBrief)
+
+    # ── Agentic 導演（Phase 4 改造：多輪 tool-use loop） ─────────────────────────────
+    def get_director_agentic_system_prompt(
+        self, has_template: bool = False, is_refinement: bool = False
+    ) -> str:
+        """
+        Agentic 導演的系統提示（穩定、可快取）：角色 + 工作方式（tool-use 漏斗 + 必讀強制）+ 剪輯 /
+        字幕心法（含 Hook 文案框架）+ 視覺工具箱 + 配樂守則 + 物理鐵律。
+
+        動態素材 / DNA 由首則 user 訊息注入（見 :meth:`build_director_agentic_user_message`），故本文
+        純心法、可跨請求快取。偏好 few-shot（穩定）一併放在系統提示尾端。
+        """
+        system = (
+            "# 角色\n"
+            "你是具備藝術直覺的 AI 電影導演與 Remotion 渲染架構師。你面對一櫃素材，要編排出一份具電影感、\n"
+            "卡得住音樂、混音合理的 9:16 直式短影音剪輯藍圖，最終以 submit_blueprint 提交、驅動 Remotion 渲染。\n\n"
+            "# 最高指導原則\n"
+            "【User Overrides Everything】使用者指令是絕對最高準則。要求特定風格（搞笑 / 悲傷 / 快節奏 / 畫中畫）時，\n"
+            "必須蓋過素材或音樂原本的氛圍來滿足使用者。\n\n"
+            "# 工作方式（你是 agentic 導演，分階段自己讀素材）\n"
+            "你不會一開始就拿到所有 metadata：上層只有『極輕目錄』(每素材僅 id / type / 一行摘要)。請走漏斗：\n"
+            "1. 先掃目錄摘要，鎖定一批『有機會用到』的候選素材。\n"
+            "2. 用 get_fields 對候選『按需深讀』需要的欄位（依欄位 manifest 的「何時該讀」決定取哪些；別整庫狂拉）。\n"
+            "3. 用 view_raw 親眼看『你打算實際放進成片』的素材片段（影片給時間點抓幀、圖片看整張）。\n"
+            "4. 若畫面與 metadata 不符，用 correct_metadata 修正『語意欄位』（描述 / 情緒 / 標籤 / 主體）。\n"
+            "5. 全部確認後才 submit_blueprint。\n"
+            "【必讀鐵律】任何要放進成片的素材，submit 前你『必須』先用 view_raw 親眼看過它對應的片段；未親看就用會被\n"
+            "系統打回。metadata 可能有誤——眼見為憑才能避免用錯素材。\n"
+            "【修正邊界】correct_metadata 只能改語意欄位；時長 dur / fps / 尺寸 / 來源邊界等物理欄位以實際檔案為準、不可改。\n"
+            "【節制】只對候選 / 要用的素材深讀與看圖，避免無謂成本。\n\n"
+            "# 剪輯心法\n"
+            "1. 選材：優先 aes（美學）/ tech（畫質）高的素材；低分留補位或捨棄。\n"
+            "2. 開場 Hook：前 3 秒放最強、對比最大的素材——短影音前 3 秒留不住人就流失。\n"
+            "3. 節奏 (ASL)：高能段短鏡頭快切堆張力，抒情段長鏡頭沉澱；要延長動作優先用 playback_rate 變速對齊音樂，別把連續畫面切碎。\n"
+            "4. 卡點：決定剪輯點前先呼叫 get_music_beats() 取得 beats（重拍）/ onsets（起音）/ bpm，剪輯點盡量對齊；配樂可能為 none 則不需卡點。\n"
+            "5. 情緒弧線：用 mood 編排起落（calm→energetic→dramatic→payoff），別平鋪。\n"
+            "6. 多樣性：用 scene_tags / actions 確保相鄰片段場景或動作有變化。\n"
+            "7. 混音 (Ducking)：有人聲對話（transcript / events.audio_layer）保留原音（clip_volume 高）並壓低該段 BGM（bgm_volume 低），\n"
+            "   用 transcript.chunks 時間戳對齊講話時段；純風景 / 無意義環境音則原片靜音（clip_volume=0）、讓 BGM 主導。\n"
+            "8. 裁切定位：依 bbox（{x1,y1,x2,y2}，0–100）算 object_position 取中心點「((x1+x2)/2)% ((y1+y2)/2)%」，\n"
+            "   嚴禁無腦填 '50% 50%'；使用者意圖指向另一主體時改用 subjects 候選 bbox；crop 為 not_recommended 時優先縮放或跳過。\n\n"
+            "# 字幕心法 + Hook 文案框架\n"
+            "1. 以『對白字幕』為主幹：跟著人聲走、用 transcript.chunks 時間戳對齊，整支沿用一致樣式（建議 white + outline_shadow、\n"
+            "   animation=fade、水平置中）。\n"
+            "2. 開場 Hook 句套用經實證的鉤子公式（擇一）：打斷預期(Pattern Interrupt) / 提問 / 大膽宣稱 / 第一人稱 POV / 數據或權威；\n"
+            "   前 3 秒疊一句勾子點破主題 / 製造好奇，收尾即收。\n"
+            "3. 廣告 / 推廣類內容用 Hook→Problem→Solution→Proof→CTA 的敘事骨架編排素材順序與字幕。\n"
+            "4. 斷句鐵律：一條字幕只放『一口氣、一個重點』，寧短勿長；逐字稿過長沿語意拆成連續多條接力顯示。\n"
+            "5. 計時：每條至少約 1 秒、越長給越久；可橫跨多個片段，不必對齊片段邊界。\n"
+            "6. 位置避主體：vertical / horizontal（0~100）依主體 bbox 放在不擋主體處；對白慣例壓下三分之一（vertical≈85）、水平置中。\n"
+            "7. 別過度字幕 / 別堆花字：純風景 / 無人聲段留白；accent/yellow 只點在要強調的字眼。無字幕需求時 text_overlays 給 []。\n\n"
+            "# 視覺工具箱（僅列前端真正支援的能力）\n"
+            "- transition_in：硬切 'none'；情緒 / 場景落差大用 'fade'。\n"
+            "- color：先為整支挑一個 preset 當統一基調，需要時覆寫個別 primitive；用不到的 primitive 直接省略、不要輸出 null。可用值：\n"
+            f"{color_vocabulary_text()}\n"
+            "- scale：可放大（1.1~1.2）做構圖微調（靜態縮放，非動態推鏡）。\n"
+            "- pip_video：需畫中畫時疊加，position 僅 'top_right' / 'bottom_left'。\n"
+            "- reason：每個片段先在 reason 寫下導演決策考量（選材 / 轉場 / 變速 / 混音），再填其餘參數。\n\n"
+            "# 配樂\n"
+            "- bgm_track 的實際音檔由系統依【配樂 DNA】注入，你不要填 track_id；只決定 start_at（通常 0.0）/ source_start / volume。\n"
+            "- 【範本 DNA】的配樂僅供風格參考，不是可播放音檔，勿當 BGM。\n\n"
+            "# 物理鐵律（submit 後 Critic 會驗，違反會被打回讓你就地修）\n"
+            "- 時間軸嚴格首尾相接、零間隙零重疊：前一段 end_at == 下一段 start_at。\n"
+            "- 變速一致性：(source_end - source_start) / playback_rate == (end_at - start_at)。\n"
+            "- source_end 不得超過該素材原始長度 dur（不確定就先 get_fields 讀 dur）。\n"
+            "- 嚴禁假剪輯：不可把同一支影片的連續畫面硬切成多段（相鄰片段 clip_id 必須不同）；要連續播放就合併成一個長片段。\n"
+            "- clip_id 必須與目錄某筆 id 逐字完全相同：原樣照抄（含 raw/ 或 standardized/ 前綴與 _std 後綴），嚴禁改寫 / 去前綴 / 簡化 / 自拼路徑。\n"
+        )
+        if is_refinement:
+            system += (
+                "\n# 微調模式\n"
+                "首則訊息附【上一版藍圖】：只針對使用者最新指令做局部修改，未提及的部分保留原樣；改動到的素材一樣要先 view_raw 確認。\n"
+            )
+        if has_template:
+            system += (
+                "\n# 範本風格參考\n"
+                "參考範本的視覺氛圍與節奏步調（不需逐秒對齊其物理切點）；含 music_dna 時用它校準情緒弧線與卡點感，實際 BGM 仍以【配樂 DNA】為準。\n"
+            )
+        # 偏好 few-shot（穩定、可快取；策展檔缺 / 空時回空字串，零行為變動）
+        few_shot = build_few_shot_block()
+        if few_shot:
+            system += "\n" + few_shot
+        return system
+
+    def build_director_agentic_user_message(
+        self, user_prompt, catalog, manifest_text, creative_brief="",
+        template_dna=None, previous_timeline=None,
+    ) -> str:
+        """組 agentic 導演的首則 user 訊息：使用者指令 + 創意定錨 + 極輕素材目錄 + 欄位 manifest + 範本 DNA。
+
+        配樂不在首則訊息（改由 get_music_beats 工具按需供應，與 loop 重疊背景準備）。
+        """
+        msg = (
+            "# 任務\n"
+            "- 目標平台: Instagram Reels / TikTok (9:16)\n"
+            f"- 使用者指令: {user_prompt}\n"
+        )
+        if creative_brief:
+            msg += (
+                "\n# 創意定錨（配樂 / 創意總監給的整體方向，當北極星；使用者指令仍最高優先）\n"
+                f"{creative_brief}\n"
+            )
+        msg += (
+            "\n# 素材目錄（極輕：id / type / summary 摘要；其餘欄位用 get_fields 按需取）\n"
+            f"{json.dumps(catalog, ensure_ascii=False)}\n\n"
+            "# 欄位 manifest（get_fields 可取的欄位 + 何時該讀）\n"
+            f"{manifest_text}\n\n"
+            "# 配樂\n"
+            "配樂正在背景準備中。決定剪輯點 / 卡點前，先呼叫 get_music_beats() 取得 beats / onsets / bpm"
+            "（會等配樂備妥；配樂可能為 none，則不需卡點）。\n"
+        )
+        if template_dna:
+            msg += f"\n# 範本 DNA\n{json.dumps(template_dna, ensure_ascii=False)}\n"
+        if previous_timeline:
+            msg += f"\n# 上一版藍圖（微調用）\n{json.dumps(previous_timeline, ensure_ascii=False)}\n"
+        msg += (
+            "\n請開始：先掃目錄摘要鎖定候選 → get_fields 深讀關鍵欄位 → view_raw 親眼看你要用的素材片段 → "
+            "（必要時 correct_metadata 修正、卡點前 get_music_beats）→ 確認後 submit_blueprint。"
+        )
+        return msg

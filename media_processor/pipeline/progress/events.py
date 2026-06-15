@@ -38,6 +38,13 @@ class ProgressEventType(str, Enum):
     RESOURCE_WAIT     = "resource_wait"
     RESOURCE_ACQUIRED = "resource_acquired"
 
+    # ── 導演 agentic loop（Phase 4）：思考串流 / 工具呼叫旁白 / 中途提問 ────────────
+    # 導演多輪 tool-use 過程的即時認知串流，前端據此在聊天面板呈現「思考 / 動作 / 提問」
+    DIRECTOR_THINKING_DELTA       = "director_thinking_delta"
+    DIRECTOR_TOOL_CALL            = "director_tool_call"
+    # 導演呼叫 ask_user 暫停、等待使用者回答（B2 suspend/resume 的軟終端訊號）
+    DIRECTOR_CLARIFICATION_NEEDED = "director_clarification_needed"
+
 
 class ProgressEvent(BaseModel):
     """

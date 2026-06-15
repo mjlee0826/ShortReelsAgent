@@ -1,18 +1,22 @@
 import React from 'react';
 import useBlueprintStore from '../../store/useBlueprintStore';
 import GenerationForm from './GenerationForm';
+import ChatBox from '../RightPanel/ChatBox';
 import { FaMagic } from 'react-icons/fa';
 
 const MUSIC_SEARCH_COPYRIGHT = 'search_copyright';
 
 /**
- * SetupView：兩階段中的「生成前」聚焦畫面。
+ * SetupView：blueprint 尚未產生時的「生成前」畫面（agentic 改造後）。
  *
- * blueprint 尚未產生時顯示，置中呈現生成表單，把使用者注意力集中在拿到第一版影片。
- * 生成成功後 EditorPage 會切換到 Workbench（編輯工作台）。
+ * 上半為生成表單（設定 + 初次指令）；一旦開始生成（或有對話 / 導演中途提問），下半即時呈現導演 agentic
+ * loop 的思考串流、工具旁白與 ask_user 提問（共用 :component:`ChatBox`），讓初次生成也看得到導演的認知
+ * 與對話對齊。生成成功後 EditorPage 切到 Workbench。
  */
 export default function SetupView() {
-  const { errorMsg, musicStrategy } = useBlueprintStore();
+  const { errorMsg, musicStrategy, isProcessing, chatHistory, pendingClarification } = useBlueprintStore();
+  // 有對話 / 處理中 / 待回答 → 顯示導演對話面板（初次生成的思考串流與提問都在這裡）
+  const showChat = isProcessing || (chatHistory && chatHistory.length > 0) || !!pendingClarification;
 
   return (
     <div className="flex-1 overflow-y-auto bg-canvas">
@@ -44,6 +48,13 @@ export default function SetupView() {
         <div className="bg-surface border border-border rounded-2xl p-6">
           <GenerationForm submitLabel="🎬 開始生成影片" showProject />
         </div>
+
+        {/* 導演對話面板：初次生成時即時呈現思考串流 / 工具旁白 / 中途提問（共用 ChatBox） */}
+        {showChat && (
+          <div className="mt-6 h-[440px] bg-surface border border-border rounded-2xl flex flex-col overflow-hidden">
+            <ChatBox />
+          </div>
+        )}
       </div>
     </div>
   );

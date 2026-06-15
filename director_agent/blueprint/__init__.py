@@ -1,19 +1,15 @@
-"""藍圖準備階段(Phase 2 Template DNA ∥ Phase 3 Music DNA)的 fork-join 並行套件。
+"""藍圖準備的 DNA 生產者 (Strategy)：Template DNA / Music DNA。
 
-把彼此獨立的 template / music 兩分支抽成 ``DnaProducer``(Strategy),由 ``BlueprintPreparer``
-以 fork-join 並行;兩分支的 GPU 工作經 Tier A(``ModelPoolRegistry``)共用同一 GpuGate,
-並行不撞 VRAM。設計見 docs/blueprint_prep_design.md。
+把素材深度感知 / 配樂解析抽成 ``DnaProducer``(Strategy)。Phase 4 agentic 改造後改由 ``director_service``
+inline 編排（template 主執行緒、music 背景 future 與導演 loop 重疊），不再經 ``BlueprintPreparer`` fork-join
+（已移除）。配樂解析的實際入口為 ``director_agent.music_director.MusicDirector``。
 """
 from director_agent.blueprint.prep_context import PrepContext
 from director_agent.blueprint.dna_producer import DnaProducer
 from director_agent.blueprint.template_dna_producer import TemplateDnaProducer
-from director_agent.blueprint.music_dna_producer import MusicDnaProducer
-from director_agent.blueprint.blueprint_preparer import BlueprintPreparer
 
 __all__ = [
     "PrepContext",
     "DnaProducer",
     "TemplateDnaProducer",
-    "MusicDnaProducer",
-    "BlueprintPreparer",
 ]

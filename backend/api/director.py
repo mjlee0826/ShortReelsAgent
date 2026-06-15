@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from typing import Optional, Dict
 from backend.services.director_service import director_service, AssetsNotAnalyzedError
 from backend.services.render_service import RenderService
+from backend.services.stores.agent_session_store import agent_session_store
 from backend.services.jobs.async_job_runner import async_job_runner
 from backend.services.jobs.generation_lock import generation_lock
 from backend.services.jobs.generation_progress_meta import (
@@ -120,6 +121,63 @@ async def generate_timeline(req: GenerateRequest, user_id: str = Depends(verify_
         job_id_box["id"] = job_id  # launch 與此行間無 await,work 啟動前必已填妥
     except BaseException:
         # launch 失敗(極少)時釋放已取得的鎖,避免洩漏使該專案永久卡 409
+        generation_lock.release(user_id, req.asset_folder_name)
+        raise
+    return {"job_id": job_id}
+
+
+class ResumeGenerationRequest(BaseModel):
+    """B2 續跑請求：導演中途提問（ask_user）後，使用者回答接回 agentic loop。"""
+    asset_folder_name: str
+    answer: str
+
+
+@router.post("/generate/resume")
+async def resume_generation(req: ResumeGenerationRequest, user_id: str = Depends(verify_token)):
+    """
+    導演 ask_user 暫停後的續跑：以使用者答案接回 agentic loop，啟動背景 job，立即回 ``{job_id}``。
+
+    前端據此開 ``WS /ws/progress/{job_id}`` 看續跑進度（導演可能再次提問 → 又回 needs_input）。
+    查無待回答 session（已完成 / 逾時）時同步回 409，與 ``/generate`` 的鎖 / job 生命週期一致。
+    """
+    project_dir = os.path.join(_ASSETS_BASE_PATH, user_id, req.asset_folder_name)
+
+    # 1. 預檢：必須有待回答 session（避免白白起 job）
+    has_session = await asyncio.to_thread(
+        lambda: agent_session_store.load(project_dir) is not None
+    )
+    if not has_session:
+        raise HTTPException(status_code=409, detail="查無待回答的生成 session（可能已完成或逾時）")
+
+    # 2. 取生成鎖（resume 是一次生成續跑）；已在生成 → 回既有 job 讓前端附掛，避免 double-run
+    if not generation_lock.acquire(user_id, req.asset_folder_name):
+        active = await asyncio.to_thread(read_active_generation_job, project_dir)
+        if active is not None and job_manager.get(active) is not None:
+            return {"job_id": active, "already_running": True}
+        raise HTTPException(status_code=409, detail="生成進行中，請稍候")
+
+    # 3. 啟動背景 job 續跑；收尾務必清 meta 並釋放鎖
+    job_id_box: dict[str, str] = {}
+
+    def work(tracker) -> dict:
+        """背景執行緒內續跑 agentic loop，tracker 把 thinking / 旁白 / 再次提問串到 WS。"""
+        try:
+            publish_active_generation_job(project_dir, job_id_box["id"])
+            return director_service.resume_generation(
+                folder_name=req.asset_folder_name, user_id=user_id,
+                answer=req.answer, tracker=tracker,
+            )
+        finally:
+            # 先清 active job_id 再釋放鎖；即使清除失敗也務必釋鎖，避免該專案永久卡 409
+            try:
+                clear_active_generation_job(project_dir)
+            finally:
+                generation_lock.release(user_id, req.asset_folder_name)
+
+    try:
+        job_id = async_job_runner.launch(user_id, work)
+        job_id_box["id"] = job_id
+    except BaseException:
         generation_lock.release(user_id, req.asset_folder_name)
         raise
     return {"job_id": job_id}

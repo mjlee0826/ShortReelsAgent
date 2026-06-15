@@ -10,6 +10,15 @@ export const generationApi = {
     return response.data;
   },
 
+  // B2 續跑：導演 ask_user 暫停後，把使用者答案接回 agentic loop，回 { job_id }（前端開 WS 看續跑）。
+  async resumeGeneration(folderName, answer) {
+    const response = await apiClient.post('/api/generate/resume', {
+      asset_folder_name: folderName,
+      answer,
+    });
+    return response.data;
+  },
+
   // 讀回專案先前生成並落地的最終藍圖，回傳 { blueprint, assets_root_url }。
   // 尚未生成過時後端回 404，呼叫端應視為「無已存結果」而非錯誤。
   async fetchBlueprint(projectName) {
