@@ -772,6 +772,8 @@ class DirectorService:
         )
         audio_dna = read_json_tolerant(os.path.join(target_dir, PHASE3_AUDIO_DNA_FILENAME), None)
 
+        # 量測續跑耗時:prep(Phase 2∥3)已於首跑完成,此處只接回 Phase 4 導演 loop,故僅報續跑段
+        resume_start = time.perf_counter()
         with cost_session() as ledger:
             try:
                 final_blueprint = self.director.resume_timeline(
@@ -801,6 +803,10 @@ class DirectorService:
                 is_refinement=session.is_refinement,
             )
             agent_session_store.clear(target_dir)  # 完成 → 清 session
+            # 續跑只涵蓋 Phase 4 loop 的續段(首跑已印 prep / 暫停前耗時),與首跑的 timings 口徑對齊
+            resume_sec = time.perf_counter() - resume_start
+            result["timings"] = {"phase4_resume_sec": round(resume_sec, 2)}
+            print(f"[Service] ⏱ Phase 4 續跑: {resume_sec:.1f}s")
             print(ledger.format_summary("Resume"))
             result["costs"] = ledger.summary()
             return result
