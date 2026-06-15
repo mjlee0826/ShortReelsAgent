@@ -79,6 +79,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="curate 時若無人工選取，改自動依品質挑選覆蓋秒數預算（會明確標示非人工策展）",
     )
     parser.add_argument(
+        "--take-all",
+        action="store_true",
+        help="curate 時跳過 serve/挑選，直接取用全部已抓素材（優先於人工選取與 --fallback）",
+    )
+    parser.add_argument(
         "--host", default=DEFAULT_SERVE_HOST, help="serve 綁定的主機（預設僅本機 localhost）"
     )
     parser.add_argument(
@@ -103,7 +108,12 @@ def main(argv: list[str] | None = None) -> int:
     output_dir = Path(spec.output_dir).expanduser().resolve()
     # all 隱含允許 fallback；單獨 curate 需顯式 --fallback
     allow_fallback = args.fallback or args.command == CMD_ALL
-    context = BuildContext(spec=spec, output_dir=output_dir, allow_fallback=allow_fallback)
+    context = BuildContext(
+        spec=spec,
+        output_dir=output_dir,
+        allow_fallback=allow_fallback,
+        take_all=args.take_all,  # --take-all：跳過挑選直接全取
+    )
 
     # serve 為長駐 server（非一次性階段），單獨分派、阻塞至 Ctrl-C
     if args.command == CMD_SERVE:

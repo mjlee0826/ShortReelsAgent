@@ -41,6 +41,8 @@ class BuildContext:
     output_dir: Path
     # 允許自動 fallback 策展（`all` 子指令或 `--fallback` 時為 True）
     allow_fallback: bool = False
+    # 跳過挑選、直接取用全部候選（`--take-all` 時為 True）；優先於人工選取與 fallback
+    take_all: bool = False
 
     # ───────────────────────── 工作目錄（中間產物）─────────────────────────
     @property

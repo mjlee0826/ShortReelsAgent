@@ -12,13 +12,19 @@ from ..pipeline import BuildContext, PipelineStage
 from .curator import GroupCurator
 from .preview import HtmlPreviewBuilder
 from .quality import QualityScorer
-from .selection import AutoFallbackSelector, SelectionReader, SelectionTemplateWriter
+from .selection import (
+    AutoFallbackSelector,
+    SelectAllSelector,
+    SelectionReader,
+    SelectionTemplateWriter,
+)
 
 logger = get_logger(__name__)
 
 # 策展模式標記
 _MODE_MANUAL: str = "manual"
 _MODE_AUTO_FALLBACK: str = "auto_fallback"
+_MODE_TAKE_ALL: str = "take_all"
 
 
 class CurateStage(PipelineStage):
@@ -33,6 +39,7 @@ class CurateStage(PipelineStage):
         self._template_writer = SelectionTemplateWriter()
         self._selection_reader = SelectionReader()
         self._fallback = AutoFallbackSelector()
+        self._select_all = SelectAllSelector()
         self._curator = GroupCurator()
 
     def run(self, context: BuildContext) -> None:
@@ -94,7 +101,13 @@ class CurateStage(PipelineStage):
         target_seconds: float,
         image_ratio: float,
     ) -> tuple[list[ClipCandidate] | None, str]:
-        """決定選取來源：人工 > 自動 fallback > 等待（回傳 (None, "")）。"""
+        """決定選取來源：全取(--take-all) > 人工 > 自動 fallback > 等待（回傳 (None, "")）。"""
+        # 全取優先：明確要求跳過挑選、直接用全部素材
+        if context.take_all:
+            chosen = self._select_all.select(ordered)
+            logger.info("組 %s：取用全部候選 %d 件（--take-all，跳過挑選）", group.group_id, len(chosen))
+            return chosen, _MODE_TAKE_ALL
+
         selected_keys = self._selection_reader.read(context.selection_file(group))
         if selected_keys:
             chosen = [c for c in ordered if c.cache_key in selected_keys]

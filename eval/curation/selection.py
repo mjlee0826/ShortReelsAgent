@@ -102,6 +102,14 @@ class SelectionReader:
         return selected
 
 
+class SelectAllSelector:
+    """全取選取：直接取用全部候選（跳過人工挑選與品質 fallback）。"""
+
+    def select(self, candidates: list[ClipCandidate]) -> list[ClipCandidate]:
+        """回傳全部候選（順序不變；後續策展會自行以 group_id 決定性亂序）。"""
+        return list(candidates)
+
+
 class AutoFallbackSelector:
     """自動 fallback 選取：影片與圖片各依品質由高到低挑到覆蓋對應秒數預算。"""
 
