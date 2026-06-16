@@ -10,12 +10,14 @@
 #   預算 × candidate_multiplier 的候選池；策展（人工或自動 fallback）挑到覆蓋預算為止。
 # - image_ratio：該組圖片佔秒數預算的比例（選填，覆寫 default_image_ratio）。
 #
-# 三軸難度（evaluation 切片用，皆寫進 manifest / prompts）：
+# 組層難度（evaluation 切片用，寫進 manifest）：
 # - topic_difficulty：主題敘事難度（broad 多場景通常較難）。easy / medium / hard。
 # - asset_difficulty：素材雜亂與多樣程度（關鍵字越廣、跨地、影圖越雜越難）。easy / medium / hard。
-# - prompt 難度：不在此設定，由生成階段依 prompt 詳細度自動推導成 U 型（minimal/detailed=hard、
-#   light=easy、specific=medium），落在每筆 prompt 的 difficulty 欄。
 # 本範例刻意讓 topic 與 asset 兩軸都涵蓋 easy/medium/hard，方便比較不同產品在各難度下的表現。
+#
+# prompt：每組只生成「一個」完整的 EditDuet 風格指令，句中含明確目標秒數，並把該秒數存成
+# prompts.json 的 target_duration_sec（供評測算 Time-Constraint-Satisfaction / Coverage）。
+# prompt_count 已棄用、固定為 1（保留欄位僅為相容舊 spec）。
 # 註：broad 旅遊類主題（如「日本旅遊」）刻意放寬地理範圍，可混入跨地（北海道/京都/富士山）標誌性素材。
 
 dataset_version: v1
@@ -44,7 +46,7 @@ groups:
     asset_difficulty: hard
     keywords: [sushi, ramen bowl, tokyo tower, senso-ji temple, torii gate, shibuya crossing, mount fuji, kyoto old street, hokkaido snow, shinkansen train, cherry blossom, osaka night]
     target_total_seconds: 150
-    prompt_count: 8
+    prompt_count: 1
 
   - group_id: night_city_walk
     theme: 城市夜散步
@@ -53,7 +55,7 @@ groups:
     asset_difficulty: hard
     keywords: [neon street signs, traffic light trails, night market food stall, crosswalk at night, skyscraper night, rainy street reflection, izakaya alley, subway station night, rooftop city view, street food grilling]
     target_total_seconds: 90
-    prompt_count: 8
+    prompt_count: 1
 
   - group_id: beach_day
     theme: 海邊一日遊
@@ -62,7 +64,7 @@ groups:
     asset_difficulty: medium
     keywords: [ocean waves, sunset beach, surfing wave, palm trees beach, beach umbrella, snorkeling coral reef, footprints in sand, seaside cliff, beach volleyball, coconut drink beach]
     target_total_seconds: 90
-    prompt_count: 8
+    prompt_count: 1
 
   - group_id: mountain_hike
     theme: 健行登山
@@ -71,7 +73,7 @@ groups:
     asset_difficulty: medium
     keywords: [mountain hiking trail, summit sunrise, sea of clouds, forest path, alpine lake, rocky ridge, hiking boots closeup, trekking backpack, forest waterfall, mountain wildflowers]
     target_total_seconds: 120
-    prompt_count: 8
+    prompt_count: 1
 
   - group_id: gym_workout
     theme: 健身房日常
@@ -80,7 +82,7 @@ groups:
     asset_difficulty: medium
     keywords: [deadlift barbell, squat rack, treadmill running, dumbbell curl, battle ropes, kettlebell swing, sweat closeup, rowing machine, stretching, pull up bar]
     target_total_seconds: 90
-    prompt_count: 8
+    prompt_count: 1
 
   # 居家料理：步驟雖多但場景一致（廚房），素材相對單純 → asset 偏易
   - group_id: home_cooking
@@ -90,7 +92,7 @@ groups:
     asset_difficulty: easy
     keywords: [chopping vegetables, stir fry wok flame, boiling pasta, plating dish, sizzling steak pan, kneading dough, pouring sauce, fresh ingredients, garnishing herbs, knife slicing closeup]
     target_total_seconds: 90
-    prompt_count: 8
+    prompt_count: 1
 
   # ───── focused：單一主體，考驗從相似鏡頭做出節奏與變化（topic 偏易）─────
   # 烘焙甜點 / 水族箱：成品種類多、視覺較雜 → asset 升到 medium
@@ -102,7 +104,7 @@ groups:
     keywords: [cake decorating, piping cream, oven baking, powdered sugar dusting, chocolate ganache, cutting layered cake, strawberry tart, cookie dough, macarons closeup]
     target_total_seconds: 60
     image_ratio: 0.4          # 甜點成品照很適合，這組多放一點圖片
-    prompt_count: 8
+    prompt_count: 1
 
   - group_id: aquarium_fish
     theme: 水族箱
@@ -111,7 +113,7 @@ groups:
     asset_difficulty: medium
     keywords: [tropical fish swimming, aquarium plants, rising bubbles, fish feeding, clownfish closeup, light through water, coral reef tank, school of fish, snail on glass]
     target_total_seconds: 60
-    prompt_count: 8
+    prompt_count: 1
 
   # 特調飲料 / 拉花 / 貓咪 / 多肉：單一主體、視覺一致 → topic 與 asset 皆易
   - group_id: signature_drink
@@ -122,7 +124,7 @@ groups:
     keywords: [iced coffee pouring, cocktail closeup, bubble tea, fruit soda splash, matcha latte, ice cubes drop, citrus garnish, smoothie pour, glass condensation, straw stir]
     target_total_seconds: 60
     image_ratio: 0.4          # 單品照片很適合，這組多放一點圖片
-    prompt_count: 8
+    prompt_count: 1
 
   - group_id: latte_art
     theme: 拉花咖啡
@@ -131,7 +133,7 @@ groups:
     asset_difficulty: easy
     keywords: [latte art pour, espresso extraction, milk foam rosetta, coffee crema closeup, barista tamping, steaming milk pitcher, latte top down, coffee bean grinder]
     target_total_seconds: 45
-    prompt_count: 8
+    prompt_count: 1
 
   - group_id: cat_daily
     theme: 貓咪日常
@@ -140,7 +142,7 @@ groups:
     asset_difficulty: easy
     keywords: [cat closeup, kitten playing, cat yawning, cat paws, cat stretching, cat tail flick, cat grooming, cat staring camera, cat sleeping curled]
     target_total_seconds: 60
-    prompt_count: 8
+    prompt_count: 1
 
   - group_id: potted_plant
     theme: 多肉植物
@@ -150,4 +152,4 @@ groups:
     keywords: [succulent closeup, potted plants row, watering droplets leaf, repotting hands, cactus spines macro, plant on windowsill, terracotta pots, leaf texture macro, plant cuttings]
     target_total_seconds: 45
     image_ratio: 0.4          # 多肉單品照素材豐富
-    prompt_count: 8
+    prompt_count: 1

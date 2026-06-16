@@ -11,12 +11,10 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from .constants import (
-    CAPTION_NONE,
     DEFAULT_CANDIDATE_MULTIPLIER,
     DEFAULT_IMAGE_NOMINAL_SECONDS,
     DEFAULT_IMAGE_RATIO,
     DEFAULT_TARGET_TOTAL_SECONDS,
-    DIFFICULTY_MEDIUM,
 )
 
 # 難度三軸共用的字面值（與 constants.DIFFICULTY_* 對應；Literal 需直接字面量故在此重列）
@@ -43,7 +41,8 @@ class GroupSpec(BaseModel):
     group_id: str = Field(description="組別唯一識別碼，會用於目錄與檔名")
     theme: str = Field(description="主題（中文），用於 prompt 生成")
     keywords: list[str] = Field(min_length=1, description="API 搜尋關鍵字（建議英文）")
-    prompt_count: int = Field(ge=1, description="要生成幾個 user prompt")
+    # 已棄用：改為每組一個 canonical prompt；此值會被忽略（保留以相容舊 spec）
+    prompt_count: int = Field(default=1, ge=1, description="（已棄用）每組固定產生 1 個 prompt")
     # 聚焦度維度：focused=單一主體（如某杯飲料）、broad=多場景（如一日遊）；None 不分類
     scope: Literal["focused", "broad"] | None = Field(default=None)
     # 主題難度：把該主題組成連貫敘事的難度（broad 多場景通常較難）；None 不分級
@@ -150,17 +149,25 @@ class ClipMetadata(BaseModel):
 
 
 class PromptVariant(BaseModel):
-    """單一 user prompt 變異（含多樣性標記，便於分析涵蓋度）。"""
+    """單一 user prompt：一段完整的 EditDuet 風格剪輯指令 + 可機器檢查的 ground truth。
 
-    text: str
-    detail_level: str = Field(description="詳細度：minimal/light/specific/detailed")
-    # Prompt 難度（U 型，由 detail_level 推導）：minimal/detailed=hard、light=easy、specific=medium。
-    # 給預設值避免讀到舊版 prompts.json 驗證失敗；生成階段必定覆寫為實際值。
-    difficulty: str = Field(default=DIFFICULTY_MEDIUM, description="Prompt 難度：easy/medium/hard")
-    tone: str = Field(description="語氣標記")
-    scenario: str = Field(description="情境標記")
-    # 字幕軸：none=未提及、add=要字幕/字卡、no_subtitle=明確不要（供 eval 切片比較字幕能力）
-    caption: str = Field(default=CAPTION_NONE, description="字幕標記：none/add/no_subtitle")
+    每組素材只產生一個這樣的 canonical prompt。``target_duration_sec`` 與 ``caption_requirement``
+    是評測用的 ground truth（前者算 Time-Constraint-Satisfaction / Coverage，後者切片字幕行為）；
+    其餘 ``style``/``music``/``opening_hook``/``tone``/``scenario`` 為描述性標記，便於分析切片。
+    """
+
+    text: str = Field(description="完整的繁中剪輯指令（句中含明確目標秒數）")
+    # 目標秒數 d：EditDuet 的 TC=min(d,d̂)/max(d,d̂) 與 Coverage 都以此為基準；必與 text 句中秒數一致
+    target_duration_sec: int = Field(gt=0, description="目標成片秒數（ground truth）")
+    # 字幕要求 ground truth（見 constants.CAPTION_*）
+    caption_requirement: Literal["required", "forbidden", "unspecified"] = Field(
+        description="字幕要求：required=要、forbidden=明確不要、unspecified=未提及"
+    )
+    style: str = Field(description="prompt 要求的視覺風格（描述用）")
+    music: str = Field(description="prompt 要求的音樂氛圍（描述用）")
+    opening_hook: str = Field(description="prompt 要求的開場鏡頭（描述用）")
+    tone: str = Field(description="語氣標記（描述用）")
+    scenario: str = Field(description="情境標記（描述用）")
 
 
 class CurationSummary(BaseModel):
@@ -179,7 +186,7 @@ class GroupManifest(BaseModel):
     group_id: str
     theme: str
     scope: str | None = None
-    # 三軸難度（評測切片用）：主題與素材難度由 spec 帶入，prompt 難度落在 prompts.json 各筆
+    # 組層難度（評測切片用）：主題與素材難度由 spec 帶入
     topic_difficulty: str | None = None
     asset_difficulty: str | None = None
     clip_count: int
@@ -187,6 +194,8 @@ class GroupManifest(BaseModel):
     image_count: int
     total_seconds: float
     prompt_count: int
+    # 該組唯一 prompt 的目標秒數（EditDuet 的 d）；方便評測 harness 直接從 manifest 取得
+    target_duration_sec: int | None = None
     curation_mode: str = Field(description="manual 或 auto_fallback")
 
 

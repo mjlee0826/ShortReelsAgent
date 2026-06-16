@@ -55,7 +55,7 @@ poetry install          # 或 poetry add pyyaml requests（已執行過）
 | `groups[].keywords` | API 搜尋關鍵字（建議英文，盡量「具體」以提高素材多樣性） |
 | `groups[].image_ratio` | 該組圖片佔比（選填，覆寫 `default_image_ratio`） |
 | `groups[].target_total_seconds` | 該組秒數預算（選填，否則繼承預設） |
-| `groups[].prompt_count` | 要生成幾個 user prompt |
+| `groups[].prompt_count` | （已棄用）每組固定生成 1 個 prompt；欄位僅為相容舊 spec |
 | `groups[].target_clip_count` | 片段數上限/提示（選填） |
 
 ## 使用方式
@@ -137,14 +137,29 @@ python -m eval -c eval/dataset_spec.example.yaml serve --port 9000 # 換埠
 - **影片＋圖片**：同時抓兩家平台的影片與照片；圖片以名目秒數計入同一預算，`image_ratio` 控佔比。
 - **兩家平台公平取用**：每個秒數預算池先讓各來源各自湊到約 `1/來源數`，再用全部來源補滿；因此 Pexels 與 Pixabay 都會混入（不會被先查到的 Pexels 一次塞滿、Pixabay 永遠輪不到）。某來源素材不足時由另一家補齊，預算仍會湊滿。
 - **scope 維度**：每組標 `focused`（單一主體）或 `broad`（多場景），prompt 也會依 scope 調整；評測時可切片比較產品在兩種素材上的表現。
-- **三軸難度**：每組標 `topic_difficulty`（主題敘事難度）與 `asset_difficulty`（素材雜亂/多樣程度），各為 `easy`/`medium`/`hard`，寫進 `manifest.json`；每筆 prompt 另有 `difficulty`，由詳細度自動推導成 **U 型**（`minimal`/`detailed`=`hard`、`light`=`easy`、`specific`=`medium`），寫進 `prompts.json`。評測時可沿「主題 × 素材 × Prompt」三軸切片，比較不同產品在不同難度下的表現。
+- **組層難度 + 目標秒數**：每組標 `topic_difficulty`（主題敘事難度）與 `asset_difficulty`（素材雜亂/多樣程度），各為 `easy`/`medium`/`hard`，寫進 `manifest.json`；每組唯一 prompt 另含明確 `target_duration_sec`（EditDuet 的目標秒數 `d`），同時寫進 `prompts.json` 與 `manifest.json`。評測時可沿「主題 × 素材」難度與目標秒數切片。
 - **關鍵字偏具體**：範例刻意用「壽司／東京鐵塔／拉花」等具體詞而非泛詞，讓候選素材池更多樣；`broad` 旅遊類主題（如「日本旅遊」）刻意放寬地理範圍以提高素材難度。
 - **preview 可播放**：`preview.html` 內嵌 `<video>`，人工策展時可直接看影片再決定保留哪些。
 - **可重複執行**：已下載者用 `video_id` 快取判斷不重抓；prompt 以 `group_id` 為種子決定性生成（重跑結果一致）。
-- **prompt 不呼叫任何 API**：由手寫的繁中範本 + 各主題詞庫（`eval/prompts/lexicon.py`）決定性組合，
-  涵蓋詳細度（從「幫我剪一下」到指定時長/風格/濾鏡）、語氣、情境三軸。
+- **每組一個 EditDuet 風格 prompt（不呼叫任何 API）**：由手寫的繁中範本 + 各主題詞庫（`eval/prompts/lexicon.py`）決定性組出
+  **一段完整指令**——開場鏡頭 → 中段內容 → 結尾收束，含明確目標秒數、風格、配樂、剔除壞片，並依字幕要求接子句。
+  `prompts.json` 同時存 `target_duration_sec` 與 `caption_requirement` 作為評測 ground truth。
 - **design pattern**：Pipeline（階段串接）、Adapter（Pexels/Pixabay）、Strategy（來源/篩選/品質/選取/prompt）、
   Factory（來源、prompt 生成器）、Composite（篩選條件）。
+
+## 評測指標（對齊 EditDuet）
+
+dataset 把評測 ground truth 一併凍結，跑完各產品後即可算 [EditDuet](https://arxiv.org/abs/2509.10761)
+的指標（`d`＝`prompts.json` 的 `target_duration_sec`，`d̂`＝產品輸出影片的實際秒數）：
+
+| 指標 | 算法 | 需要的 ground truth |
+| --- | --- | --- |
+| **Time-Constraint Satisfaction** | `TC = min(d, d̂) / max(d, d̂)`（越接近 1 越好） | `target_duration_sec`（prompts.json / manifest.json） |
+| **Coverage** | 輸出秒數逼近目標秒數的程度（同上彙總成百分比） | `target_duration_sec` |
+| **Failure Rate** | 跑不出有效影片的比例（function/file hallucination、index 越界…） | 任務本身（每組單一直式短片、目標約 `d` 秒、用該組 clips） |
+| **Repetitions** | 同一成片中重疊 ≥80% 的 sub-clip 配對數 | `metadata.json` 的 `clip_name ↔ original_video_id` 溯源 |
+
+字幕行為另可用 `caption_requirement`（`required`/`forbidden`/`unspecified`）切片：該加時有沒有加、該不加時會不會亂加。
 
 ## 授權
 

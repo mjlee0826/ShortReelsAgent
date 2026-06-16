@@ -31,6 +31,18 @@ def _read_bool_env(env_name: str, default: bool) -> bool:
     return raw.strip().lower() in {"true", "1", "yes", "on"}
 
 
+def _read_float_env(env_name: str, default: float) -> float:
+    """讀取 env var 並轉為 float；未設定或格式錯誤時回傳 default（不讓壞值炸掉啟動）。"""
+    raw = os.environ.get(env_name)
+    if raw is None:
+        return default
+    try:
+        return float(raw.strip())
+    except ValueError:
+        # 壞字串視為未設定，回退預設值以保證啟動穩定
+        return default
+
+
 # ── Google Drive API（公開資料夾 + 共用 API key）─────────────────────────────────
 # 全站共用的 Drive API key（Cloud Console 建立、無同意畫面、非 per-user）；
 # 只對「知道連結的人可檢視」的公開檔案有效。未設定時列檔／下載會得到授權錯誤。
@@ -47,6 +59,25 @@ DRIVE_API_TIMEOUT_SEC = _read_int_env("DRIVE_API_TIMEOUT_SEC", 120)
 
 # Drive 用來表示「資料夾」的 mimeType；列檔時以此判斷子資料夾 vs 檔案。
 DRIVE_FOLDER_MIMETYPE = "application/vnd.google-apps.folder"
+
+# ── Drive API 限流退避重試 ───────────────────────────────────────────────────────
+# 「檔案多」的專案首同步會連發大量列檔／下載請求，易撞 Drive API 限流（常以 HTTP 403 +
+# rateLimitExceeded 回應，而非真權限不足）。adapter 偵測到限流時就地指數退避重試，避免暫時性
+# 限流被誤判成授權失效而把專案永久暫停。以下數值皆可由環境變數覆寫，方便實機調校。
+# 單次請求遇限流時，在 adapter 內就地退避重試的最大次數（超過仍失敗才以暫時性錯誤上拋）。
+DRIVE_API_MAX_RETRIES = _read_int_env("DRIVE_API_MAX_RETRIES", 5)
+
+# 首次重試前的基礎等待秒數；其後每次乘以 BACKOFF_MULTIPLIER 形成指數退避。
+DRIVE_API_RETRY_BASE_BACKOFF_SEC = _read_float_env("DRIVE_API_RETRY_BASE_BACKOFF_SEC", 1.0)
+
+# 指數退避倍率：每次重試的等待時間乘以此值。
+DRIVE_API_RETRY_BACKOFF_MULTIPLIER = _read_float_env("DRIVE_API_RETRY_BACKOFF_MULTIPLIER", 2.0)
+
+# 單次退避等待的上限秒數，避免指數成長到不合理的長等待。
+DRIVE_API_RETRY_MAX_BACKOFF_SEC = _read_float_env("DRIVE_API_RETRY_MAX_BACKOFF_SEC", 30.0)
+
+# 退避等待的抖動比例（±此比例隨機擾動）：打散多專案同時退避造成的同步尖峰（thundering herd）。
+DRIVE_API_RETRY_JITTER_RATIO = _read_float_env("DRIVE_API_RETRY_JITTER_RATIO", 0.2)
 
 # ── 輪詢排程 ──────────────────────────────────────────────────────────────────
 # 每個 project 兩次同步的最小間隔（秒），預設 5 分鐘。

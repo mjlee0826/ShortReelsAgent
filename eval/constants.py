@@ -130,15 +130,26 @@ WRITABLE_DIR_MODE: int = 0o755             # 解除凍結重建時暫時用
 
 # ──────────────────────────── Prompt 生成（階段 4）────────────────────────────
 PROMPT_GENERATOR_TEMPLATE: str = "template"  # 目前唯一實作的策略名稱
-# 組合 prompt 時為避免重複，最多重抽幾次
-PROMPT_COMPOSE_MAX_ATTEMPTS: int = 8
 
-# 字幕（字卡／畫面文字）軸的標記值；素材為無對白 stock 片，故指畫面上的文字而非語音轉字幕
-CAPTION_NONE: str = "none"           # prompt 未提到字幕
-CAPTION_ADD: str = "add"             # 要求加字幕／字卡／標題
-CAPTION_NO: str = "no_subtitle"      # 明確要求不要字幕（負面控制組）
-# 達此 prompt_count 才額外保證一個「不要字幕」負面 prompt（低於此只保證一個正面字幕 prompt）
-CAPTION_NEGATIVE_MIN_PROMPTS: int = 4
+# 目標秒數（EditDuet 的 d）：每組唯一 prompt 句中明示、同時存成可機器檢查的
+# target_duration_sec，供評測算 Time-Constraint-Satisfaction（TC=min(d,d̂)/max(d,d̂)）與 Coverage。
+# 依 scope 分桶，並刻意取「短於各組素材秒數預算」的值以確保任務可行
+# （focused 組素材預算約 45–60s、broad 約 90–150s）。
+FOCUSED_TARGET_DURATIONS_SEC: tuple[int, ...] = (15, 20, 30)
+BROAD_TARGET_DURATIONS_SEC: tuple[int, ...] = (30, 45, 60)
+DEFAULT_TARGET_DURATIONS_SEC: tuple[int, ...] = (20, 30, 45)
+
+# 字幕（字卡／畫面文字）要求；素材為無對白 stock 片，故指畫面上的文字而非語音轉字幕。
+# 作為 ground truth，供評測切片「該加時有沒有加、該不加時會不會亂加」。
+CAPTION_REQUIRED: str = "required"        # 明確要求加字幕／字卡
+CAPTION_FORBIDDEN: str = "forbidden"      # 明確要求不要任何字幕（負面控制）
+CAPTION_UNSPECIFIED: str = "unspecified"  # 未提及字幕
+# 每組決定性抽樣的權重（讓整份 dataset 產生三種要求的混合，供字幕行為切片）；鍵須為上述三值。
+CAPTION_REQUIREMENT_WEIGHTS: dict[str, float] = {
+    CAPTION_UNSPECIFIED: 0.5,
+    CAPTION_REQUIRED: 0.33,
+    CAPTION_FORBIDDEN: 0.17,
+}
 
 # ──────────────────────────── 互動策展 server（serve 子指令）────────────────────────────
 # 只綁本機回送位址（localhost），不對外開放

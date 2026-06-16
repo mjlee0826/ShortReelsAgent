@@ -11,13 +11,21 @@ httpx client 可由外部注入，方便測試時以 `httpx.MockTransport` 餵 c
 from __future__ import annotations
 
 import os
+import random
 import re
+import time
+from typing import Callable, TypeVar
 
 import httpx
 
 from config.ingestion_config import (
     DRIVE_API_BASE_URL,
+    DRIVE_API_MAX_RETRIES,
     DRIVE_API_PAGE_SIZE,
+    DRIVE_API_RETRY_BACKOFF_MULTIPLIER,
+    DRIVE_API_RETRY_BASE_BACKOFF_SEC,
+    DRIVE_API_RETRY_JITTER_RATIO,
+    DRIVE_API_RETRY_MAX_BACKOFF_SEC,
     DRIVE_API_TIMEOUT_SEC,
     DRIVE_FOLDER_MIMETYPE,
     GOOGLE_API_KEY,
@@ -29,10 +37,33 @@ from ingestion_engine.models import RemoteEntry
 
 # 視為「授權／權限失效」的 HTTP 狀態碼（API key 對非公開檔案無效、資料夾轉私人皆落此）。
 _AUTH_ERROR_STATUS = (401, 403)
+# HTTP「請求過多」狀態碼：明確的限流訊號，一律視為暫時性、可退避重試。
+_HTTP_TOO_MANY_REQUESTS = 429
 # HTTP 錯誤判定門檻：>= 此值即視為失敗回應。
 _HTTP_ERROR_THRESHOLD = 400
+# Drive API 在 403 回應 body 中代表「限流／配額用盡」(而非真權限不足) 的 error reason 集合；
+# 命中這些 reason 的 403 屬暫時性，須退避重試而非當成授權失效把專案永久暫停。
+_RATE_LIMIT_REASONS = frozenset({
+    "rateLimitExceeded",
+    "userRateLimitExceeded",
+    "dailyLimitExceeded",
+    "sharingRateLimitExceeded",
+    "quotaExceeded",
+})
 # 串流下載的暫存副檔名（下載完成才 rename，避免半截檔被誤判為已完成）。
 _PARTIAL_SUFFIX = ".part"
+
+# 「執行一次嘗試」callable 的回傳型別變數，供 _with_retry 泛型保留 attempt 的回傳型別。
+_T = TypeVar("_T")
+
+
+class _RateLimitedError(RemoteAccessError):
+    """
+    內部訊號例外：Drive API 限流（rate limit／quota）→ 屬暫時性，供 _with_retry 退避重試。
+
+    刻意設為 RemoteAccessError 子類：即使重試耗盡逸出本 adapter，同步協調層也只會標 error、
+    下輪 poller 重試，絕不會被當成授權失效（RemoteAuthError）而把專案永久暫停。
+    """
 
 # 無法解析資料夾 ID 時回給使用者的提示。
 DRIVE_URL_HINT = (
@@ -122,53 +153,142 @@ class PublicDriveApiAdapter(CloudStorageAdapter):
         return children
 
     def _download_file(self, file_id: str, dest_path: str) -> None:
-        """以 alt=media 串流下載單檔到暫存檔，完成後 rename 成最終檔（避免半截檔）。"""
+        """以 alt=media 串流下載單檔到暫存檔，完成後 rename 成最終檔；遇限流退避重試（避免半截檔）。"""
         url = f"{self._base_url}/files/{file_id}"
         params = {"alt": "media", "key": self._api_key}
         tmp_path = f"{dest_path}{_PARTIAL_SUFFIX}"
-        try:
-            with self._client.stream("GET", url, params=params) as resp:
-                self._raise_for_status(resp.status_code, context=f"下載檔案 {file_id}")
-                with open(tmp_path, "wb") as handle:
-                    for chunk in resp.iter_bytes():
-                        handle.write(chunk)
-            os.replace(tmp_path, dest_path)
-        except httpx.TimeoutException as exc:
-            self._remove_quietly(tmp_path)
-            raise RemoteAccessError(f"下載檔案逾時：{file_id}") from exc
-        except httpx.RequestError as exc:
-            self._remove_quietly(tmp_path)
-            raise RemoteAccessError(f"下載檔案失敗（網路錯誤）：{file_id}：{exc}") from exc
-        except IngestionError:
-            self._remove_quietly(tmp_path)
-            raise
+        context = f"下載檔案 {file_id}"
+
+        def _attempt() -> None:
+            """單次下載嘗試；任何攝取層例外（含限流訊號）發生前先清半截暫存檔再上拋。"""
+            try:
+                with self._client.stream("GET", url, params=params) as resp:
+                    self._classify_http_error(resp, context=context)
+                    with open(tmp_path, "wb") as handle:
+                        for chunk in resp.iter_bytes():
+                            handle.write(chunk)
+                os.replace(tmp_path, dest_path)
+            except httpx.TimeoutException as exc:
+                self._remove_quietly(tmp_path)
+                raise RemoteAccessError(f"下載檔案逾時：{file_id}") from exc
+            except httpx.RequestError as exc:
+                self._remove_quietly(tmp_path)
+                raise RemoteAccessError(f"下載檔案失敗（網路錯誤）：{file_id}：{exc}") from exc
+            except IngestionError:
+                # 含限流 _RateLimitedError：先清半截暫存檔再上拋（限流者由 _with_retry 退避後重試）
+                self._remove_quietly(tmp_path)
+                raise
+
+        self._with_retry(_attempt, context=context)
 
     def _get_json(self, url: str, params: dict, context: str) -> dict:
-        """送出 GET 並回傳解析後 JSON；網路／逾時／HTTP／解析錯誤統一分類成攝取層例外。"""
-        try:
-            resp = self._client.get(url, params=params)
-        except httpx.TimeoutException as exc:
-            raise RemoteAccessError(f"{context}逾時") from exc
-        except httpx.RequestError as exc:
-            raise RemoteAccessError(f"{context}失敗（網路錯誤）：{exc}") from exc
-        self._raise_for_status(resp.status_code, context=context)
-        try:
-            return resp.json()
-        except ValueError as exc:  # 含 json.JSONDecodeError
-            raise RemoteAccessError(f"{context}：無法解析 Drive API 回應") from exc
+        """送出 GET 並回傳解析後 JSON；遇限流退避重試，網路／逾時／HTTP／解析錯誤統一分類成攝取層例外。"""
 
-    # ── 純函式工具 ────────────────────────────────────────────────────────────
+        def _attempt() -> dict:
+            """單次列檔請求嘗試；回傳解析後 JSON 或上拋分類後的攝取層例外。"""
+            try:
+                resp = self._client.get(url, params=params)
+            except httpx.TimeoutException as exc:
+                raise RemoteAccessError(f"{context}逾時") from exc
+            except httpx.RequestError as exc:
+                raise RemoteAccessError(f"{context}失敗（網路錯誤）：{exc}") from exc
+            self._classify_http_error(resp, context=context)
+            try:
+                return resp.json()
+            except ValueError as exc:  # 含 json.JSONDecodeError
+                raise RemoteAccessError(f"{context}：無法解析 Drive API 回應") from exc
 
-    @staticmethod
-    def _raise_for_status(status_code: int, context: str) -> None:
-        """依 HTTP 狀態碼分類：401／403 → 授權失效；其餘 >=400 → 一般存取錯誤。"""
+        return self._with_retry(_attempt, context)
+
+    # ── 錯誤分類與退避重試 ─────────────────────────────────────────────────────
+
+    def _with_retry(self, attempt: Callable[[], _T], context: str) -> _T:
+        """
+        執行 attempt()，對「限流」(_RateLimitedError) 指數退避＋抖動重試；其餘錯誤立即上拋。
+
+        重試耗盡仍限流時，以 RemoteAccessError（暫時性）上拋——交給同步協調層標 error、下輪
+        poller 重試，絕不冒充 RemoteAuthError 把專案永久暫停。在工作執行緒內以 time.sleep 阻塞
+        等待（sync_project 經 asyncio.to_thread 執行，不卡 event loop）。
+        """
+        backoff_sec = DRIVE_API_RETRY_BASE_BACKOFF_SEC
+        for attempt_index in range(DRIVE_API_MAX_RETRIES + 1):
+            try:
+                return attempt()
+            except _RateLimitedError as exc:
+                if attempt_index >= DRIVE_API_MAX_RETRIES:
+                    raise RemoteAccessError(
+                        f"{context}：Drive API 持續限流，已重試 {DRIVE_API_MAX_RETRIES} 次仍失敗，"
+                        "稍後將自動再嘗試。"
+                    ) from exc
+                wait_sec = self._backoff_with_jitter(backoff_sec)
+                print(
+                    f"[PublicDriveApi] ⏳ {context} 遇限流，{wait_sec:.1f}s 後重試"
+                    f"（{attempt_index + 1}/{DRIVE_API_MAX_RETRIES}）：{exc}"
+                )
+                time.sleep(wait_sec)
+                backoff_sec *= DRIVE_API_RETRY_BACKOFF_MULTIPLIER
+
+    def _classify_http_error(self, resp: httpx.Response, context: str) -> None:
+        """
+        依 HTTP 狀態碼 + Drive API 錯誤原因把失敗回應分流成對應例外（2xx 直接放行）。
+
+        關鍵分流：403 可能是「真權限不足」也可能是「限流／配額用盡」，後者 body 的
+        error.errors[].reason 落在 _RATE_LIMIT_REASONS。限流（含 HTTP 429）一律丟
+        _RateLimitedError（暫時性 → 由 _with_retry 退避重試），唯有真權限不足才丟
+        RemoteAuthError，避免暫時性限流被誤判成授權失效而把專案永久暫停。
+        """
+        status_code = resp.status_code
+        if status_code < _HTTP_ERROR_THRESHOLD:
+            return
+        reason = self._extract_error_reason(resp)
+        is_rate_limited = status_code == _HTTP_TOO_MANY_REQUESTS or (
+            status_code in _AUTH_ERROR_STATUS and reason in _RATE_LIMIT_REASONS
+        )
+        if is_rate_limited:
+            detail = f" / {reason}" if reason else ""
+            raise _RateLimitedError(f"{context}：Drive API 限流（HTTP {status_code}{detail}）")
         if status_code in _AUTH_ERROR_STATUS:
             raise RemoteAuthError(
                 f"{context}：授權／權限失效（HTTP {status_code}），"
                 "請確認資料夾已設為「知道連結的人可檢視」且 API key 有效。"
             )
-        if status_code >= _HTTP_ERROR_THRESHOLD:
-            raise RemoteAccessError(f"{context}：Drive API 回應 HTTP {status_code}")
+        raise RemoteAccessError(f"{context}：Drive API 回應 HTTP {status_code}")
+
+    # ── 純函式工具 ────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _extract_error_reason(resp: httpx.Response) -> str | None:
+        """
+        從 Drive API 錯誤回應 body 取出第一個 error.errors[].reason（取不到再退取 error.status）。
+
+        串流下載的回應 body 尚未載入，需先 read() 才能解析（對一般回應為冪等）；任何解析失敗都
+        回 None（讓呼叫端退回純狀態碼分類），best-effort 不得掩蓋原本要回報的 HTTP 錯誤。
+        """
+        try:
+            resp.read()  # 串流回應先把（通常很小的）錯誤 body 讀進來；一般回應已讀取，呼叫冪等
+            body = resp.json()
+        except (ValueError, RuntimeError, httpx.HTTPError):
+            return None
+        if not isinstance(body, dict):
+            return None
+        error = body.get("error")
+        if not isinstance(error, dict):
+            return None
+        errors = error.get("errors")
+        if isinstance(errors, list) and errors and isinstance(errors[0], dict):
+            reason = errors[0].get("reason")
+            if reason:
+                return reason
+        # 新式錯誤格式可能只帶 status 字串（如 "RESOURCE_EXHAUSTED"）
+        status = error.get("status")
+        return status if isinstance(status, str) else None
+
+    @staticmethod
+    def _backoff_with_jitter(base_backoff_sec: float) -> float:
+        """把基礎退避秒數夾在上限內，再套 ±JITTER_RATIO 隨機抖動，打散多專案同步退避尖峰。"""
+        capped = min(base_backoff_sec, DRIVE_API_RETRY_MAX_BACKOFF_SEC)
+        jitter = capped * DRIVE_API_RETRY_JITTER_RATIO
+        return max(0.0, capped + random.uniform(-jitter, jitter))
 
     @staticmethod
     def _to_entry(item: dict) -> RemoteEntry:

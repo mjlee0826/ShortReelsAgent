@@ -1,169 +1,89 @@
-"""手寫的繁體中文 prompt 範本庫與各主題詞庫（多樣性來源）。
+"""手寫的繁體中文 prompt 範本庫與各主題詞庫（每組唯一 prompt 的組裝來源）。
 
-設計目標（對應 docs 的多樣性軸）：
-- **詳細度**：minimal（「幫我剪一下」）→ light（帶平台/情境）→ specific（指定時長/風格/音樂）
-  → detailed（多項具體要求，並提到素材是亂序、要剔除壞片）。
-- **語氣**：隨興／禮貌／急迫／興奮。
-- **情境**：發限動／紀念／分享朋友／投稿。
-- **字幕**：none（未提及）／add（要字幕/字卡/標題）／no_subtitle（明確不要）。素材為無對白 stock 片，
-  故「字幕」指畫面上的文字／字卡／標題，而非語音轉字幕。
+每組素材只生成「一段完整的 EditDuet 風格剪輯指令」：開場鏡頭 → 中段內容 → 結尾收束，
+帶明確目標秒數、視覺風格、配樂、剔除壞片，並依字幕要求接上對應子句。範本依素材組的
+``scope`` 切兩種敘事：
 
-範本以 ``str.format`` 佔位符填入：``{theme} {subject} {hook} {duration} {style} {music}
-{platform} {scenario} {tone} {caption}``。未列入 ``THEME_LEXICONS`` 的主題會用 ``generic_lexicon`` 以
-主題字串本身填空，確保 prompt 仍切合主題。
+- **focused**（單一主體）：多放同一主體的不同角度特寫。
+- **broad**（多場景）：強調素材亂序，重排成有起承轉合的多場景敘事。
+
+範本以 ``str.format`` 佔位符填入：``{tone} {theme} {duration} {hook} {subject_a} {subject_b}
+{subject_c} {style} {music} {cleanup} {caption_clause} {scenario}``。未列入 ``THEME_LEXICONS``
+的主題會用 ``generic_lexicon`` 以主題字串本身填空，確保 prompt 仍切合主題。
 """
 from __future__ import annotations
 
 from ..constants import (
-    DIFFICULTY_EASY,
-    DIFFICULTY_HARD,
-    DIFFICULTY_MEDIUM,
+    CAPTION_FORBIDDEN,
+    CAPTION_REQUIRED,
+    CAPTION_UNSPECIFIED,
     SCOPE_BROAD,
     SCOPE_FOCUSED,
 )
 
-# ──────────────────────────── 詳細度級別 ────────────────────────────
-DETAIL_MINIMAL: str = "minimal"
-DETAIL_LIGHT: str = "light"
-DETAIL_SPECIFIC: str = "specific"
-DETAIL_DETAILED: str = "detailed"
+# ──────────────────────────── scope 對應的指令範本 ────────────────────────────
+# 每個範本都是一段完整指令：開場（{hook}）→ 中段（{subject_a}/{subject_b}）→ 結尾（{subject_c}），
+# 帶 {duration} 秒、{style}、{music}、{cleanup}，並接上 {caption_clause}（依字幕要求）與 {scenario}。
+# scope 為 None 時用 GENERIC_PROMPT_TEMPLATES。
 
-# 由低到高的順序（generator 用來保證涵蓋度）
-DETAIL_LEVEL_ORDER: list[str] = [
-    DETAIL_MINIMAL,
-    DETAIL_LIGHT,
-    DETAIL_SPECIFIC,
-    DETAIL_DETAILED,
+# 通用（未分聚焦度）：一般敘事
+GENERIC_PROMPT_TEMPLATES: list[str] = [
+    "{tone}幫我把這批{theme}的素材剪成一支 {duration} 秒的直式短影音：用{hook}開場，"
+    "中段把{subject_a}、{subject_b}排出節奏，結尾收在{subject_c}；整體走{style}、"
+    "{music}的配樂{caption_clause}，{cleanup}，{scenario}",
+    "{tone}這批{theme}的素材幫我剪成一支 {duration} 秒的直式短片：開頭用{hook}抓住注意力，"
+    "中段帶{subject_a}、{subject_b}，結尾停在{subject_c}；{style}、{music}的配樂"
+    "{caption_clause}，{cleanup}，{scenario}",
 ]
 
-# 詳細度 → Prompt 難度（U 型）：兩端都難、中間易。
-# - minimal：欠規格、需 agent 自行推斷意圖 → hard
-# - light：帶平台/情境的輕量指示 → easy
-# - specific：指定時長/風格/音樂等具體但有限 → medium
-# - detailed：多項約束要同時滿足（重排/剔除/開場/調色…）→ hard
-DETAIL_TO_PROMPT_DIFFICULTY: dict[str, str] = {
-    DETAIL_MINIMAL: DIFFICULTY_HARD,
-    DETAIL_LIGHT: DIFFICULTY_EASY,
-    DETAIL_SPECIFIC: DIFFICULTY_MEDIUM,
-    DETAIL_DETAILED: DIFFICULTY_HARD,
-}
-
-# ──────────────────────────── 各級別範本 ────────────────────────────
-TEMPLATES: dict[str, list[str]] = {
-    DETAIL_MINIMAL: [
-        "{tone}幫我把這些{theme}的影片剪成一支短片",
-        "{tone}{theme}的素材幫我剪一下",
-        "{tone}這批{theme}的片段幫我湊成一支短影音",
-        "{tone}這些{theme}的影片幫我隨便剪成一支就好",
-        "{tone}{theme}的片段，幫我快速做成一支短影音",
+# focused（單一主體）：多放同一主體的不同角度特寫
+# broad（多場景）：強調素材亂序，重排成有起承轉合的多場景敘事
+SCOPE_PROMPT_TEMPLATES: dict[str, list[str]] = {
+    SCOPE_FOCUSED: [
+        "{tone}幫我把這批{theme}的素材剪成一支 {duration} 秒的直式短影音：開頭用{hook}抓住注意力，"
+        "中段多放{subject_a}、{subject_b}的不同角度特寫，結尾收在{subject_c}的畫面；"
+        "整體走{style}、{music}的配樂{caption_clause}，{cleanup}，{scenario}",
+        "{tone}這批素材都是{theme}，幫我剪成一支 {duration} 秒的直式特寫短片：用{hook}開場，"
+        "把{subject_a}、{subject_b}換不同角度排出節奏，結尾停在{subject_c}；"
+        "走{style}、{music}的配樂{caption_clause}，{cleanup}，{scenario}",
     ],
-    DETAIL_LIGHT: [
-        "{tone}幫我把{theme}的影片剪成適合{platform}的短片，{scenario}",
-        "{tone}想用這些{theme}的素材做一支短影音放到{platform}，{scenario}",
-        "{tone}幫我把{theme}的片段剪得順一點，{scenario}就好",
-        "{tone}幫我把{theme}的素材剪成一支短片放{platform}，{scenario}，順順的就好",
-        "{tone}這些{theme}想做成短影音貼到{platform}，{scenario}",
-    ],
-    DETAIL_SPECIFIC: [
-        "{tone}想把{theme}的片段剪成{duration}的短影音，走{style}，配{music}的音樂",
-        "{tone}幫我把這些{theme}素材剪成{duration}、{style}的影片，音樂用{music}的",
-        "{tone}這批{theme}的影片幫我做成{duration}短片，風格{style}，節奏配{music}",
-        "{tone}幫我把{theme}剪成{duration}、走{style}的短片，配{music}的音樂，給{platform}用",
-        "{tone}這批{theme}想剪成{duration}短影音：{style}風格、{music}配樂",
-    ],
-    DETAIL_DETAILED: [
-        "{tone}這批{theme}的素材順序是亂的，幫我重新排好剪成{duration}的短片："
-        "開頭放{hook}，整體走{style}，配{music}音樂，畫質差或晃動的請剔除，最後{scenario}",
-        "{tone}幫我把{theme}的片段剪成{duration}、適合{platform}的成品："
-        "先用{hook}開場，色調走{style}，音樂{music}，轉場順一點，{scenario}",
-        "{tone}想要一支{duration}的{theme}短影音：用{hook}當開頭，{style}風格，"
-        "{music}配樂，把重複的片段拿掉，{scenario}",
-        "{tone}{theme}的素材有點亂，幫我剪成{duration}適合{platform}的成品："
-        "{hook}開場、{style}調色、{music}配樂，模糊或重複的拿掉，{scenario}",
+    SCOPE_BROAD: [
+        "{tone}這批{theme}的素材是不同場景、順序也亂了，幫我重排成一支 {duration} 秒、"
+        "有起承轉合的直式短影音：用{hook}開場，中段串起{subject_a}、{subject_b}等不同畫面，"
+        "結尾收在{subject_c}；整體走{style}、{music}的配樂、場景轉場順一點{caption_clause}，{cleanup}，{scenario}",
+        "{tone}幫我把這批{theme}的素材（場景很雜、順序是亂的）排成一支 {duration} 秒的直式短片："
+        "{hook}開場帶氣氛，中段把{subject_a}、{subject_b}串順，結尾落在{subject_c}；"
+        "走{style}、{music}的配樂{caption_clause}，{cleanup}，{scenario}",
     ],
 }
 
-# scope 專屬模板：依素材組聚焦度併入既有四級詳細度（focused=單一主體多角度；broad=多場景敘事）
-SCOPE_TEMPLATES: dict[str, dict[str, list[str]]] = {
-    SCOPE_FOCUSED: {
-        DETAIL_LIGHT: [
-            "{tone}幫我把這些{theme}的鏡頭剪成一支聚焦的短片，多放幾個{subject}的角度，{scenario}",
-            "{tone}這些都是{theme}，幫我挑幾顆{subject}剪成一支特寫短片放{platform}，{scenario}",
-        ],
-        DETAIL_SPECIFIC: [
-            "{tone}這些都是{theme}的素材，幫我剪成{duration}的特寫短片，主角就是它，風格{style}、配{music}音樂",
-            "{tone}全部是{theme}，幫我剪成{duration}的單品短片：多給{subject}的特寫，{style}、配{music}",
-        ],
-        DETAIL_DETAILED: [
-            "{tone}全部都是{theme}，幫我挑最好看的幾顆剪成{duration}：用{hook}開場，"
-            "多放不同角度的{subject}特寫，{style}風格、{music}配樂，重複或晃動的剔除，{scenario}",
-            "{tone}這支主角只有{theme}：用{hook}開場，{subject}的特寫換不同角度排出節奏，"
-            "剪成{duration}、{style}、配{music}，糊掉或重複的拿掉，{scenario}",
-        ],
-    },
-    SCOPE_BROAD: {
-        DETAIL_LIGHT: [
-            "{tone}這批{theme}有好幾個場景，幫我串成一支有故事感的短片放到{platform}，{scenario}",
-            "{tone}{theme}場景蠻多的，幫我串成一支順順的短片放{platform}，{scenario}",
-        ],
-        DETAIL_SPECIFIC: [
-            "{tone}{theme}的素材場景很雜，幫我排成{duration}的短片，走{style}、配{music}，場景之間轉場要順",
-            "{tone}{theme}有不同場景，幫我排成{duration}有節奏的一支：{style}、配{music}，從{hook}帶出整段",
-        ],
-        DETAIL_DETAILED: [
-            "{tone}{theme}的素材是不同場景、順序也亂，幫我重排成{duration}有起承轉合的一支："
-            "{hook}開場，{style}風格、{music}配樂，把重複的拿掉，{scenario}",
-            "{tone}{theme}橫跨好幾個場景又是亂序，幫我重排成{duration}的一支：用{hook}開場帶氣氛，"
-            "場景之間轉場順一點，{style}、配{music}，畫質差的剔除，{scenario}",
-        ],
-    },
-}
+# ──────────────────────────── 剔除壞片子句（填入 {cleanup}）────────────────────────────
+CLEANUP_CHOICES: list[str] = [
+    "畫質差或晃動的片段請剔除",
+    "模糊或重複的片段拿掉",
+    "晃動、糊掉的片段不要用",
+    "重複和畫質差的片段幫我剔除",
+]
 
-# ──────────────────────────── 字幕（字卡／畫面文字）範本 ────────────────────────────
-# 正面：要求加字幕／字卡。僅 specific 與 detailed 兩級（字幕屬具體要求，不放在極簡級）。
-# ``{caption}`` 由 CAPTION_CHOICES 填入具體字幕要求。
-CAPTION_TEMPLATES: dict[str, list[str]] = {
-    DETAIL_SPECIFIC: [
-        "{tone}幫我把{theme}剪成{duration}的短片，{caption}，配{music}的音樂",
-        "{tone}這批{theme}剪成{duration}、走{style}的短影音，記得{caption}",
-        "{tone}幫我把{theme}做成{duration}的短片放{platform}，{caption}",
+# ──────────────────────────── 字幕子句（依 caption_requirement 接上 {caption_clause}）────────────────────────────
+# 子句一律以「，」開頭，故 unspecified 用空字串時句子仍然通順（無多餘標點）。
+CAPTION_CLAUSES: dict[str, list[str]] = {
+    CAPTION_REQUIRED: [
+        "，記得幫我上字幕、重點打字卡",
+        "，幫每段配上說明字幕",
+        "，開頭打一張標題字卡、重點句子上字幕",
     ],
-    DETAIL_DETAILED: [
-        "{tone}這批{theme}的素材順序是亂的，幫我重排成{duration}的短片：開頭放{hook}，{caption}，"
-        "整體走{style}、配{music}音樂，畫質差的剔除，{scenario}",
-        "{tone}幫我把{theme}剪成{duration}適合{platform}的成品：{hook}開場、{style}調色、{music}配樂，"
-        "{caption}，重複的拿掉，{scenario}",
-        "{tone}想要一支{duration}的{theme}短影音：用{hook}當開頭，{caption}，{style}風格、{music}配樂，{scenario}",
+    CAPTION_FORBIDDEN: [
+        "，整支不要任何字幕或畫面文字",
+        "，全程不要字幕、純靠畫面",
+        "，不要加任何字幕或字卡",
     ],
-}
-
-# 負面：明確不要任何字幕／畫面文字（eval 的控制組，測 agent 會不會該不加時亂加）。
-CAPTION_NEGATIVE_TEMPLATES: dict[str, list[str]] = {
-    DETAIL_SPECIFIC: [
-        "{tone}幫我把{theme}剪成{duration}的短片，走{style}、配{music}，不要加任何字幕，純畫面就好",
-        "{tone}這批{theme}做成{duration}的短影音放{platform}，{style}、配{music}，全程不要字幕或文字",
-    ],
-    DETAIL_DETAILED: [
-        "{tone}這批{theme}是亂序的，幫我重排成{duration}的成品：{hook}開場、{style}調色、{music}配樂，"
-        "整支都不要字幕或畫面文字，乾淨一點，{scenario}",
-        "{tone}幫我把{theme}剪成{duration}適合{platform}的成品：{hook}開場、{style}、{music}配樂，"
-        "不要任何字幕純靠畫面，重複的拿掉，{scenario}",
-    ],
+    CAPTION_UNSPECIFIED: [""],
 }
 
 # ──────────────────────────── 通用詞庫（跨主題）────────────────────────────
-DURATION_CHOICES: list[str] = ["15 秒", "20 秒", "30 秒", "40 秒", "45 秒左右", "一分鐘以內", "一分鐘左右"]
-# 字幕的具體要求（填入 CAPTION_TEMPLATES 的 {caption}）：涵蓋位置、大小、配色、字卡、關鍵字
-CAPTION_CHOICES: list[str] = [
-    "幫每段配上說明字幕",
-    "重點的地方打上字幕",
-    "幫我加字幕、放在畫面下方",
-    "字幕記得大一點、白字黑邊",
-    "開頭打一張標題字卡",
-    "把關鍵字打在畫面上",
-    "幫我上字幕，字體再大一點",
-    "重要的句子用字卡帶出來",
-]
+# 目標秒數已改為整數、集中於 constants（FOCUSED/BROAD/DEFAULT_TARGET_DURATIONS_SEC）；
+# 字幕改以 CAPTION_CLAUSES 子句接入，故此處不再有 DURATION_CHOICES / CAPTION_CHOICES / PLATFORM_CHOICES。
 STYLE_CHOICES: list[str] = [
     "電影感調色",
     "清新明亮的風格",
@@ -187,7 +107,6 @@ MUSIC_CHOICES: list[str] = [
     "city pop",
     "輕快口哨",
 ]
-PLATFORM_CHOICES: list[str] = ["IG Reels", "TikTok", "YouTube Shorts", "小紅書", "Facebook Reels"]
 
 # 語氣：(標記, 句首前綴)；前綴可為空字串（隨興）
 TONE_CHOICES: list[tuple[str, str]] = [

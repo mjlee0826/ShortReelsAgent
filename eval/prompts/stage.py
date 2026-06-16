@@ -22,14 +22,13 @@ class PromptStage(PipelineStage):
         self._generator = PromptGeneratorFactory.create()
 
     def run(self, context: BuildContext) -> None:
-        """對每組生成 prompt 並寫檔。"""
+        """對每組生成單一 canonical prompt 並寫檔。"""
         for group in context.spec.groups:
             variants = self._generator.generate(group)
             write_models(context.prompts_json(group), variants)
-            covered = sorted({v.detail_level for v in variants})
-            captions = sorted({v.caption for v in variants})
-            difficulties = sorted({v.difficulty for v in variants})
+            prompt = variants[0]  # 每組固定一個 canonical prompt
             logger.info(
-                "組 %s：產生 %d 個 prompt（涵蓋詳細度 %s、難度 %s、字幕 %s）",
-                group.group_id, len(variants), covered, difficulties, captions,
+                "組 %s：產生 %d 個 canonical prompt（目標 %d 秒、字幕=%s、scope=%s）",
+                group.group_id, len(variants), prompt.target_duration_sec,
+                prompt.caption_requirement, group.scope or "未分類",
             )

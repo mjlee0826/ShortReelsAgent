@@ -107,6 +107,8 @@ class DatasetPackager:
         summary = self._read_summary(context, group)
         video_count = sum(1 for m in clip_metadata if m.media_type is MediaType.VIDEO)
         image_count = sum(1 for m in clip_metadata if m.media_type is MediaType.IMAGE)
+        # 該組唯一 prompt 的目標秒數（EditDuet 的 d）；缺 prompt 時為 None
+        target_duration_sec = prompts[0].target_duration_sec if prompts else None
         return GroupManifest(
             group_id=group.group_id,
             theme=group.theme,
@@ -118,6 +120,7 @@ class DatasetPackager:
             image_count=image_count,
             total_seconds=summary.total_seconds,
             prompt_count=len(prompts),
+            target_duration_sec=target_duration_sec,
             curation_mode=summary.curation_mode,
         )
 

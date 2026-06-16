@@ -37,11 +37,14 @@
   - 根據我的選擇，把選中的片段複製到該組的正式素材資料夾，並**用亂序命名**（clip_01, clip_02… 的順序不對應任何理想排序）
 - 若我沒做人工選擇，提供一個 fallback：自動選畫質較好的前 N 段，但 log 要明確標示「這是自動 fallback，非人工策展」
 
-### 階段 4：生成 prompt 變異
-- 對每組生成 prompt_count 個多樣化的 user prompt
-- 多樣性要涵蓋：詳細度（從「幫我剪一下」到具體指定時長/風格/濾鏡）、語氣、情境
-- 生成方式：可呼叫 LLM API（用 Anthropic API，從環境變數讀 ANTHROPIC_API_KEY），或先提供 template-based 的生成器，兩種都可，請選一種實作並說明
-- prompt 要貼合該組主題（旅遊組的 prompt 要講旅遊）
+### 階段 4：生成 prompt（每組一個 EditDuet 風格指令）
+- 對每組生成「一個」完整的 user prompt（不再是多個變異）：一段連貫的 EditDuet 風格剪輯指令——
+  開場鏡頭 → 中段內容 → 結尾收束，含明確目標秒數、風格、配樂、剔除壞片，並依字幕要求接子句。
+- 生成方式：template-based、決定性（以 group_id 為種子）、不呼叫任何 LLM API。
+- prompt 要貼合該組主題（旅遊組的 prompt 要講旅遊），並依 scope（focused/broad）切換敘事。
+- 為對齊 EditDuet 指標，prompt 句中必含明確目標秒數，並把該秒數存成 prompts.json 的
+  `target_duration_sec`（評測算 Time-Constraint-Satisfaction / Coverage 用）；字幕要求存
+  `caption_requirement`（required/forbidden/unspecified）。
 
 ### 階段 5：打包與凍結
 - 產出版本化的唯讀 dataset，目錄結構如下：
