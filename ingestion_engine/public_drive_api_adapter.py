@@ -32,7 +32,12 @@ from config.ingestion_config import (
     INGESTION_MEDIA_EXTENSIONS,
 )
 from ingestion_engine.cloud_storage_adapter import CloudStorageAdapter
-from ingestion_engine.exceptions import IngestionError, RemoteAccessError, RemoteAuthError
+from ingestion_engine.exceptions import (
+    IngestionError,
+    RemoteAccessError,
+    RemoteAuthError,
+    RemoteFileUnavailableError,
+)
 from ingestion_engine.models import RemoteEntry
 
 # 視為「授權／權限失效」的 HTTP 狀態碼（API key 對非公開檔案無效、資料夾轉私人皆落此）。
@@ -50,6 +55,16 @@ _RATE_LIMIT_REASONS = frozenset({
     "sharingRateLimitExceeded",
     "quotaExceeded",
 })
+# Drive API 在 403 回應 body 中代表「此檔無法以 alt=media 下載」(該檔層級、非授權問題) 的 reason；
+# 命中者應略過該檔、續抓其餘，而非把整個 project 當授權失效暫停。
+# - fileNotDownloadable：Google 原生檔(Docs/Sheets/Slides)、捷徑等無二進位內容
+# - cannotDownloadAbusiveFile：被標記為可能有害、需額外確認才能下載；先一律略過較安全
+_NON_DOWNLOADABLE_REASONS = frozenset({
+    "fileNotDownloadable",
+    "cannotDownloadAbusiveFile",
+})
+# Google 原生檔／捷徑／資料夾的 mimeType 共同前綴；這類無二進位內容，列檔階段即排除不嘗試下載。
+_GOOGLE_APPS_MIMETYPE_PREFIX = "application/vnd.google-apps."
 # 串流下載的暫存副檔名（下載完成才 rename，避免半截檔被誤判為已完成）。
 _PARTIAL_SUFFIX = ".part"
 # 診斷用：印出 Drive API 錯誤回應 body 時的最大字元數（避免超長 body 洗版 console）。
@@ -113,24 +128,36 @@ class PublicDriveApiAdapter(CloudStorageAdapter):
         raise ValueError(DRIVE_URL_HINT)
 
     def list_files(self, folder_locator: str) -> list[RemoteEntry]:
-        """列出資料夾一層內的媒體檔（排除子資料夾，並套副檔名白名單）。"""
+        """列出資料夾一層內可下載的媒體檔（排除 Google 原生檔／捷徑／子資料夾，並套副檔名白名單）。"""
         entries: list[RemoteEntry] = []
         for item in self._list_children(folder_locator):
-            if item.get("mimeType") == DRIVE_FOLDER_MIMETYPE:
-                continue  # 子資料夾不列入（壓平模型：只取本資料夾的檔案）
+            # Google 原生檔(Docs/Sheets/Slides)、捷徑、子資料夾皆無二進位內容、alt=media 會回
+            # 403 fileNotDownloadable；前綴一次涵蓋(含 DRIVE_FOLDER_MIMETYPE)，列檔階段即排除不嘗試下載。
+            if item.get("mimeType", "").startswith(_GOOGLE_APPS_MIMETYPE_PREFIX):
+                continue
             if not self._is_media(item.get("name", "")):
                 continue  # 非媒體雜檔（文件／壓縮檔）略過
             entries.append(self._to_entry(item))
         return entries
 
     def download_folder(self, folder_locator: str, dest_dir: str) -> None:
-        """把資料夾內媒體檔增量下載到 dest_dir（本地已存在且同大小者跳過）。"""
+        """
+        把資料夾內媒體檔增量下載到 dest_dir（本地已存在且同大小者跳過）。
+
+        單檔的「無法下載」(RemoteFileUnavailableError，如漏網的 Google 原生檔／捷徑／被標記檔)
+        只略過該檔、續抓其餘——一顆壞檔不該拖垮整個資料夾同步。授權／限流／網路等資料夾層級
+        錯誤仍照常上拋（暫停或重試整個 project）。
+        """
         os.makedirs(dest_dir, exist_ok=True)
         for entry in self.list_files(folder_locator):
             dest_path = os.path.join(dest_dir, entry.name)
             if os.path.exists(dest_path) and os.path.getsize(dest_path) == entry.size:
                 continue  # 增量：大小一致視為未變動，省下重複下載
-            self._download_file(entry.locator, dest_path)
+            try:
+                self._download_file(entry.locator, dest_path)
+            except RemoteFileUnavailableError as exc:
+                print(f"[PublicDriveApi] ⏭ 略過無法下載的檔案 '{entry.name}'：{exc}")
+                continue
 
     # ── Drive API 呼叫 ─────────────────────────────────────────────────────────
 
@@ -254,6 +281,12 @@ class PublicDriveApiAdapter(CloudStorageAdapter):
         if is_rate_limited:
             detail = f" / {reason}" if reason else ""
             raise _RateLimitedError(f"{context}：Drive API 限流（HTTP {status_code}{detail}）")
+        # 該檔層級的「無法下載」(Google 原生檔／捷徑／被標記檔)：先於授權判定攔下，避免被當成
+        # 整個資料夾授權失效；由 download_folder 略過該檔、續抓其餘。
+        if reason in _NON_DOWNLOADABLE_REASONS:
+            raise RemoteFileUnavailableError(
+                f"{context}：此檔無法直接下載（HTTP {status_code} / {reason}），已略過"
+            )
         if status_code in _AUTH_ERROR_STATUS:
             raise RemoteAuthError(
                 f"{context}：授權／權限失效（HTTP {status_code}），"
