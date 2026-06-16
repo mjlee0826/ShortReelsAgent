@@ -42,6 +42,19 @@ const useProjectStore = create((set, get) => ({
     }
   },
 
+  // 以本機資料夾建立「本機來源」專案並重新載入清單（檔案上傳後於背景標準化／分析）
+  createProjectFromFolder: async (displayName, files) => {
+    set({ isLoading: true, errorMsg: '' });
+    try {
+      await apiService.createProjectFromFolder(displayName, files);
+      await get().fetchProjects();
+    } catch (error) {
+      const msg = extractErrorMessage(error);
+      set({ errorMsg: `建立專案失敗：${msg}`, isLoading: false });
+      throw error;
+    }
+  },
+
   // 手動觸發一次雲端同步（下載新素材 + 增量 Phase 1），完成後重抓刷新 sync_status / 素材數。
   // 刻意不切換全域 isLoading（避免整個網格翻 spinner）；按鈕的「同步中」狀態由 ProjectCard 本地管理。
   syncProject: async (projectName) => {

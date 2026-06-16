@@ -18,6 +18,17 @@ export const projectApi = {
     return response.data;
   },
 
+  // 以本機資料夾建立「本機來源」專案：multipart 上傳整夾媒體，後端存入 raw/ 並依設定背景跑 Phase 1
+  async createProjectFromFolder(displayName, files) {
+    const form = new FormData();
+    form.append('display_name', displayName);
+    // 每個檔案以同一欄位名 files 附加（後端收成 list[UploadFile]）；保留原檔名供去重
+    files.forEach((file) => form.append('files', file, file.name));
+    // 傳 FormData 時 axios 會自動帶 multipart/form-data 與 boundary，無需手動設 Content-Type
+    const response = await apiClient.post('/api/projects/from-folder', form);
+    return response.data;
+  },
+
   // 手動觸發一次雲端同步（阻塞：下載新素材 + 增量 Phase 1），回傳 SyncReport
   async syncProject(projectName) {
     const response = await apiClient.post(`/api/projects/${projectName}/sync`);

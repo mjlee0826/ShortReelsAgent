@@ -11,17 +11,22 @@ import re
 import shutil
 from datetime import datetime, timezone
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from backend.auth.logto_jwt_verifier import verify_token
+from backend.services.director_service import director_service
 from backend.services.ingestion_provider import cloud_ingestion_service
+from backend.services.jobs.async_job_runner import async_job_runner
 from backend.services.jobs.job_manager import job_manager
+from backend.services.jobs.phase1_lock import phase1_lock
+from backend.services.jobs.phase1_progress_meta import clear_active_job, publish_active_job
 from backend.services.project_cover_service import ProjectCoverService
 from backend.services.stores.project_meta_store import project_meta_store
 from backend.services.stores.user_settings_store import user_settings_store
 from backend.services.thumbnail_service import ThumbnailService
 from backend.utils.asset_discovery import collect_asset_files
-from config.app_config import ASSETS_DIR, COVER_THUMBNAIL_MAX_PX, COVER_THUMBNAIL_SUBDIR
+from config.app_config import ASSETS_DIR, COVER_THUMBNAIL_MAX_PX, COVER_THUMBNAIL_SUBDIR, RAW_SUBDIR
+from config.media_formats import MEDIA_EXTENSIONS
 from config.project_artifacts import PHASE4_BLUEPRINT_FILENAME
 from ingestion_engine.models import (
     META_KEY_ACTIVE_GENERATION_JOB_ID,
@@ -143,6 +148,46 @@ def _allocate_unique_name(user_root: str, base_name: str) -> str:
     return name
 
 
+# 上傳檔名同名碰撞時的序號後綴起始值（webkitdirectory 不同子夾可能有同名檔）。
+_FILENAME_DEDUPE_START_INDEX = 1
+
+
+def _allocate_unique_filename(filename: str, taken: set[str]) -> str:
+    """為落地檔名解同名碰撞：已被占用時在副檔名前加遞增序號後綴（如 photo_1.jpg）。"""
+    if filename not in taken:
+        return filename
+    stem, ext = os.path.splitext(filename)
+    index = _FILENAME_DEDUPE_START_INDEX
+    candidate = f"{stem}_{index}{ext}"
+    while candidate in taken:
+        index += 1
+        candidate = f"{stem}_{index}{ext}"
+    return candidate
+
+
+def _store_uploaded_media(raw_dir: str, files: list[UploadFile]) -> int:
+    """把上傳檔案中屬受支援媒體格式者串流落地到 raw/，回傳實際存入數量。
+
+    webkitdirectory 會連同非媒體雜檔一併送來，故依 MEDIA_EXTENSIONS 過濾；不同子夾可能有同名
+    檔，落地前以 basename 去重（碰撞加序號後綴）避免互相覆蓋。以 copyfileobj 串流，不把整檔讀進
+    記憶體（資料夾可能含大影片）。此函式為純磁碟工作，呼叫端應丟 thread 執行以免卡 event loop。
+    """
+    os.makedirs(raw_dir, exist_ok=True)
+    taken_names: set[str] = set()
+    saved = 0
+    for upload in files:
+        original = os.path.basename(upload.filename or "")
+        ext = os.path.splitext(original)[1].lower()
+        if not original or ext not in MEDIA_EXTENSIONS:
+            continue
+        unique_name = _allocate_unique_filename(original, taken_names)
+        taken_names.add(unique_name)
+        with open(os.path.join(raw_dir, unique_name), "wb") as dst:
+            shutil.copyfileobj(upload.file, dst)
+        saved += 1
+    return saved
+
+
 # --- API 端點 ---
 
 @router.get("/projects", response_model=list[ProjectMeta])
@@ -236,6 +281,63 @@ async def create_project_from_drive(req: CreateFromDriveRequest, user_id: str = 
     return meta
 
 
+@router.post("/projects/from-folder", response_model=ProjectMeta, status_code=201)
+async def create_project_from_folder(
+    display_name: str = Form(...),
+    files: list[UploadFile] = File(...),
+    user_id: str = Depends(verify_token),
+):
+    """
+    以使用者上傳的本機資料夾建立一個「本機來源」專案，並依全域設定排程背景處理。
+
+    收 multipart 整夾檔案 → 過濾出受支援媒體串流存入 raw/ → 寫「不含雲端來源欄位」的 meta
+    （前端據此顯示「本機」、poller 也不會挑到）→ 依使用者 auto_analyze 設定排程背景標準化／Phase 1。
+    一個有效媒體都沒有時回收剛建立的空目錄並回 400。
+    """
+    if not display_name.strip():
+        raise HTTPException(status_code=400, detail="專案名稱不能為空")
+
+    user_root = _user_dir(user_id)
+    name = _allocate_unique_name(user_root, _slugify(display_name))
+    project_dir = os.path.join(user_root, name)
+    os.makedirs(project_dir, exist_ok=True)
+
+    # 過濾＋串流落地為純磁碟工作，丟 thread 不卡 event loop（資料夾可能含大影片）
+    saved = await asyncio.to_thread(
+        _store_uploaded_media, os.path.join(project_dir, RAW_SUBDIR), files
+    )
+    if saved == 0:
+        # 沒有任何受支援媒體：回收剛建立的空目錄，避免留下殘骸專案
+        shutil.rmtree(project_dir, ignore_errors=True)
+        raise HTTPException(
+            status_code=400,
+            detail=f"資料夾內沒有受支援的媒體檔，請上傳: {', '.join(sorted(MEDIA_EXTENSIONS))}",
+        )
+
+    # 快照「建立當下」的全域自動分析偏好（與 from-drive 同源）：決定是否在背景立即跑 Phase 1
+    auto_analyze = user_settings_store.get(user_id).auto_analyze_on_create
+
+    now = _now_iso()
+    meta = {
+        "name": name,
+        "display_name": display_name.strip(),
+        "created_at": now,
+        "last_modified": now,
+        "asset_count": 0,
+        "has_blueprint": False,
+        # 本機來源專案：刻意省略所有雲端來源欄位（source/drive_folder_id/sync_status…），
+        # 讓 deriveProjectStatus 走本機分支、卡片顯「本機」badge，poller 也因非 gdrive 而忽略。
+        META_KEY_PHASE1_STATUS: PHASE1_STATUS_PENDING,
+        META_KEY_PHASE1_UPDATED_AT: None,
+        META_KEY_AUTO_ANALYZE: auto_analyze,
+    }
+    project_meta_store.write(project_dir, meta)
+    _schedule_local_processing(user_id, name, auto_analyze)
+
+    print(f"[Projects] 建立本機來源專案: '{name}'（{saved} 個素材，使用者 '{user_id[:8]}...'）")
+    return meta
+
+
 @router.post("/projects/{project_name}/sync", response_model=SyncReport)
 async def sync_project(project_name: str, user_id: str = Depends(verify_token)):
     """手動觸發一次雲端同步；阻塞的 Drive API／Phase 1 丟到 thread 執行，不卡 event loop。"""
@@ -318,6 +420,75 @@ def _on_first_sync_done(project_name: str):
             return
         print(f"[Projects] 首同步完成（{project_name}）：status={report.sync_status}, "
               f"downloaded={report.downloaded}, phase1_ran={report.phase1_ran}, errors={report.errors}")
+    return _callback
+
+
+def _schedule_local_processing(user_id: str, project_name: str, auto_analyze: bool) -> None:
+    """
+    排程本機專案上傳後的背景處理（不阻塞建立請求）。
+
+    auto_analyze 為真：以 async job 跑完整 Phase 1（run_phase1 內部會先標準化、並把 PROCESSING→
+    DONE/FAILED 落地），job_id 寫入 meta 供素材頁訂閱 ``/ws/progress/{job_id}`` 看即時進度——
+    沿用 reanalyze 的 phase1_lock + async_job_runner + publish/clear active job 形態。
+    auto_analyze 為假：僅背景標準化讓素材身分先穩定，phase1_status 維持 pending（前端顯「等待分析」），
+    待使用者進素材頁手動觸發。
+    """
+    project_dir = os.path.join(_user_dir(user_id), project_name)
+
+    if not auto_analyze:
+        # 只標準化（不動 phase1_status）：丟 thread 不阻塞請求；完成／例外於 callback 印出
+        task = asyncio.create_task(
+            asyncio.to_thread(director_service.standardize_project, project_name, user_id)
+        )
+        _background_tasks.add(task)
+        task.add_done_callback(_on_local_processing_done(project_name))
+        return
+
+    # 與其他 Phase 1 路徑互斥；剛建立的專案幾乎不會被占用，占用則略過、留 pending 待手動觸發
+    if not phase1_lock.acquire(user_id, project_name, blocking=False):
+        print(f"⚠️ [Projects] 本機專案 '{project_name}' Phase 1 鎖被占用，略過自動分析（待手動觸發）")
+        return
+
+    # job_id 須在 work 開跑前就緒：launch 回傳後同步填入（中間無 await，work 於 event loop 讓出後
+    # 才在 thread 啟動，故必讀得到），供 work 把進行中 job_id 落地 meta 讓素材頁重整後可重連 WS
+    job_id_box: dict[str, str] = {}
+
+    def work(tracker) -> dict:
+        """背景執行緒內跑完整 Phase 1（標準化＋感知分析）；收尾先清 active job_id 再釋放鎖。"""
+        try:
+            publish_active_job(project_dir, job_id_box["id"])
+            cost_sink: dict = {}  # 收 Phase 1 分階段成本，併入 job 結果供前端 / GET /api/jobs 取得
+            success = director_service.run_phase1(
+                project_name, user_id=user_id, tracker=tracker,
+                require_success=False, cost_sink=cost_sink,
+            )
+            return {"success_count": len(success), "costs": cost_sink}
+        finally:
+            # 先清 active job_id 再釋放鎖；即使清除的原子寫失敗也務必釋放鎖，避免該專案永久卡 409
+            try:
+                clear_active_job(project_dir)
+            finally:
+                phase1_lock.release(user_id, project_name)
+
+    try:
+        job_id = async_job_runner.launch(user_id, work)
+        job_id_box["id"] = job_id  # launch 與此行間無 await，work 啟動前必已填妥
+    except BaseException:
+        # launch 失敗（極少）時釋放已取得的鎖，避免洩漏使該專案永久卡 409
+        phase1_lock.release(user_id, project_name)
+        raise
+
+
+def _on_local_processing_done(project_name: str):
+    """產生本機專案背景標準化完成的 callback：移除任務參照，並印出結果／例外（避免被靜默吞掉）。"""
+    def _callback(task: asyncio.Task) -> None:
+        _background_tasks.discard(task)
+        try:
+            task.result()
+        except Exception as exc:  # noqa: BLE001 - 背景標準化任何意外都只記錄，不影響請求流程
+            print(f"⚠️ [Projects] 本機專案標準化未預期失敗（{project_name}）：{exc}")
+            return
+        print(f"[Projects] 本機專案標準化完成（{project_name}）")
     return _callback
 
 

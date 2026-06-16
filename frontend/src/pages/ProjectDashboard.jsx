@@ -17,7 +17,8 @@ export default function ProjectDashboard() {
   const navigate = useNavigate();
   const {
     projects, isLoading, errorMsg,
-    fetchProjects, createProjectFromDrive, deleteProject, selectProject, syncProject, clearError,
+    fetchProjects, createProjectFromDrive, createProjectFromFolder,
+    deleteProject, selectProject, syncProject, clearError,
   } = useProjectStore();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -128,6 +129,7 @@ export default function ProjectDashboard() {
         <CreateProjectModal
           onClose={() => setShowCreateModal(false)}
           onCreate={createProjectFromDrive}
+          onCreateFromFolder={createProjectFromFolder}
         />
       )}
     </div>
