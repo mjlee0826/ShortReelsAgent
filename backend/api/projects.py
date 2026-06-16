@@ -302,7 +302,23 @@ def _schedule_first_sync(user_id: str, project_name: str) -> None:
         asyncio.to_thread(cloud_ingestion_service.sync_project, user_id, project_name)
     )
     _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+    task.add_done_callback(_on_first_sync_done(project_name))
+
+
+def _on_first_sync_done(project_name: str):
+    """產生首同步完成的 callback：從集合移除任務參照，並把同步結果／例外印出（原本被靜默吞掉）。"""
+    def _callback(task: asyncio.Task) -> None:
+        _background_tasks.discard(task)
+        # 背景 task 的例外若不取出會被靜默丟棄；同步失敗（授權／網路）的狀態雖已落地 meta，
+        # 仍主動印出收尾，避免 console 完全看不到首同步發生過什麼。
+        try:
+            report = task.result()
+        except Exception as exc:  # noqa: BLE001 - 背景首同步任何意外都只記錄，不影響請求流程
+            print(f"⚠️ [Projects] 首同步未預期失敗（{project_name}）：{exc}")
+            return
+        print(f"[Projects] 首同步完成（{project_name}）：status={report.sync_status}, "
+              f"downloaded={report.downloaded}, phase1_ran={report.phase1_ran}, errors={report.errors}")
+    return _callback
 
 
 @router.delete("/projects/{project_name}", status_code=204)

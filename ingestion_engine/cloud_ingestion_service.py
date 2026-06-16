@@ -304,6 +304,7 @@ class CloudIngestionService:
 
     def _pause_for_auth(self, project_dir: str, report: SyncReport, exc: object) -> SyncReport:
         """授權失效：暫停此 project 同步、記錄錯誤並持久化（其他 project 不受影響）。"""
+        print(f"⚠️ [CloudIngestion] 授權失效，暫停專案同步（{report.project_name}）：{exc}")
         self._patch_meta(project_dir, {
             META_KEY_SYNC_STATUS: SYNC_STATUS_PAUSED_AUTH,
             META_KEY_LAST_SYNC_ERROR: str(exc),
@@ -315,6 +316,7 @@ class CloudIngestionService:
 
     def _fail_sync(self, project_dir: str, report: SyncReport, exc: object) -> SyncReport:
         """非授權類雲端錯誤：標 error（暫時性，下輪重試）並持久化。"""
+        print(f"⚠️ [CloudIngestion] 同步錯誤（暫時性，下輪重試）（{report.project_name}）：{exc}")
         self._patch_meta(project_dir, {
             META_KEY_SYNC_STATUS: SYNC_STATUS_ERROR,
             META_KEY_LAST_SYNC_ERROR: str(exc),

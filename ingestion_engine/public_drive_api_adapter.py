@@ -52,6 +52,8 @@ _RATE_LIMIT_REASONS = frozenset({
 })
 # 串流下載的暫存副檔名（下載完成才 rename，避免半截檔被誤判為已完成）。
 _PARTIAL_SUFFIX = ".part"
+# 診斷用：印出 Drive API 錯誤回應 body 時的最大字元數（避免超長 body 洗版 console）。
+_ERROR_BODY_SNIPPET_LEN = 300
 
 # 「執行一次嘗試」callable 的回傳型別變數，供 _with_retry 泛型保留 attempt 的回傳型別。
 _T = TypeVar("_T")
@@ -241,6 +243,11 @@ class PublicDriveApiAdapter(CloudStorageAdapter):
         if status_code < _HTTP_ERROR_THRESHOLD:
             return
         reason = self._extract_error_reason(resp)
+        # 診斷：把 Drive API 真正回的 status / reason / body 印出來，便於分辨「限流」vs「真授權」根因
+        print(
+            f"[PublicDriveApi] ⚠️ {context}：HTTP {status_code} reason={reason!r} "
+            f"body={self._body_snippet(resp)!r}"
+        )
         is_rate_limited = status_code == _HTTP_TOO_MANY_REQUESTS or (
             status_code in _AUTH_ERROR_STATUS and reason in _RATE_LIMIT_REASONS
         )
@@ -282,6 +289,16 @@ class PublicDriveApiAdapter(CloudStorageAdapter):
         # 新式錯誤格式可能只帶 status 字串（如 "RESOURCE_EXHAUSTED"）
         status = error.get("status")
         return status if isinstance(status, str) else None
+
+    @staticmethod
+    def _body_snippet(resp: httpx.Response) -> str:
+        """回傳錯誤回應 body 的截斷文字片段（診斷用）；body 尚未讀取或解碼失敗回佔位字串。"""
+        try:
+            text = resp.text
+        except (RuntimeError, httpx.HTTPError):
+            return "<unread>"
+        snippet = text[:_ERROR_BODY_SNIPPET_LEN].replace("\n", " ").strip()
+        return snippet or "<empty>"
 
     @staticmethod
     def _backoff_with_jitter(base_backoff_sec: float) -> float:
