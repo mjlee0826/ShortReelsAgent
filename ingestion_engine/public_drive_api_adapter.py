@@ -65,6 +65,13 @@ _NON_DOWNLOADABLE_REASONS = frozenset({
 })
 # Google 原生檔／捷徑／資料夾的 mimeType 共同前綴；這類無二進位內容，列檔階段即排除不嘗試下載。
 _GOOGLE_APPS_MIMETYPE_PREFIX = "application/vnd.google-apps."
+# Drive API 正常以 JSON 回錯誤；當流量過大／被反濫用機制攔下時，邊層改回一頁 HTML 的「Sorry…」
+# 節流頁（content-type 為 text/html、無 JSON reason）。這屬暫時性節流，應退避重試而非當授權失效。
+_HTML_CONTENT_TYPE = "text/html"
+# 從 body 開頭嗅探是否為 HTML 文件（content-type 缺漏時的後備判斷）的取樣字元數。
+_HTML_SNIFF_LEN = 32
+# HTML 文件開頭常見前綴（小寫比對），用以辨識「回的是網頁而非 JSON」。
+_HTML_DOCUMENT_PREFIXES = ("<html", "<!doctype html")
 # 串流下載的暫存副檔名（下載完成才 rename，避免半截檔被誤判為已完成）。
 _PARTIAL_SUFFIX = ".part"
 # 診斷用：印出 Drive API 錯誤回應 body 時的最大字元數（避免超長 body 洗版 console）。
@@ -262,9 +269,10 @@ class PublicDriveApiAdapter(CloudStorageAdapter):
         依 HTTP 狀態碼 + Drive API 錯誤原因把失敗回應分流成對應例外（2xx 直接放行）。
 
         關鍵分流：403 可能是「真權限不足」也可能是「限流／配額用盡」，後者 body 的
-        error.errors[].reason 落在 _RATE_LIMIT_REASONS。限流（含 HTTP 429）一律丟
-        _RateLimitedError（暫時性 → 由 _with_retry 退避重試），唯有真權限不足才丟
-        RemoteAuthError，避免暫時性限流被誤判成授權失效而把專案永久暫停。
+        error.errors[].reason 落在 _RATE_LIMIT_REASONS。此外，被反濫用機制攔下時 Google 改回一頁
+        HTML 的「Sorry…」節流頁（reason 解不出、content-type 為 text/html），同屬暫時性。
+        以上各種限流（含 HTTP 429）一律丟 _RateLimitedError（暫時性 → 由 _with_retry 退避重試），
+        唯有真權限不足（JSON 錯誤）才丟 RemoteAuthError，避免暫時性節流被誤判成授權失效而把專案永久暫停。
         """
         status_code = resp.status_code
         if status_code < _HTTP_ERROR_THRESHOLD:
@@ -275,8 +283,11 @@ class PublicDriveApiAdapter(CloudStorageAdapter):
             f"[PublicDriveApi] ⚠️ {context}：HTTP {status_code} reason={reason!r} "
             f"body={self._body_snippet(resp)!r}"
         )
-        is_rate_limited = status_code == _HTTP_TOO_MANY_REQUESTS or (
-            status_code in _AUTH_ERROR_STATUS and reason in _RATE_LIMIT_REASONS
+        is_rate_limited = (
+            status_code == _HTTP_TOO_MANY_REQUESTS
+            or (status_code in _AUTH_ERROR_STATUS and reason in _RATE_LIMIT_REASONS)
+            # 解不出 JSON reason 又回 HTML：Drive API 錯誤一律是 JSON，回網頁即邊層節流/封鎖頁 → 暫時性
+            or (reason is None and self._is_html_response(resp))
         )
         if is_rate_limited:
             detail = f" / {reason}" if reason else ""
@@ -322,6 +333,22 @@ class PublicDriveApiAdapter(CloudStorageAdapter):
         # 新式錯誤格式可能只帶 status 字串（如 "RESOURCE_EXHAUSTED"）
         status = error.get("status")
         return status if isinstance(status, str) else None
+
+    @staticmethod
+    def _is_html_response(resp: httpx.Response) -> bool:
+        """
+        判斷回應 body 是否為 HTML 文件（而非 Drive API 的 JSON）。
+
+        Drive API 錯誤恆回 JSON；回 HTML 代表是邊層的「Sorry…」節流/封鎖頁。優先看 content-type，
+        缺漏時再嗅探 body 開頭。供分類器把這類無 JSON reason 的 HTML 回應歸為暫時性節流。
+        """
+        if _HTML_CONTENT_TYPE in resp.headers.get("content-type", "").lower():
+            return True
+        try:
+            head = resp.text.lstrip()[:_HTML_SNIFF_LEN].lower()
+        except (RuntimeError, httpx.HTTPError):
+            return False
+        return head.startswith(_HTML_DOCUMENT_PREFIXES)
 
     @staticmethod
     def _body_snippet(resp: httpx.Response) -> str:
