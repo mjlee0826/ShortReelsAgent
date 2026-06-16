@@ -123,8 +123,6 @@ GEMINI_TASK_MODEL: dict[str, str] = {
     "deep_image_analysis": os.getenv("GEMINI_MODEL_DEEP_IMAGE", "gemini-2.5-flash"),
     # 1c 影片事件索引(影音 + 時間定位 + 轉錄)
     "video_event_index":   os.getenv("GEMINI_MODEL_VIDEO_INDEX", "gemini-2.5-flash"),
-    # 2 範本分析(同 1c 再加配樂偵測)
-    "template_analysis":   os.getenv("GEMINI_MODEL_TEMPLATE", "gemini-2.5-flash"),
     # 3 配樂關鍵字(任務極簡)
     "music_search_query":  os.getenv("GEMINI_MODEL_MUSIC_QUERY", "gemini-2.5-flash"),
     # 4 導演藍圖(純文字推理;結構化 + agentic 推理) → 3.1 Pro(實測 3.5 Flash 未更好)

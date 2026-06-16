@@ -66,6 +66,16 @@ try:
 except ValueError:
     DIRECTOR_VIEW_RAW_MAX_FRAMES = _VIEW_RAW_MAX_FRAMES_DEFAULT
 
+# view_template 單次最多抓幾張範本幀。範本切點可能很多,但每張幀都是昂貴的像素 token,故另封一個
+# 上限(與看單一素材的 view_raw 分開計):值略高於 view_raw,讓導演一次看清範本的鏡頭序列 / 節奏。
+_VIEW_RAW_TEMPLATE_MAX_FRAMES_DEFAULT = 6
+try:
+    DIRECTOR_VIEW_RAW_TEMPLATE_MAX_FRAMES = int(
+        os.environ.get("DIRECTOR_VIEW_RAW_TEMPLATE_MAX_FRAMES", _VIEW_RAW_TEMPLATE_MAX_FRAMES_DEFAULT)
+    )
+except ValueError:
+    DIRECTOR_VIEW_RAW_TEMPLATE_MAX_FRAMES = _VIEW_RAW_TEMPLATE_MAX_FRAMES_DEFAULT
+
 # view_raw 抓出的幀長邊降到此像素再 base64(控成本;對導演判斷構圖 / 主體已足夠)。
 _VIEW_RAW_DOWNSCALE_PX_DEFAULT = 1080
 try:

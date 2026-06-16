@@ -48,7 +48,6 @@ class Phase(Enum):
 TASKMODE_TO_PHASE: dict[TaskMode, Phase] = {
     TaskMode.DEEP_IMAGE_ANALYSIS: Phase.PHASE1,
     TaskMode.VIDEO_EVENT_INDEX: Phase.PHASE1,
-    TaskMode.TEMPLATE_ANALYSIS: Phase.PHASE2,
     TaskMode.MUSIC_SEARCH_QUERY: Phase.PHASE3,
     TaskMode.DIRECTOR_BLUEPRINT: Phase.PHASE4,
 }

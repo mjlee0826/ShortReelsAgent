@@ -90,20 +90,6 @@ class TimeOfDay(str, Enum):
     UNKNOWN = "unknown"
 
 
-class MusicGenre(str, Enum):
-    """配樂曲風（範本配樂偵測用）。"""
-    POP = "pop"
-    ROCK = "rock"
-    HIPHOP = "hiphop"
-    ELECTRONIC = "electronic"
-    JAZZ = "jazz"
-    CLASSICAL = "classical"
-    AMBIENT = "ambient"
-    FOLK = "folk"
-    CINEMATIC = "cinematic"
-    OTHER = "other"
-
-
 # 調色預設名 enum：刻意**動態**由 SSOT (color_presets.json) 的 preset 名建立，
 # 而非手寫成員——如此「新增一個 look = 在 JSON 加一筆」即可，schema / prompt / 前端全自動跟上，
 # 從根拔除過去『濾鏡名手抄四處』的飄移 (對應 docs/editing_capability_roadmap.md 方向三)。
@@ -255,10 +241,6 @@ class VideoEvent(MultimodalEventBase):
     )
 
 
-class TemplateEvent(MultimodalEventBase):
-    """範本影片的事件區塊：只需風格 / 節奏參考，故為基底本身（不需主體框與關鍵點）。"""
-
-
 # ──────────────────────────────────────────────────────────────────────────────
 # ③ 影片事件索引（複雜影片：事件 + 全局語意 + 音訊轉錄）
 # ──────────────────────────────────────────────────────────────────────────────
@@ -279,43 +261,6 @@ class VideoEventIndexSemantics(BaseModel):
     audio_transcript: AudioTranscript = Field(default_factory=AudioTranscript, description="逐句轉錄與時間戳")
     environmental_sounds: list[EnvironmentalSound] = Field(default_factory=list, description="主要環境音")
     multimodal_event_index: list[VideoEvent] = Field(
-        default_factory=list, description="依時間軸拆解的連續多模態事件區塊"
-    )
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# ④ 範本分析（事件 + 全局語意 + 音訊轉錄 + 配樂偵測）
-# ──────────────────────────────────────────────────────────────────────────────
-class SongGuess(BaseModel):
-    """範本配樂的歌名最佳猜測（可能有誤，務必附 confidence、寧缺勿造）。"""
-    title: str = Field(default="", description="猜測歌名；不確定留空")
-    artist: str = Field(default="", description="猜測歌手；不確定留空")
-    confidence: float = Field(default=0.0, description="猜測把握程度 0~1；不確定給低分")
-
-
-class MusicAnalysis(BaseModel):
-    """範本配樂偵測：曲風 / 情緒 / 是否有歌聲 / 歌名猜測。"""
-    music_style: str = Field(default="", description="自由描述曲風 / 編制，如 'lo-fi chill hip-hop, mellow piano'")
-    genre: MusicGenre = Field(default=MusicGenre.OTHER, description="曲風分類")
-    mood: Mood = Field(default=Mood.CALM, description="音樂情緒")
-    has_vocals: bool = Field(default=False, description="是否有歌聲")
-    song_guess: SongGuess = Field(default_factory=SongGuess, description="歌名最佳猜測")
-
-
-class TemplateAnalysisSemantics(BaseModel):
-    """
-    範本影片的風格 / 節奏 / 配樂分析輸出（TEMPLATE_ANALYSIS）。
-
-    對齊 ``assembly_video_stage._build_template`` 取用的欄位：刻意**無** camera_angle /
-    time_of_day（範本 DNA 不消費），多了 ``music_analysis``（範本專屬配樂偵測）。
-    """
-    cinematic_critique: str = Field(default="", description="整支範本的運鏡與情緒氛圍評論")
-    mood: Mood = Field(default=Mood.CALM, description="整體情緒")
-    scene_tags: list[SceneTag] = Field(default_factory=list, description="場景標籤，可多選")
-    action_tags: list[ActionTag] = Field(default_factory=list, description="全局動作標籤，可多選")
-    audio_transcript: AudioTranscript = Field(default_factory=AudioTranscript, description="逐句轉錄與時間戳")
-    music_analysis: MusicAnalysis = Field(default_factory=MusicAnalysis, description="範本配樂偵測")
-    multimodal_event_index: list[TemplateEvent] = Field(
         default_factory=list, description="依時間軸拆解的連續多模態事件區塊"
     )
 

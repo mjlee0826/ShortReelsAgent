@@ -48,7 +48,7 @@ class AssemblyVideoStage(Stage):
         work = get_video_work(context)
         vlm = work.vlm_result
         if context.video_strategy == VideoStrategy.TEMPLATE:
-            metadata = self._build_template(work, vlm)
+            metadata = self._build_template(work)
         elif context.video_strategy == VideoStrategy.COMPLEX:
             metadata = self._build_complex(work, vlm)
         else:
@@ -126,12 +126,13 @@ class AssemblyVideoStage(Stage):
         return events
 
     @staticmethod
-    def _build_template(work: VideoWork, vlm: dict) -> TemplateVideoMetadata:
+    def _build_template(work: VideoWork) -> TemplateVideoMetadata:
         """
-        組範本 metadata(TEMPLATE 策略):風格 / 節奏 / 配樂偵測,無品質分 / 主體框 / 臉部(template DNA 不消費)。
+        組範本 metadata(TEMPLATE 策略):只有 decode 的結構資訊 + scene 的物理切點,無任何 LLM 語意。
 
-        音訊轉錄直接取自 ``vlm_result``(template 不建音訊鏈,故 work 的音訊欄位恆為空);逐 event 不做主體框
-        正規化(範本只當風格參考、不需逐段裁切框),``multimodal_event_index`` 原樣帶出。
+        範本的視覺理解改由導演 ``view_template`` 親眼看原始幀(見 ``_build_template_video_pipeline``),
+        故此處不再有 cinematic_critique / 配樂偵測 / 逐字稿 / 事件索引等 Gemini 欄位。``scene_cuts`` 即
+        範本剪輯節奏,供導演取樣與卡點參考。
         """
         return TemplateVideoMetadata(
             width=work.width,
@@ -141,14 +142,7 @@ class AssemblyVideoStage(Stage):
             fps=work.fps,
             creation_time=work.creation_time,
             location_gps=work.location_gps,
-            audio_transcript=vlm.get("audio_transcript") or {},
-            cinematic_critique=vlm.get("cinematic_critique", ""),
-            mood=vlm.get("mood", ""),
-            scene_tags=vlm.get("scene_tags", []),
-            action_tags=vlm.get("action_tags", []),
-            music_analysis=vlm.get("music_analysis") or {},
             scene_cuts=work.scene_cuts,
-            multimodal_event_index=vlm.get(_EVENT_INDEX_KEY, []),
         )
 
     @staticmethod

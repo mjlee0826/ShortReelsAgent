@@ -124,11 +124,12 @@ class ComplexVideoMetadata(BaseModel):
 
 class TemplateVideoMetadata(BaseModel):
     """
-    範本影片的感知元數據（TEMPLATE 策略深分輸出，供 BlueprintBuilder 組 template_dna）。
+    範本影片的感知元數據（TEMPLATE 策略精簡輸出，供 BlueprintBuilder 組 template_dna）。
 
-    刻意與 ``ComplexVideoMetadata`` 分家：範本只需「風格 / 節奏 / 配樂偵測」參考，不需逐幀品質分、
-    主體框、臉部等欄位，故砍掉那些 stage 後此 model 也不帶那些欄位（單一職責、可讀性更高）。
-    多了 ``music_analysis``（Gemini 對範本配樂的曲風 / 情緒 / 歌名猜測），是 Complex 沒有的範本專屬訊號。
+    刻意與 ``ComplexVideoMetadata`` 分家：範本的視覺理解改由導演 ``view_template`` 親眼看原始幀，
+    故此 model 只承載「導演視覺還原不了」的便宜訊號——decode 的結構資訊（時長 / fps / 解析度）與
+    scene 的物理切點（剪輯節奏）。原 Gemini ``TEMPLATE_ANALYSIS`` 產出的 cinematic_critique /
+    audio_transcript / music_analysis / multimodal_event_index 等已隨拔除 Gemini 節點一併移除。
     """
     width: int
     height: int
@@ -137,19 +138,8 @@ class TemplateVideoMetadata(BaseModel):
     fps: float
     creation_time: str = ""
     location_gps: str = ""
-    # ── 音訊分析（Gemini TEMPLATE_ANALYSIS 輸出；供 is_audio_essential 與導演人聲保留參考）──
-    audio_transcript: dict[str, Any] = {}
-    # ── 語意分析（LLM，全局）──
-    cinematic_critique: str = ""
-    mood: str = ""
-    scene_tags: list[str] = []
-    action_tags: list[str] = []
-    # ── 配樂偵測（範本專屬；music_style / genre / mood / has_vocals / song_guess）──
-    music_analysis: dict[str, Any] = {}
-    # ── 影片結構 ──
-    is_dense_indexed: bool = True
+    # ── 影片結構（物理切點＝範本剪輯節奏，供導演取樣 / 卡點參考）──
     scene_cuts: list[float] = []
-    multimodal_event_index: list[dict[str, Any]] = []
 
 
 class ProcessorResult(BaseModel):

@@ -14,17 +14,15 @@ from director_agent.blueprint.prep_context import PrepContext
 
 # 物理節奏分析用的純音軌檔名後綴(librosa 吃 wav);與舊 facade 命名一致,禁 magic string
 _AUDIO_ONLY_SUFFIX = "_a_only.wav"
-# 新流程不再產 video-only 軌(下游已無人消費),local_assets.video_only 留空
-_NO_VIDEO_ONLY = ""
 
 
 class TemplateDnaProducer(DnaProducer):
-    """Template 分支:素材深度感知委派共享 ``PipelineRunner`` 的 TEMPLATE 精簡 DAG,
-    再補物理節奏(beats)與 DNA 組裝(Builder)。
+    """Template 分支:委派共享 ``PipelineRunner`` 的 TEMPLATE 純訊號 DAG(decode + scene),
+    再補物理節奏(bpm)與輕量 DNA 組裝(Builder)。
 
-    重點:不自己造 DAG —— TEMPLATE 策略的精簡 DAG(decode + scene + Gemini 範本語意)已存在於
-    pipeline,本生產者只是它的 consumer + 後處理。``scene_cuts`` 直接取 pipeline metadata,
-    不再重跑場景偵測(解 P2)。範本配樂偵測(music_dna)由 TEMPLATE_ANALYSIS 產出後由 Builder 收進 DNA。
+    重點:不自己造 DAG —— TEMPLATE 策略的精簡 DAG(decode + scene,無 LLM)已存在於 pipeline,
+    本生產者只是它的 consumer + 後處理。``scene_cuts`` / ``duration`` 直接取 pipeline metadata。
+    範本的視覺理解改由導演 view_template 親眼看原始幀,故 DNA 不再帶任何 Gemini 文字語意。
     """
 
     name = "template_dna"
@@ -47,8 +45,8 @@ class TemplateDnaProducer(DnaProducer):
         base_dir = os.path.dirname(video)
         asset_id = os.path.basename(video)
 
-        # 2. 深度感知:走共享 pipeline 的 TEMPLATE 精簡 DAG(decode + scene + Gemini 範本語意);
-        #    砍掉音訊鏈與品質 / 臉部評分,語意走 TEMPLATE_ANALYSIS(含 audio_transcript 與 music_analysis)。
+        # 2. 精簡感知:走共享 pipeline 的 TEMPLATE 純訊號 DAG(decode + scene,無 LLM)。
+        #    範本視覺理解改由導演 view_template 親眼看原始幀,故不再跑 Gemini 範本語意。
         #    tracker 透傳讓 stage 事件帶正確 job_id 上前端(無前端時為 None,退化純 print)。
         results = self._runner.run(
             [video],
@@ -57,21 +55,22 @@ class TemplateDnaProducer(DnaProducer):
             tracker=tracker,
         )
         if not results:
-            raise RuntimeError("Template 深度分析失敗(pipeline 無 success 結果)")
+            raise RuntimeError("Template 分析失敗(pipeline 無 success 結果)")
         template_meta = results[0]["metadata"]
 
-        # 3. 物理節奏:beats 是 template 專屬、librosa 純 CPU,留在本分支(不入 pipeline)。
+        # 3. 物理節奏:bpm 是 template 專屬、librosa 純 CPU,留在本分支(不入 pipeline)。只取 bpm,
+        #    範本完整 beats/onsets 無消費端(實際卡點走選定配樂的 beats)。
         a_only = os.path.join(base_dir, f"{os.path.splitext(asset_id)[0]}{_AUDIO_ONLY_SUFFIX}")
         self._ffmpeg.extract_ai_audio(video, a_only)
         beats = self._beat_extractor.get_beats(a_only)
 
-        # 4. 組裝 DNA;scene_cuts 取自 pipeline metadata(解 P2,不再自跑場景偵測)。
+        # 4. 組裝輕量 DNA;scene_cuts / duration 取自 pipeline metadata。
         return (
             BlueprintBuilder()
             .set_info(media_info["music_metadata"], media_info["original_url"])
-            .set_local_assets(original_video=video, video_only=_NO_VIDEO_ONLY, audio_only=a_only)
+            .set_local_assets(original_video=video)
             .set_physical_cuts(template_meta.get("scene_cuts", []))
-            .set_audio_features(beats)
-            .ingest_template_metadata(template_meta)
+            .set_duration(template_meta.get("duration", 0.0))
+            .set_bpm(beats.get("bpm"))
             .build()
         )

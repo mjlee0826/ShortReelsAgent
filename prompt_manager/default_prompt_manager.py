@@ -7,7 +7,6 @@ from prompt_manager.schemas import (
     BasicMediaSemantics,
     MusicBrief,
     MusicSearchQuery,
-    TemplateAnalysisSemantics,
     VideoEventIndexSemantics,
     schema_to_text,
 )
@@ -79,24 +78,6 @@ class DefaultPromptManager(BasePromptManager):
             "6. 寧缺勿造：不確定的主體框 / 標籤保守處理。"
         )
         return PromptSpec(text=text, schema=VideoEventIndexSemantics)
-
-    def get_template_analysis_prompt(self) -> PromptSpec:
-        """範本分析（事件索引 + 音訊轉錄 + 配樂偵測；Gemini）。"""
-        text = (
-            "# 角色\n"
-            "你是專業的「AI 影片架構與配樂分析師」，正在解析一支『範本影片』。\n\n"
-            "# 分析重點\n"
-            "1. 你在拆解一支風格範本：目的是萃取『節奏感、情緒曲線、配樂風格』供後續剪輯模仿，\n"
-            "   不是逐秒複製它的物理切點。\n"
-            "2. 全局觀看並『聆聽』，理解敘事節奏、情緒氛圍與配樂風格。\n"
-            "3. 依時間軸拆成數個『連續的多模態事件區塊』，每塊含 visual_layer 與 audio_layer 描述。\n"
-            "4. 逐句轉錄人聲並附 [起, 訖] 秒時間戳；無人聲時轉錄留空。\n"
-            "5. 配樂偵測 (music_analysis)：描述曲風 / 編制 (music_style)、分類 (genre)、音樂情緒、是否有歌聲；\n"
-            "   並『盡力猜測』歌名 (song_guess)。\n"
-            "   ⚠️ song_guess 為最佳猜測、可能有誤：不確定的欄位務必留空、confidence 給低分，切勿杜撰歌名。\n"
-            "6. 給出整支範本的全局攝影評論與全局情緒 / 場景 / 動作標籤。"
-        )
-        return PromptSpec(text=text, schema=TemplateAnalysisSemantics)
 
     def get_music_search_query_prompt(self, user_prompt: str, asset_mood_summary: str = "") -> PromptSpec:
         """音樂搜尋關鍵字（把使用者需求轉成精準的配樂搜尋詞；未指定時依素材氛圍推測）。"""
@@ -198,7 +179,7 @@ class DefaultPromptManager(BasePromptManager):
             "- reason：每個片段先在 reason 寫下導演決策考量（選材 / 轉場 / 變速 / 混音），再填其餘參數。\n\n"
             "# 配樂\n"
             "- bgm_track 的實際音檔由系統依【配樂 DNA】注入，你不要填 track_id；只決定 start_at（通常 0.0）/ source_start / volume。\n"
-            "- 【範本 DNA】的配樂僅供風格參考，不是可播放音檔，勿當 BGM。\n\n"
+            "- 範本（若有）只是視覺風格 / 節奏參考，不提供可播放配樂；BGM 一律以【配樂 DNA】為準。\n\n"
             "# 物理鐵律（submit 後 Critic 會驗，違反會被打回讓你就地修）\n"
             "- 時間軸嚴格首尾相接、零間隙零重疊：前一段 end_at == 下一段 start_at。\n"
             "- 變速一致性：(source_end - source_start) / playback_rate == (end_at - start_at)。\n"
@@ -213,8 +194,10 @@ class DefaultPromptManager(BasePromptManager):
             )
         if has_template:
             system += (
-                "\n# 範本風格參考\n"
-                "參考範本的視覺氛圍與節奏步調（不需逐秒對齊其物理切點）；含 music_dna 時用它校準情緒弧線與卡點感，實際 BGM 仍以【配樂 DNA】為準。\n"
+                "\n# 範本風格參考（你有一支範本影片可看）\n"
+                "首則訊息附【範本骨架】(總長 / bpm / 切點時間)。用 view_template 親眼看範本的原始幀（不給秒數則\n"
+                "自動踩切點取樣），讀它的構圖 / 運鏡 / 轉場 / 剪輯節奏，作為整支片的視覺風格與步調參考——學它的\n"
+                "『感覺與步調』即可，不需逐秒對齊其物理切點。範本只是參考，clip_id 一律只能用素材目錄裡的 id。\n"
             )
         # 偏好 few-shot（穩定、可快取；策展檔缺 / 空時回空字串，零行為變動）
         few_shot = build_few_shot_block()
@@ -250,7 +233,7 @@ class DefaultPromptManager(BasePromptManager):
             "（會等配樂備妥；配樂可能為 none，則不需卡點）。\n"
         )
         if template_dna:
-            msg += f"\n# 範本 DNA\n{json.dumps(template_dna, ensure_ascii=False)}\n"
+            msg += self._format_template_skeleton(template_dna)
         if previous_timeline:
             msg += f"\n# 上一版藍圖（微調用）\n{json.dumps(previous_timeline, ensure_ascii=False)}\n"
         msg += (
@@ -258,3 +241,25 @@ class DefaultPromptManager(BasePromptManager):
             "（必要時 correct_metadata 修正、卡點前 get_music_beats）→ 確認後 submit_blueprint。"
         )
         return msg
+
+    @staticmethod
+    def _format_template_skeleton(template_dna: dict) -> str:
+        """
+        組【範本骨架】區塊：只放輕量結構訊號（總長 / bpm / 切點 / 來源歌名提示）。
+
+        範本的視覺細節不再整包 dump，改由導演 view_template 親眼看（見系統提示的「範本風格參考」段）。
+        如此首則訊息保持精簡、cache 友善，導演也能真正『看見』範本而非只讀文字轉述。
+        """
+        info = template_dna.get("template_info") or {}
+        skeleton = {
+            "duration": template_dna.get("duration"),
+            "bpm": template_dna.get("bpm"),
+            "visual_cuts": template_dna.get("visual_cuts") or [],
+        }
+        source_music = info.get("music")
+        if source_music:
+            skeleton["source_music_hint"] = source_music  # yt-dlp 帶出的歌名提示（非可播放音檔）
+        return (
+            "\n# 範本骨架（結構訊號；視覺細節用 view_template 親眼看）\n"
+            f"{json.dumps(skeleton, ensure_ascii=False)}\n"
+        )

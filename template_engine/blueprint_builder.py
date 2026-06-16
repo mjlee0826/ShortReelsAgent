@@ -1,74 +1,56 @@
 import copy
-import json
-
-# 逐字稿長度超過此字元數即視為「原音重要」(影響導演人聲保留);具名避免 magic number
-_MIN_ESSENTIAL_TRANSCRIPT_CHARS = 5
 
 
 class BlueprintBuilder:
     """
-    Builder Pattern: 將範本影片的感知特徵(TemplateVideoMetadata)轉化為 Template DNA。
+    Builder Pattern: 把範本影片的精簡感知訊號組裝成輕量 Template DNA。
+
+    範本的視覺理解改由導演 ``view_template`` 親眼看原始幀(見 media_processor 的 TEMPLATE DAG),
+    故 DNA 不再承載 Gemini 文字評論 / 逐字稿 / 事件索引 / 配樂偵測等重欄位,只留:
+      - 導演視覺還原不了的物理訊號(剪輯切點 visual_cuts、節奏 bpm、總長 duration)
+      - view_template 解析原始影片所需的實體路徑(local_assets.original_video)
+      - 來源資訊(template_info:yt-dlp 帶出的歌名提示與原始 URL,免費附帶)
     """
     def __init__(self):
         self._dna = {
+            # yt-dlp 帶出的來源資訊:music 為歌名提示(非可播放音檔)、source 為原始 URL
             "template_info": {},
-            # 【新增】記錄實體檔案在 Server / 工作站上的絕對路徑
-            "local_assets": {
-                "original_video": "",
-                "video_only": "",
-                "audio_only": ""
-            },
+            # view_template 需要原始影片實體路徑來抓幀
+            "local_assets": {"original_video": ""},
+            # 場景物理切點(秒):範本剪輯節奏,供導演取樣 / 卡點參考
             "visual_cuts": [],
-            "audio_beats": {},
-            "cinematic_critique": "",
-            "multimodal_event_index": [],
-            "audio_transcript": {},
-            "is_audio_essential": False,
-            # 範本配樂偵測(Gemini TEMPLATE_ANALYSIS 產出:music_style / genre / 情緒 / 歌名猜測)
-            "music_dna": {}
+            # 範本總長(秒)
+            "duration": 0.0,
+            # librosa 估的範本節奏 BPM(風格參考;實際 BGM 卡點仍以選定配樂的 beats 為準)
+            "bpm": None,
         }
 
     def set_info(self, music_metadata: str, url: str):
+        """寫入來源資訊(yt-dlp 歌名提示 + 原始 URL)。"""
         self._dna["template_info"] = {"music": music_metadata, "source": url}
         return self
 
-    # 【新增】將路徑寫入藍圖的方法
-    def set_local_assets(self, original_video: str, video_only: str, audio_only: str):
-        self._dna["local_assets"] = {
-            "original_video": original_video,
-            "video_only": video_only,
-            "audio_only": audio_only
-        }
-        return self
-
-    def set_audio_features(self, beats: dict):
-        self._dna["audio_beats"] = beats
-        return self
-
-    def ingest_template_metadata(self, metadata: dict):
-        """吃 TemplateVideoMetadata(dict)：攝影評論 / 逐字稿 / 事件索引 / 配樂偵測 → 寫入 Template DNA。"""
-        self._dna["cinematic_critique"] = metadata.get("cinematic_critique", "")
-        self._dna["audio_transcript"] = metadata.get("audio_transcript") or {}
-        # 配樂偵測：Gemini song_guess 與 yt-dlp template_info.music(權威歌名)並存，消費端自行取捨優先序
-        self._dna["music_dna"] = metadata.get("music_analysis") or {}
-
-        transcript_text = self._dna["audio_transcript"].get("text", "")
-        self._dna["is_audio_essential"] = len(transcript_text) > _MIN_ESSENTIAL_TRANSCRIPT_CHARS
-
-        semantic_events = metadata.get("multimodal_event_index", [])
-        self._dna["multimodal_event_index"] = semantic_events
-
-        if not self._dna["visual_cuts"] and semantic_events:
-            print("[Builder] 偵測到一鏡到底，正在將語意事件轉換為剪輯切點...")
-            semantic_cuts = [float(e["start_time"]) for e in semantic_events if float(e["start_time"]) > 0]
-            self._dna["visual_cuts"] = sorted(list(set(semantic_cuts)))
-            
+    def set_local_assets(self, original_video: str):
+        """寫入原始影片實體路徑,供 view_template 抓幀。"""
+        self._dna["local_assets"] = {"original_video": original_video}
         return self
 
     def set_physical_cuts(self, physical_cuts: list):
+        """寫入場景物理切點(空清單時不覆寫,保留預設空陣列)。"""
         if physical_cuts:
             self._dna["visual_cuts"] = physical_cuts
         return self
 
+    def set_duration(self, duration: float):
+        """寫入範本總長(秒)。"""
+        self._dna["duration"] = duration or 0.0
+        return self
+
+    def set_bpm(self, bpm):
+        """寫入 librosa 估的節奏 BPM(可能為 None,代表未測得)。"""
+        self._dna["bpm"] = bpm
+        return self
+
     def build(self) -> dict:
+        """產出 Template DNA 的深拷貝(避免外部就地改動 builder 內部狀態)。"""
         return copy.deepcopy(self._dna)

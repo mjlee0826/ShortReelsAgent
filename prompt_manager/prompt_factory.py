@@ -13,7 +13,6 @@ class PromptFactory:
             TaskMode.BASIC_MEDIA_ANALYSIS: manager.get_basic_media_analysis_prompt,
             TaskMode.DEEP_IMAGE_ANALYSIS: manager.get_deep_image_analysis_prompt,   # 深度圖片分析（Gemini）
             TaskMode.VIDEO_EVENT_INDEX: manager.get_video_event_index_prompt,
-            TaskMode.TEMPLATE_ANALYSIS: manager.get_template_analysis_prompt,       # 範本分析（含音樂偵測）
             TaskMode.MUSIC_SEARCH_QUERY: manager.get_music_search_query_prompt,
         }
 

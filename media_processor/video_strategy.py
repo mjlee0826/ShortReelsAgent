@@ -9,8 +9,9 @@ class VideoStrategy(Enum):
 
     SIMPLE   → 本地 Qwen 全局分析（快速，無時間碼燒錄）
     COMPLEX  → Gemini API 精確索引（慢但準確，需燒錄視覺時間碼）
-    TEMPLATE → 範本專屬深分：精簡 DAG（decode + scene + Gemini 範本語意），砍掉音訊鏈與品質/臉部評分，
-               語意走 TEMPLATE_ANALYSIS（含音樂偵測），供 BlueprintPreparer 的 template 分支使用。
+    TEMPLATE → 範本專屬精簡分析：純訊號 DAG（decode + scene），無任何 LLM。視覺理解改由導演
+               view_template 親眼看原始幀，只保留導演還原不了的物理切點（剪輯節奏）與結構資訊，
+               供 TemplateDnaProducer 的 template 分支使用。
     """
     SIMPLE = "simple"
     COMPLEX = "complex"

@@ -32,6 +32,9 @@ class AgentContext:
     music_future: Optional[object] = None
     # 已解析的配樂 audio_dna；get_music_beats join future 後快取於此，resume 時由 facade 直接設入
     audio_dna: Optional[dict] = None
+    # 範本 handle（view_template 用）：{abs_path（原始影片實體路徑）, cuts（切點秒）, dur（總長）}；
+    # 無範本時為 None。範本非成片素材、不入 asset_index，故獨立承載於此，clip_id 驗證不受影響。
+    template: Optional[dict] = None
 
     def record_view(self, asset_id: str, start: float = 0.0, end: float = 0.0) -> None:
         """記錄某素材已被親看的一段時間範圍（圖片用 (0.0, 0.0)）。"""

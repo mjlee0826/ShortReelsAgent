@@ -40,10 +40,6 @@ class BasePromptManager(ABC):
         """影片事件索引：複雜影片的逐時間段多模態事件 + 音訊轉錄（Gemini）"""
 
     @abstractmethod
-    def get_template_analysis_prompt(self) -> PromptSpec:
-        """範本分析：範本影片的事件索引 + 音訊轉錄 + 配樂偵測（曲風 / 歌名猜測）"""
-
-    @abstractmethod
     def get_director_agentic_system_prompt(self, has_template: bool = False,
                                            is_refinement: bool = False) -> str:
         """Agentic 導演系統提示（純心法、可快取）：角色 + 工作方式 + 剪輯 / 字幕心法 + 工具箱 + 物理鐵律"""

@@ -29,8 +29,9 @@ class SemanticVideoStage(Stage):
     結果 dict 寫入 ``VideoWork.vlm_result``,由 Assembly(含逐 event 主體框正規化)後續取用。
     """
 
-    # 走 Gemini API 的策略(對應 API 資源池);其餘走本地 Qwen(GPU)
-    _GEMINI_STRATEGIES = (VideoStrategy.COMPLEX, VideoStrategy.TEMPLATE)
+    # 走 Gemini API 的策略(對應 API 資源池);其餘走本地 Qwen(GPU)。
+    # TEMPLATE 已不經本 Stage(範本改由導演 view_template 看原始幀,DAG 無 semantic 節點)。
+    _GEMINI_STRATEGIES = (VideoStrategy.COMPLEX,)
 
     def __init__(self, video_strategy: VideoStrategy = VideoStrategy.SIMPLE):
         """依策略決定資源型別(Qwen=GPU / Gemini=API)並預備兩個 lazy 引擎。"""
@@ -62,8 +63,8 @@ class SemanticVideoStage(Stage):
 
         - COMPLEX → Gemini ``VIDEO_EVENT_INDEX``;``COMPLEX_AUDIO_VIA_GEMINI`` 開啟時把 Gemini
           一併產出的音訊欄位寫回 work(取代已移除的 VAD/Whisper/AudioEnv 鏈)。
-        - TEMPLATE → Gemini ``TEMPLATE_ANALYSIS``(含音樂偵測);音訊只進 vlm_result,由 template assembly 直接取用。
         - SIMPLE → 本地 Qwen 全局分析。
+        (TEMPLATE 不經本 Stage:範本改由導演 view_template 看原始幀,DAG 已無 semantic 節點。)
         """
         work = get_video_work(context)
         if self._video_strategy == VideoStrategy.COMPLEX:
@@ -75,12 +76,6 @@ class SemanticVideoStage(Stage):
             # 旗標開啟:不建音訊鏈,改把 Gemini 的音訊欄位寫回 VideoWork,讓 Assembly 來源透明、不需改。
             if COMPLEX_AUDIO_VIA_GEMINI:
                 self._apply_gemini_audio(work)
-        elif self._video_strategy == VideoStrategy.TEMPLATE:
-            work.vlm_result = self._gemini_engine().analyze_media(
-                media_input=context.file_path,
-                media_type=_MEDIA_TYPE_VIDEO,
-                mode=TaskMode.TEMPLATE_ANALYSIS,
-            )
         else:
             work.vlm_result = self._analyze_with_qwen(context.file_path, context)
 

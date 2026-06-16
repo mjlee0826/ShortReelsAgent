@@ -71,12 +71,16 @@ class DirectorFacade:
             previous_timeline=previous_timeline,
         )
 
-        # 3. 跑 agentic loop（get_fields / view_raw / correct_metadata / get_music_beats / ask_user / submit）
+        # 3. 跑 agentic loop（get_fields / view_raw / view_template / correct_metadata / get_music_beats /
+        #    ask_user / submit）；有範本才把範本 handle 設入 ctx 並加掛 view_template 工具
+        template_handle = self._build_template_handle(template_dna)
         ctx = AgentContext(
             asset_index=asset_index, project_dir=project_dir or "", tracker=tracker,
-            music_future=music_future, audio_dna=audio_dna,
+            music_future=music_future, audio_dna=audio_dna, template=template_handle,
         )
-        blueprint_draft = self._build_loop().run(system_prompt, user_message, ctx)
+        blueprint_draft = self._build_loop(has_template=template_handle is not None).run(
+            system_prompt, user_message, ctx
+        )
 
         # 4. 後處理組裝（全局 FPS / 逐段預設 / 配樂保護）
         final_blueprint = self._assemble_blueprint(
@@ -90,42 +94,68 @@ class DirectorFacade:
 
     def resume_timeline(self, resume_state: dict, answer: str, raw_assets: list,
                         regenerate_music: bool = True, previous_bgm_track: dict = None,
-                        audio_dna: dict = None, tracker=None, project_dir: str = "") -> dict:
+                        audio_dna: dict = None, tracker=None, project_dir: str = "",
+                        template_dna: dict = None) -> dict:
         """
         B2 續跑：以使用者答案接回暫停的 loop，回最終藍圖（dict）。導演若再次 ask_user 仍會往上拋。
 
         重建 ctx：重新 compress 素材 → 還原已看範圍 viewed 與 metadata 修正 corrections，使必讀強制 /
-        修正狀態延續。素材 / DNA 由 ``director_service`` 從 PHASE1/3 快取重載後傳入（``audio_dna`` 設入
-        ctx 供 get_music_beats 直接回；系統提示與素材目錄已在持久化的 messages 內，無須重建）。
+        修正狀態延續。素材 / DNA 由 ``director_service`` 從 PHASE1/2/3 快取重載後傳入（``audio_dna`` 設入
+        ctx 供 get_music_beats 直接回；``template_dna`` 重建範本 handle 供 view_template 續用；系統提示與
+        素材目錄已在持久化的 messages 內，無須重建，但工具集須與首跑一致故依範本有無重建 registry）。
         """
         print("\n🎬 [Director Agent] 導演大腦續跑（resume）...")
         compressed_assets = self.compressor.compress(raw_assets)
         asset_index = {asset["id"]: asset for asset in compressed_assets if asset.get("id")}
-        ctx = self._restore_ctx(asset_index, project_dir, tracker, resume_state, audio_dna)
+        template_handle = self._build_template_handle(template_dna)
+        ctx = self._restore_ctx(
+            asset_index, project_dir, tracker, resume_state, audio_dna, template_handle
+        )
 
-        blueprint_draft = self._build_loop().resume(resume_state, answer, ctx)
+        blueprint_draft = self._build_loop(has_template=template_handle is not None).resume(
+            resume_state, answer, ctx
+        )
         return self._assemble_blueprint(
             compressed_assets, blueprint_draft, regenerate_music, previous_bgm_track
         )
 
     # ── 內部組裝 ──────────────────────────────────────────────────────────────
-    def _build_loop(self) -> DirectorAgentLoop:
-        """組一個導演 loop（manager / 工具 / CriticGate / 收斂上限）。"""
+    def _build_loop(self, has_template: bool = False) -> DirectorAgentLoop:
+        """組一個導演 loop（manager / 工具 / CriticGate / 收斂上限）；有範本才加掛 view_template。"""
         return DirectorAgentLoop(
             manager=get_director_manager(),
-            registry=build_director_registry(),
+            registry=build_director_registry(has_template),
             critic_gate=CriticGate(),
             max_steps=DIRECTOR_AGENTIC_MAX_STEPS,
             max_critic_retries=DIRECTOR_MAX_CRITIC_RETRIES,
         )
 
     @staticmethod
+    def _build_template_handle(template_dna: dict | None) -> dict | None:
+        """
+        從 template_dna 萃取 view_template 所需的範本 handle；無範本 / 無實體影片回 None。
+
+        只取 view_template 需要的三項：原始影片實體路徑、切點（預設取樣點）、總長（無切點時均勻取樣
+        的回退依據）。範本非成片素材、不入 asset_index，故獨立成 handle 承載於 ctx。
+        """
+        if not template_dna:
+            return None
+        abs_path = (template_dna.get("local_assets") or {}).get("original_video", "")
+        if not abs_path:
+            return None
+        return {
+            "abs_path": abs_path,
+            "cuts": template_dna.get("visual_cuts") or [],
+            "dur": template_dna.get("duration") or 0.0,
+        }
+
+    @staticmethod
     def _restore_ctx(asset_index: dict, project_dir: str, tracker, resume_state: dict,
-                     audio_dna: dict = None) -> AgentContext:
-        """從續跑狀態還原 ctx：重套 metadata 修正、還原已看範圍、設入重載的配樂（無 future）。"""
+                     audio_dna: dict = None, template: dict = None) -> AgentContext:
+        """從續跑狀態還原 ctx：重套 metadata 修正、還原已看範圍、設入重載的配樂與範本 handle。"""
         ctx = AgentContext(
             asset_index=asset_index, project_dir=project_dir or "", tracker=tracker,
-            audio_dna=audio_dna,
+            audio_dna=audio_dna, template=template,
         )
         # 重套語意修正到重新 compress 出的 dossier（physical 欄位 correct 階段已擋，這裡只重放語意值）
         for correction in resume_state.get("corrections") or []:

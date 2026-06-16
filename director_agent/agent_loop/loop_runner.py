@@ -263,12 +263,14 @@ class _SubmitOutcome:
         self.tool_result = tool_result
 
 
-def build_director_registry() -> ToolRegistry:
+def build_director_registry(has_template: bool = False) -> ToolRegistry:
     """
     組裝導演工具註冊表（工廠）。
 
-    Phase A–C：``get_fields`` / ``view_raw`` / ``correct_metadata`` / ``ask_user`` / ``submit_blueprint``。
-    工具皆無狀態（於 execute 收 ctx），可安全共用單一 registry 實例；延遲 import 避免時序耦合。
+    基礎工具：``get_fields`` / ``view_raw`` / ``correct_metadata`` / ``get_music_beats`` / ``ask_user`` /
+    ``submit_blueprint``。``has_template`` 時才加掛 ``view_template``（無範本就不註冊，避免導演看到一個
+    沒用的工具而誤呼叫）。工具皆無狀態（於 execute 收 ctx），可安全共用單一 registry 實例；延遲 import
+    避免時序耦合。
     """
     from director_agent.agent_loop.tools.ask_user_tool import AskUserTool
     from director_agent.agent_loop.tools.correct_metadata_tool import CorrectMetadataTool
@@ -277,11 +279,16 @@ def build_director_registry() -> ToolRegistry:
     from director_agent.agent_loop.tools.submit_blueprint_tool import SubmitBlueprintTool
     from director_agent.agent_loop.tools.view_raw_tool import ViewRawTool
 
-    return ToolRegistry([
+    tools = [
         GetFieldsTool(),
         ViewRawTool(),
         CorrectMetadataTool(),
         GetMusicBeatsTool(),
         AskUserTool(),
         SubmitBlueprintTool(),
-    ])
+    ]
+    if has_template:
+        # 緊接 view_raw 之後加掛，讓「看素材 / 看範本」兩個視覺工具相鄰、語意成對
+        from director_agent.agent_loop.tools.view_template_tool import ViewTemplateTool
+        tools.insert(2, ViewTemplateTool())
+    return ToolRegistry(tools)

@@ -163,19 +163,35 @@ class DirectorService:
             parts.append(f"常見場景: {top_scenes}")
         return "；".join(parts)
 
-    def _audio_cache_url(self, audio_dna: dict) -> str:
-        """把配樂 audio_dna 的實體標準檔轉成全域快取池 cache URL；無有效檔回 None（生成與換曲共用）。"""
+    def _audio_public_url(self, audio_dna: dict) -> str:
+        """
+        把配樂實體標準檔轉成對外可服務的 URL：依檔案落在哪個靜態根，組對應前綴（生成與換曲共用）。
+
+        兩個靜態掛載點互為兄弟目錄：搜尋 / 免費音樂下載落在 ``TEMP_TEMPLATES_DIR``(``/cache``),
+        使用者上傳的自訂配樂落在 ``ASSETS_DIR``(``/static``,專案 ``raw/`` 下)。原本寫死 ``/cache``
+        + 對 ``TEMP_TEMPLATES_DIR`` 算 relpath,對上傳檔會跑出 ``../assets/...`` → 瀏覽器正規化成
+        不存在的 ``/assets/...`` 而 404。改以 ``commonpath`` 判斷檔案真正落在哪個根、組對前綴;
+        兩根之外(無法靜態服務)一律回 None,順帶天然擋掉路徑穿越。
+        """
         if not (audio_dna and isinstance(audio_dna, dict)):
             return None
         source_audio_path = audio_dna.get("local_path", {}).get("standard", "")
         if not (source_audio_path and os.path.exists(source_audio_path)):
             return None
-        try:
-            rel_path = os.path.relpath(source_audio_path, TEMP_TEMPLATES_DIR)
-            return f"{self.backend_url}/cache/{rel_path}".replace('\\', '/')
-        except Exception as e:
-            print(f"⚠️ [Service] 轉換快取連結失敗: {e}")
-            return None
+        abs_path = os.path.abspath(source_audio_path)
+        # 掛載點 → URL 前綴對照(與 backend/main.py 的 StaticFiles mount 一致)
+        for root, prefix in ((TEMP_TEMPLATES_DIR, "cache"), (ASSETS_DIR, "static")):
+            root_abs = os.path.abspath(root)
+            try:
+                under_root = os.path.commonpath([abs_path, root_abs]) == root_abs
+            except ValueError:
+                # 不同磁碟 / 無共同前綴(Windows 跨碟)→ 視為不在此根,續試下一個
+                continue
+            if under_root:
+                rel_path = os.path.relpath(abs_path, root_abs)
+                return f"{self.backend_url}/{prefix}/{rel_path}".replace('\\', '/')
+        print(f"⚠️ [Service] 配樂檔不在任何靜態根、無法服務: {abs_path}")
+        return None
 
     def _inject_beats(self, bgm_track: dict, audio_dna: dict) -> None:
         """
@@ -652,11 +668,11 @@ class DirectorService:
         導演藍圖的後處理收尾（``run`` / ``resume`` 共用）：套配樂快取 URL、注入節拍、關字幕 / 調色雙保險、
         落地藍圖、更新專案 meta、記偏好事件，回 ``{blueprint, audio_dna, assets_root_url}``。
         """
-        # 6. 全域快取池：把實體配樂檔轉成獨立 cache URL，套進 bgm_track
-        audio_url = self._audio_cache_url(audio_dna)
+        # 6. 把實體配樂檔轉成對外 URL（依來源落在 /cache 或 /static），套進 bgm_track
+        audio_url = self._audio_public_url(audio_dna)
         if audio_url and isinstance(final_blueprint.get("bgm_track"), dict):
             final_blueprint["bgm_track"]["track_id"] = audio_url
-            print(f"🎵 [Service] 已套用全域快取配樂連結: {audio_url}")
+            print(f"🎵 [Service] 已套用配樂連結: {audio_url}")
 
         # 6b. 自動運鏡卡點：節拍帶進 bgm_track（供前端 punch；總開關已由 DirectorFacade 初始化）
         self._inject_beats(final_blueprint.get("bgm_track"), audio_dna)
@@ -771,6 +787,11 @@ class DirectorService:
             os.path.join(target_dir, PHASE1_METADATA_FILENAME), []
         )
         audio_dna = read_json_tolerant(os.path.join(target_dir, PHASE3_AUDIO_DNA_FILENAME), None)
+        # 重載範本 DNA（首跑於 loop 前已落地 phase2）：讓續跑重建 view_template handle、工具集與首跑一致。
+        # 無範本時檔案不存在 → None，view_template 不註冊。
+        template_dna = read_json_tolerant(
+            os.path.join(target_dir, PHASE2_TEMPLATE_DNA_FILENAME), None
+        )
 
         # 量測續跑耗時:prep(Phase 2∥3)已於首跑完成,此處只接回 Phase 4 導演 loop,故僅報續跑段
         resume_start = time.perf_counter()
@@ -785,6 +806,7 @@ class DirectorService:
                     audio_dna=audio_dna,  # 從 PHASE3 重載的配樂 → 設入 ctx 供 get_music_beats 直接回
                     tracker=tracker,
                     project_dir=target_dir,
+                    template_dna=template_dna,  # 從 PHASE2 重載 → 重建 view_template handle
                 )
             except ClarificationRequested as clarification:
                 result = self._suspend_for_clarification(
@@ -856,7 +878,7 @@ class DirectorService:
             user_prompt=user_prompt or "",
         ) or {}
 
-        audio_url = self._audio_cache_url(audio_dna)
+        audio_url = self._audio_public_url(audio_dna)
         prev = previous_bgm_track or {}
         if audio_url:
             # 換曲：曲目換新、起播歸零；沿用使用者既有音量（保留手動混音）

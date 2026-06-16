@@ -197,22 +197,21 @@ class PipelineBuilder:
 
     def _build_template_video_pipeline(self, context: AssetContext) -> Pipeline:
         """
-        Template 專屬精簡依賴圖:``decode → {scene, semantic(Gemini TEMPLATE_ANALYSIS)} → assembly``。
+        Template 專屬精簡依賴圖:``decode → scene → assembly``(純訊號層,無 LLM)。
 
-        範本只需風格 / 節奏 / 配樂偵測參考,故砍掉整條音訊鏈(VAD/Whisper/AudioEnv)與品質 / 美學 /
-        色彩 / 臉部 / 動態評分(template DNA 都不消費),只重用便宜的 decode(metadata + 代表幀)與
-        scene(PySceneDetect 物理切點)。語意走 ``TEMPLATE_ANALYSIS``(含 audio_transcript 與 music_analysis),
-        assembly 以 ``_build_template`` 組 ``TemplateVideoMetadata``。
+        範本的視覺理解改由導演 agentic loop 自己 ``view_template`` 親眼看原始幀(與看使用者素材的
+        ``view_raw`` 同一機制),故這裡不再跑 Gemini ``TEMPLATE_ANALYSIS``——那層只是把畫面翻成文字
+        再餵給同為多模態的導演,屬冗餘。只保留導演視覺還原不了的便宜訊號:decode(時長 / fps / 解析度 /
+        代表幀)與 scene(PySceneDetect 物理切點=範本剪輯節奏)。節拍(librosa bpm)由 ``TemplateDnaProducer``
+        於本 DAG 外補。assembly 以 ``_build_template`` 組精簡 ``TemplateVideoMetadata``。
         """
         decode = DecodeVideoStage()
         scene = SceneCutStage()
-        semantic = SemanticVideoStage(context.video_strategy)  # TEMPLATE → Gemini(API)
 
         decode_name = decode.meta.name
         nodes = [
             StageNode(decode),
             StageNode(scene, (decode_name,)),
-            StageNode(semantic, (decode_name,)),
-            StageNode(AssemblyVideoStage(), (scene.meta.name, semantic.meta.name)),
+            StageNode(AssemblyVideoStage(), (scene.meta.name,)),
         ]
         return Pipeline(nodes, name=_VIDEO_PIPELINE_NAME)
