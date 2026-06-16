@@ -47,6 +47,7 @@ from ingestion_engine.models import (
     META_KEY_PHASE1_STATUS,
     META_KEY_PHASE1_UPDATED_AT,
     PHASE1_STATUS_PENDING,
+    PHASE1_STATUS_SKIPPED,
 )
 
 # 程式結束碼:成功 / 來源無有效素材(對應端點的 400)
@@ -110,7 +111,7 @@ class LocalFolderProjectCreator:
 
         auto_analyze = self._resolve_auto_analyze(request)
         self._write_local_meta(project_dir, project_name, request.display_name.strip(), auto_analyze)
-        self._run_processing(request.user_id, project_name, auto_analyze)
+        self._run_processing(project_dir, request.user_id, project_name, auto_analyze)
 
         return IngestResult(
             project_name=project_name,
@@ -176,16 +177,32 @@ class LocalFolderProjectCreator:
         }
         project_meta_store.write(project_dir, meta)
 
-    def _run_processing(self, user_id: str, project_name: str, auto_analyze: bool) -> None:
-        """同步執行背景處理:auto_analyze 跑完整 Phase 1(內含標準化),否則僅標準化。
+    def _run_processing(
+        self, project_dir: str, user_id: str, project_name: str, auto_analyze: bool
+    ) -> None:
+        """同步執行背景處理:auto_analyze 跑完整 Phase 1(內含標準化),否則僅標準化後標 SKIPPED。
 
-        與端點 ``_schedule_local_processing`` 行為等價,差別在本工具同步執行(CLI 場景無 event loop,
+        與端點 ``_schedule_local_processing`` 同義,差別在本工具同步執行(CLI 場景無 event loop,
         也方便你直接看到完整 log);run_phase1 內部會先標準化再做感知分析。
+
+        關鍵:關閉自動分析時,標準化完成後須把 phase1_status 由 pending 推進到 SKIPPED(已收斂、
+        待手動分析),對齊雲端同步關閉自動分析時的收尾(cloud_ingestion_service ``_ingest_changed``)。
+        ``standardize_project`` 刻意不動 phase1_status,若停在 pending,前端 ``useProjectAssets`` 會把
+        pending 當「準備中」永遠顯示「正在下載並處理素材」轉圈,既看不到素材也無法手動觸發分析。
         """
         if auto_analyze:
+            # run_phase1 自行把 PROCESSING→DONE/FAILED 落地,收斂後前端不再算「準備中」
             director_service.run_phase1(project_name, user_id=user_id, require_success=False)
-        else:
-            director_service.standardize_project(project_name, user_id=user_id)
+            return
+
+        director_service.standardize_project(project_name, user_id=user_id)
+
+        def _mark_skipped(meta: dict) -> None:
+            """就地把 phase1_status 標為 SKIPPED(已收斂、待手動分析),不碰其餘欄位。"""
+            meta[META_KEY_PHASE1_STATUS] = PHASE1_STATUS_SKIPPED
+            meta[META_KEY_PHASE1_UPDATED_AT] = _now_iso()
+
+        project_meta_store.update(project_dir, _mark_skipped)
 
 
 def _parse_args(argv: Optional[list[str]] = None) -> IngestRequest:
