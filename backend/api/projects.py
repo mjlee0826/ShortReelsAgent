@@ -42,6 +42,7 @@ from ingestion_engine.models import (
     META_KEY_SOURCE_URL,
     META_KEY_SYNC_STATUS,
     PHASE1_STATUS_PENDING,
+    PHASE1_STATUS_SKIPPED,
     SOURCE_GDRIVE,
     SYNC_STATUS_ACTIVE,
     SyncReport,
@@ -423,6 +424,24 @@ def _on_first_sync_done(project_name: str):
     return _callback
 
 
+def _mark_phase1_skipped(meta: dict) -> None:
+    """就地把 phase1_status 標為 SKIPPED（已下載/標準化、依設定不自動分析、待手動觸發），不碰其餘欄位。"""
+    meta[META_KEY_PHASE1_STATUS] = PHASE1_STATUS_SKIPPED
+    meta[META_KEY_PHASE1_UPDATED_AT] = _now_iso()
+
+
+def _standardize_then_mark_skipped(project_name: str, user_id: str, project_dir: str) -> None:
+    """背景只標準化（不自動分析）：標準化完成後把 phase1_status 由 pending 推進到 SKIPPED。
+
+    對齊雲端同步關閉自動分析時的收尾（cloud_ingestion_service ``_ingest_changed``）。
+    ``standardize_project`` 刻意不動 phase1_status，若停在 pending，前端 ``useProjectAssets`` 會把
+    pending 當「準備中」永遠顯示「正在下載並處理素材」轉圈，既看不到素材也無法手動觸發分析；
+    故標準化成功後須收斂為 SKIPPED（不在前端「準備中」狀態集合內）。
+    """
+    director_service.standardize_project(project_name, user_id)
+    project_meta_store.update(project_dir, _mark_phase1_skipped)
+
+
 def _schedule_local_processing(user_id: str, project_name: str, auto_analyze: bool) -> None:
     """
     排程本機專案上傳後的背景處理（不阻塞建立請求）。
@@ -430,15 +449,16 @@ def _schedule_local_processing(user_id: str, project_name: str, auto_analyze: bo
     auto_analyze 為真：以 async job 跑完整 Phase 1（run_phase1 內部會先標準化、並把 PROCESSING→
     DONE/FAILED 落地），job_id 寫入 meta 供素材頁訂閱 ``/ws/progress/{job_id}`` 看即時進度——
     沿用 reanalyze 的 phase1_lock + async_job_runner + publish/clear active job 形態。
-    auto_analyze 為假：僅背景標準化讓素材身分先穩定，phase1_status 維持 pending（前端顯「等待分析」），
-    待使用者進素材頁手動觸發。
+    auto_analyze 為假：背景標準化讓素材身分先穩定後，把 phase1_status 由 pending 收斂為 SKIPPED
+    （已收斂、待手動分析），對齊雲端同步收尾。切忌停在 pending——前端 useProjectAssets 會把 pending
+    當「準備中」永遠顯示「正在下載並處理素材」轉圈，使用者既看不到素材也無法手動觸發分析。
     """
     project_dir = os.path.join(_user_dir(user_id), project_name)
 
     if not auto_analyze:
-        # 只標準化（不動 phase1_status）：丟 thread 不阻塞請求；完成／例外於 callback 印出
+        # 只標準化後標 SKIPPED（已收斂、待手動分析）：丟 thread 不阻塞請求；完成／例外於 callback 印出
         task = asyncio.create_task(
-            asyncio.to_thread(director_service.standardize_project, project_name, user_id)
+            asyncio.to_thread(_standardize_then_mark_skipped, project_name, user_id, project_dir)
         )
         _background_tasks.add(task)
         task.add_done_callback(_on_local_processing_done(project_name))
