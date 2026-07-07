@@ -49,6 +49,7 @@ __all__ = [
     "DIRECTOR_PROVIDER_CLAUDE",
     "DIRECTOR_PROVIDER_GEMINI",
     "CLAUDE_DIRECTOR_MODEL",
+    "CLAUDE_BRIEF_MODEL",
     "CLAUDE_DIRECTOR_MAX_TOKENS",
     "DIRECTOR_USE_TOOL_USE",
     # Qwen
@@ -70,6 +71,8 @@ __all__ = [
     "WHISPER_CPU_COMPUTE_TYPE",
     "WHISPER_BEAM_SIZE",
     "WHISPER_VAD_FILTER",
+    "WHISPER_USE_BATCHED_PIPELINE",
+    "WHISPER_CHUNK_BATCH_SIZE",
     # Audio Env
     "AUDIO_ENV_TOP_K",
     "AUDIO_SAMPLING_RATE",
@@ -90,8 +93,6 @@ __all__ = [
     # VAD
     "VAD_REPO",
     "VAD_SAMPLING_RATE",
-    # Saliency
-    "SALIENCY_MODEL_NAME",
     # 共用
     "DEFAULT_FALLBACK_SCORE",
     "SCORE_MIN",
@@ -141,34 +142,12 @@ QWEN_BASE_MODEL_ID = "Qwen/Qwen3-VL-4B-Instruct"
 QWEN_PROCESSOR_ID  = QWEN_BASE_MODEL_ID
 
 
-def _read_bool_env(env_name: str, default: bool) -> bool:
-    """讀取 env var 並轉為 bool，接受 true/1/yes/on 等常見字串。"""
-    raw = os.environ.get(env_name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"true", "1", "yes", "on"}
-
-
-def _read_int_env(env_name: str, default: int) -> int:
-    """讀取 env var 並轉為 int；未設定或格式錯誤時回 default（壞值不炸啟動）。"""
-    raw = os.environ.get(env_name)
-    if raw is None:
-        return default
-    try:
-        return int(raw.strip())
-    except ValueError:
-        return default
-
-
-def _read_float_env(env_name: str, default: float) -> float:
-    """讀取 env var 並轉為 float；未設定或格式錯誤時回 default（壞值不炸啟動）。"""
-    raw = os.environ.get(env_name)
-    if raw is None:
-        return default
-    try:
-        return float(raw.strip())
-    except ValueError:
-        return default
+# env 讀取工具集中於 config.env_utils（DRY）；別名維持模組內既有呼叫寫法
+from config.env_utils import (  # noqa: E402 - 置於使用點前即可，維持原檔案結構
+    read_bool_env as _read_bool_env,
+    read_float_env as _read_float_env,
+    read_int_env as _read_int_env,
+)
 
 
 # ── Phase 4 導演藍圖 provider 切換 (Claude 預設 / Gemini) ─────────────────────────
@@ -181,6 +160,11 @@ DIRECTOR_PROVIDER = os.getenv("DIRECTOR_PROVIDER", DIRECTOR_PROVIDER_CLAUDE).str
 
 # Claude 導演模型（預設 Opus 4.8，品質優先）；env 可切 claude-sonnet-4-6 做省錢 A/B。
 CLAUDE_DIRECTOR_MODEL = os.getenv("CLAUDE_MODEL_DIRECTOR", "claude-opus-4-8")
+# 配樂 brief 等「小型一次性結構化任務」的模型：任務只產一個搜尋詞 + 一句創意定錨，Haiku 4.5
+# （$1/$5 per MTok）綽綽有餘；沿用導演的 Opus + adaptive thinking 是 ~25× 的浪費，且 brief 是
+# 同步呼叫、擋在整條生成起跑線前（music future / 範本分析 / 導演 loop 全排在它後面），
+# 換小模型同時直接縮短使用者感受的生成延遲。env 可覆寫做 A/B。
+CLAUDE_BRIEF_MODEL = os.getenv("CLAUDE_MODEL_BRIEF", "claude-haiku-4-5")
 # 單次導演生成的輸出上限（**含 adaptive thinking token**）；截斷時（stop_reason=max_tokens）調高此值。
 # tool use 下：thinking + 整份藍圖 tool 輸出都吃這個額度，16000 對 60 秒多片段藍圖偏緊（thinking 可能
 # 就把額度耗盡、來不及呼叫 tool → 回應全空），故預設提到 32000；仍不夠可再以 env 調高（注意勿超過模型上限）。
@@ -229,7 +213,13 @@ WHISPER_CPU_COMPUTE_TYPE  = "int8"
 WHISPER_BEAM_SIZE         = 5
 # 是否以 faster-whisper 內建 Silero VAD 再修剪段內靜音以抑制幻覺；預設關——上游已有 VadStage 閘門
 # 與 _filter_hallucination 後處理，關閉可省一次額外 onnxruntime VAD 載入/開銷。要更強過濾可設 True。
+# ⚠️ 僅作用於「循序路徑」；分塊批次路徑（下方旗標）以 VAD 切塊是其自然模式，恆開不受此旗標影響。
 WHISPER_VAD_FILTER        = _read_bool_env("WHISPER_VAD_FILTER", False)
+# 單檔分塊批次（BatchedInferencePipeline）：VAD 切塊 + 多塊一次 forward，對長音檔（配樂歌詞聽寫
+# 3–5 分鐘全曲、長影片）有數倍加速；短音檔只有 1 塊、行為與循序等價。false 回退純循序（A/B / 排查）。
+WHISPER_USE_BATCHED_PIPELINE = _read_bool_env("WHISPER_USE_BATCHED_PIPELINE", True)
+# 分塊批次的單次 forward 塊數上限：越大越快但暫態 VRAM 越高（對應 WHISPER_TRANSIENT_VRAM_GB 估值）。
+WHISPER_CHUNK_BATCH_SIZE     = _read_int_env("WHISPER_CHUNK_BATCH_SIZE", 8)
 
 # ── Audio Env (PANNs CNN14) ───────────────────────────────────────────────────
 # 回傳信心分數前 K 高的分類標籤（AudioSet 527 類）
@@ -267,9 +257,6 @@ MUSIQ_METRIC_NAME = 'musiq'
 # ── Silero VAD ────────────────────────────────────────────────────────────────
 VAD_REPO        = 'snakers4/silero-vad'
 VAD_SAMPLING_RATE = 16000  # Silero VAD 要求 16000Hz
-
-# ── U²-Net Saliency ───────────────────────────────────────────────────────────
-SALIENCY_MODEL_NAME = "u2net"
 
 # ── 共用評分邊界 ───────────────────────────────────────────────────────────────
 # 失敗時的保底分數：給予及格分，避免誤砍素材

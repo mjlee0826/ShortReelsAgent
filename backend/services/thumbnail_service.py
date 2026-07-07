@@ -27,6 +27,9 @@ from config.app_config import (
 from config.media_processor_config import MIDDLE_FRAME_POSITION
 from media_processor.pipeline.context import MediaKind
 from media_processor.pipeline.utils.video_frame_utils import grab_frame_at_time
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ThumbnailService:
@@ -85,7 +88,7 @@ class ThumbnailService:
             image.convert("RGB").save(out_path, format="JPEG", quality=THUMBNAIL_JPEG_QUALITY)
             return True
         except Exception as exc:  # noqa: BLE001 - 縮圖非關鍵路徑,任何失敗都退佔位
-            print(f"[ThumbnailService Warning] 產生縮圖失敗 ({os.path.basename(src_path)}): {exc}")
+            logger.warning(f"[ThumbnailService Warning] 產生縮圖失敗 ({os.path.basename(src_path)}): {exc}")
             return False
 
     @staticmethod

@@ -42,6 +42,9 @@ from config.model_config import (
     QWEN_FPS_TIMECODED,
     QWEN_FPS_DEFAULT,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # Attention 實作優先序：FA2 為主，環境不允許時 fallback 到 sdpa（PyTorch 內建）
@@ -75,7 +78,7 @@ class QwenModelManager(BaseModelManager):
         # 印出實際生效的 attention 實作與量化模式：方便確認 FA2 是否真的啟用、
         # 以及落在 bf16（預設）/ nf4 / int8 哪條載入路徑
         attn_impl = getattr(self.model.config, "_attn_implementation", "unknown")
-        print(f"[Qwen] attn_implementation={attn_impl}, 量化={QWEN_QUANT_MODE}")
+        logger.info(f"[Qwen] attn_implementation={attn_impl}, 量化={QWEN_QUANT_MODE}")
 
     def _load_model_with_attention_fallback(self) -> Qwen3VLForConditionalGeneration:
         """
@@ -100,7 +103,7 @@ class QwenModelManager(BaseModelManager):
                 # ImportError：flash-attn 未安裝
                 # ValueError：模型 / transformers 版本不支援該 attn_implementation
                 # 這兩類才是「FA2 不可用」，OOM 等 RuntimeError 不在此列、會自然往上拋
-                print(
+                logger.info(
                     f"[Qwen FA2 Warning] Flash Attention 2 不可用，"
                     f"fallback 至 {_ATTN_FALLBACK}：{exc}"
                 )
@@ -220,7 +223,7 @@ class QwenModelManager(BaseModelManager):
             # CUDA OOM 往上拋給 @oom_resilient 重試（耗盡才標 asset error）；其餘錯誤維持 null object
             if is_cuda_oom(e):
                 raise
-            print(f"[Qwen VLM Error] 推理失敗: {str(e)}")
+            logger.error(f"[Qwen VLM Error] 推理失敗: {str(e)}")
             return {"error": "Analysis failed", "raw_output": str(e)}
         finally:
             if torch.cuda.is_available():

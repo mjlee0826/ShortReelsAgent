@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, Dict
 from backend.services.director_service import director_service, AssetsNotAnalyzedError
+from backend.services.generation_request import GenerationRequest
 from backend.services.render_service import RenderService
 from backend.services.stores.agent_session_store import agent_session_store
 from backend.services.jobs.async_job_runner import async_job_runner
@@ -19,6 +20,9 @@ from backend.services.jobs.job_manager import job_manager
 from backend.auth.logto_jwt_verifier import verify_token
 from config.app_config import ASSETS_DIR, RAW_SUBDIR
 from config.media_formats import AUDIO_EXTENSIONS
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 # director_service 為跨模組共享的單例(定義於 backend.services.director_service),此處直接 import 使用;
@@ -50,6 +54,21 @@ class GenerateRequest(BaseModel):
     regenerate_music: bool = True
     # 不重抓配樂時，沿用前端傳回的上一版 bgm_track（保留手動的音量 / 起播與曲目）
     previous_bgm_track: Optional[Dict] = None
+
+    def to_generation_request(self) -> GenerationRequest:
+        """把 API 契約模型轉成 service 層的 :class:`GenerationRequest`（欄位名對齊 service 慣例）。"""
+        return GenerationRequest(
+            prompt=self.user_prompt,
+            folder_name=self.asset_folder_name,
+            template=self.template_source,
+            subtitles=self.enable_subtitles,
+            filters=self.enable_filters,
+            old_timeline=self.previous_timeline,
+            music_strategy=self.music_strategy,
+            user_music_file=self.user_music_file,
+            regenerate_music=self.regenerate_music,
+            previous_bgm_track=self.previous_bgm_track,
+        )
 
 
 @router.post("/generate")
@@ -89,6 +108,7 @@ async def generate_timeline(req: GenerateRequest, user_id: str = Depends(verify_
 
     # 3. 啟動背景 job;work 內落地進行中 job_id(供重進接回),收尾務必清 meta 並釋放鎖
     job_id_box: dict[str, str] = {}
+    generation_request = req.to_generation_request()
 
     def work(tracker) -> dict:
         """背景執行緒內跑完整生成工作流(Phase 2–4),tracker 帶 job_id 把兩分支進度串到 WS。"""
@@ -96,18 +116,7 @@ async def generate_timeline(req: GenerateRequest, user_id: str = Depends(verify_
             # 落地進行中 job_id:編輯頁重整後查 generation-progress 即可重新訂閱 WS 接回即時進度
             publish_active_generation_job(project_dir, job_id_box["id"])
             return director_service.run_workflow(
-                prompt=req.user_prompt,
-                folder_name=req.asset_folder_name,
-                user_id=user_id,
-                template=req.template_source,
-                subtitles=req.enable_subtitles,
-                filters=req.enable_filters,
-                old_timeline=req.previous_timeline,
-                music_strategy=req.music_strategy,
-                user_music_file=req.user_music_file,
-                regenerate_music=req.regenerate_music,
-                previous_bgm_track=req.previous_bgm_track,
-                tracker=tracker,
+                generation_request, user_id=user_id, tracker=tracker,
             )
         finally:
             # 先清 active job_id 再釋放鎖;即使清除的原子寫失敗也務必釋放鎖,避免該專案永久卡 409
@@ -244,7 +253,7 @@ async def change_music(req: ChangeMusicRequest, user_id: str = Depends(verify_to
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        print("\n❌ [換曲錯誤]")
+        logger.error("\n❌ [換曲錯誤]")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -330,7 +339,7 @@ async def upload_music(folder_name: str, file: UploadFile = File(...), user_id: 
     with open(save_path, "wb") as f:
         f.write(content)
 
-    print(f"[Upload] 音訊已儲存: {save_path}")
+    logger.info(f"[Upload] 音訊已儲存: {save_path}")
     return {"filename": file.filename}
 
 
@@ -358,6 +367,6 @@ async def render_mp4(req: RenderRequest, background_tasks: BackgroundTasks, user
         )
     except Exception as e:
         workspace.cleanup()
-        print("\n❌ [SSR 算圖錯誤]")
+        logger.error("\n❌ [SSR 算圖錯誤]")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

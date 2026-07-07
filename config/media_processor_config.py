@@ -4,11 +4,7 @@ media_processor/ 與 media_tools/ 所有模組從此處 import，避免 magic nu
 """
 import os
 
-# ── 畫質過濾 ───────────────────────────────────────────────────────────────
-# MUSIQ 技術畫質分數低於此值即 reject。⚠️ 僅 legacy ImageProcessor（USE_LEGACY_IMAGE_PIPELINE）
-# 仍沿用此硬性單訊號門檻；現行細粒度 pipeline 已移除硬 reject（評分與過濾解耦），改由
-# ContextCompressor 做下方的「寬容雙訊號」非破壞性過濾，避免 MUSIQ 單訊號低估造成好素材誤刪。
-TECHNICAL_SCORE_FILTER_THRESHOLD = 40.0
+from config.env_utils import read_bool_env, read_int_env
 
 # ── 軟性畫質過濾 (ContextCompressor) ──────────────────────────────────────────
 # 評分與過濾解耦後，tech/aes 一律由 Phase 1 算好存進 metadata（含 Complex）；導演端只做
@@ -50,7 +46,7 @@ STANDARDIZE_AUDIO_BITRATE = "128k"
 # 推論的稀缺資源；CPU 路徑也最簡單可靠。遇超大批 4K、CPU 扛不住時，設 STANDARDIZE_USE_NVENC=1
 # 改用 RTX 30 系的 NVENC ASIC（獨立編碼晶片，幾乎不吃 CUDA 算力/VRAM，不與推論互搶）。
 # 若 ffmpeg 未 build h264_nvenc，或 NVENC 執行期失敗（session 滿/驅動問題），自動回退 libx264。
-STANDARDIZE_USE_NVENC = os.environ.get("STANDARDIZE_USE_NVENC", "0").strip().lower() in ("1", "true", "yes")
+STANDARDIZE_USE_NVENC = read_bool_env("STANDARDIZE_USE_NVENC", False)
 # h264_nvenc 的 preset（p1 最快～p7 最慢；p4 為速度/品質的均衡點）與固定品質值（-cq，語意近 CRF）。
 STANDARDIZE_NVENC_PRESET = "p4"
 STANDARDIZE_NVENC_CQ = "23"
@@ -65,13 +61,7 @@ MINIMUM_AUDIO_FILE_BYTES = 1000
 # Xeon 4316（40 實體核 / 80 緒），搭配每檔 STANDARDIZE_X264_THREADS=8，預設 8 workers ≈ 64 緒，
 # 仍留餘裕（threads × workers ≲ 實體緒數）；舊預設 4 對 40 核嚴重低估、僅用約 1/10 CPU。
 # 可由 env STANDARDIZE_MAX_WORKERS 覆寫；壞字串視為未設定，回退預設值以保證啟動穩定。
-_STANDARDIZE_MAX_WORKERS_DEFAULT = 8
-try:
-    STANDARDIZE_MAX_WORKERS = max(
-        1, int(os.environ.get("STANDARDIZE_MAX_WORKERS", _STANDARDIZE_MAX_WORKERS_DEFAULT))
-    )
-except ValueError:
-    STANDARDIZE_MAX_WORKERS = _STANDARDIZE_MAX_WORKERS_DEFAULT
+STANDARDIZE_MAX_WORKERS = max(1, read_int_env("STANDARDIZE_MAX_WORKERS", 8))
 
 # ── 時間碼燒錄 (FFmpegAdapter.burn_timecode) ─────────────────────────────────
 # drawtext filter 的字體大小表達式（相對影片高度）
@@ -112,15 +102,15 @@ KMEANS_EPSILON         = 0.2  # 中心位移小於此值（像素 0–255 尺度
 
 # 影片取樣
 MOTION_SAMPLE_FRAMES      = 10               # 動態強度 frame diff 取樣幀數
-SALIENCY_SAMPLE_POSITIONS = (0.1, 0.5, 0.9)  # 三幀 saliency 取樣位置（影片長度 %）
-MIDDLE_FRAME_POSITION     = 0.5              # 代表幀位置（對應 SALIENCY_SAMPLE_POSITIONS 中點）
+MIDDLE_FRAME_POSITION     = 0.5              # 代表幀位置（影片長度 %；decode / 縮圖共用）
 
 # ── Dynamic Batching 參數 (BatchCollector) ──────────────────────
 # 各支援 batch 推論的模型一次合批的最大樣本數（上限；實際批量受上游併發與 timeout 決定）。
 # 開關（*_BATCH_ENABLED）與 asset 並行度（影響 inline stage 有效批量）放在 pipeline_config.py。
+# （Whisper 不在此列：faster-whisper 無多檔 forward，跨檔合批是假合批已移除；
+#   其單檔內分塊批次見 model_config 的 WHISPER_CHUNK_BATCH_SIZE。）
 MUSIQ_BATCH_SIZE     = 16
 LAION_BATCH_SIZE     = 16
-WHISPER_BATCH_SIZE   = 4
 AUDIO_ENV_BATCH_SIZE = 4
 # 末尾未達 batch_size 時，等待多少毫秒就強制觸發 forward，避免最後幾張卡死
 BATCH_COLLECT_TIMEOUT_MS = 50
@@ -160,19 +150,15 @@ QWEN_RESIDENT_VRAM_GB, QWEN_TRANSIENT_VRAM_GB = _QWEN_VRAM_PROFILE_BY_MODE.get(
 )
 # Whisper 改 faster-whisper(CTranslate2) large-v3-turbo：CT2 float16 常駐遠小於 HF large-v3（~3GB → ~1.6GB）
 WHISPER_RESIDENT_VRAM_GB    = 1.6
-WHISPER_TRANSIENT_VRAM_GB   = 1.0
+# 暫態隨 BatchedInferencePipeline 的分塊批次升高（WHISPER_CHUNK_BATCH_SIZE=8 塊一次 forward）；
+# 估值待實機校準（torch.cuda.reset_peak_memory_stats + max_memory_allocated 包一次長音檔轉錄）。
+WHISPER_TRANSIENT_VRAM_GB   = 2.0
 MUSIQ_RESIDENT_VRAM_GB      = 0.5
 MUSIQ_TRANSIENT_VRAM_GB     = 1.5
 LAION_RESIDENT_VRAM_GB      = 1.7
 LAION_TRANSIENT_VRAM_GB     = 1.0
 AUDIO_ENV_RESIDENT_VRAM_GB  = 0.3
 AUDIO_ENV_TRANSIENT_VRAM_GB = 0.5
-# Saliency（U²-Net via rembg/onnxruntime）：常駐 + 單次推論暫態。
-# saliency 納入 GpuCapacityManager（每卡一份的多卡）並走 pool，故需 resident（規劃放置）
-# 與 transient（INFERENCE_VRAM_COST_GB，forward 經 L2 BudgetGate 記帳）。resident 為 onnxruntime
-# CUDA session 常駐估值（含 context 開銷）。
-SALIENCY_RESIDENT_VRAM_GB   = 0.5
-SALIENCY_TRANSIENT_VRAM_GB  = 1.5
 
 # Qwen 推論優先序（>0）：BudgetGate 在「有 Qwen 在等」時讓低優先（其餘模型恆 0）讓路，
 # 避免 MUSIQ/LAION 等小模型串流把主瓶頸 Qwen 的大塊 VRAM 請求無限延後（餓死）。

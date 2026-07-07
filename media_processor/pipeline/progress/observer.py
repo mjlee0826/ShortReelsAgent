@@ -8,6 +8,9 @@
 from abc import ABC, abstractmethod
 
 from media_processor.pipeline.progress.events import ProgressEvent
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ProgressObserver(ABC):
@@ -39,7 +42,7 @@ class PrintProgressObserver(ProgressObserver):
         stage    = event.stage_name or "-"
         duration = f"{event.duration_ms:.1f}ms" if event.duration_ms is not None else "-"
         suffix   = f" err={event.error}" if event.error else ""
-        print(
+        logger.info(
             f"[Progress] {event.event_type.value:<16} "
             f"asset={asset:<24} stage={stage:<24} dur={duration}{self._breakdown(event)}{suffix}"
         )

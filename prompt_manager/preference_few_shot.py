@@ -23,6 +23,9 @@ from config.director_config import (
     MAX_FIELDS_PER_EXAMPLE,
     PREFERENCE_FEW_SHOT_EXAMPLES_PATH,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _load() -> Optional[dict]:
@@ -35,7 +38,7 @@ def _load() -> Optional[dict]:
             data = json.load(f)
         return data if isinstance(data, dict) else None
     except (OSError, json.JSONDecodeError) as exc:
-        print(f"[Preference FewShot Warning] 讀取偏好範例檔失敗,略過 few-shot: {exc}")
+        logger.warning(f"[Preference FewShot Warning] 讀取偏好範例檔失敗,略過 few-shot: {exc}")
         return None
 
 

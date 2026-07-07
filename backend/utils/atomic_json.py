@@ -17,6 +17,9 @@ import json
 import os
 import tempfile
 from typing import Any
+import logging
+
+logger = logging.getLogger(__name__)
 
 # 原子寫入的暫存檔副檔名(與目標同目錄、唯一命名,確保同檔系 os.replace 具原子性)
 _TMP_SUFFIX = ".tmp"
@@ -58,5 +61,5 @@ def read_json_tolerant(path: str, default: Any) -> Any:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except (OSError, json.JSONDecodeError) as exc:
-        print(f"[atomic_json Warning] 讀取 JSON 失敗,回傳預設值: {path} ({exc})")
+        logger.warning(f"[atomic_json Warning] 讀取 JSON 失敗,回傳預設值: {path} ({exc})")
         return default

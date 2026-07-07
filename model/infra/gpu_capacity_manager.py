@@ -47,6 +47,9 @@ from config.media_processor_config import (
 from model.infra.base_model_manager import BaseModelManager
 from model.infra.gpu_gate import BudgetGate
 from model.infra.model_pool import GpuSlot
+import logging
+
+logger = logging.getLogger(__name__)
 
 # bytes → GB 換算（mem_get_info 回 bytes）
 _BYTES_PER_GB = 1024 ** 3
@@ -188,7 +191,7 @@ class GpuCapacityManager:
         """
         current = self.plan()
         if not current.gpu_ids:
-            print("[GpuCapacityManager] 無 CUDA 裝置，維持預設 BinaryGate（不套 BudgetGate）")
+            logger.info("[GpuCapacityManager] 無 CUDA 裝置，維持預設 BinaryGate（不套 BudgetGate）")
             return
 
         # 以 plan 當下的每卡預算建立工廠；閉包捕捉 budget / buffer，依 device_id 給對應預算
@@ -200,7 +203,7 @@ class GpuCapacityManager:
             return BudgetGate(total_gb=budget.get(device_id, 0.0), safety_buffer_gb=buffer)
 
         BaseModelManager.register_gate_factory(factory)
-        print(f"[GpuCapacityManager] 已套用 per-device BudgetGate；{self.describe()}")
+        logger.info(f"[GpuCapacityManager] 已套用 per-device BudgetGate；{self.describe()}")
 
     def describe(self) -> str:
         """回傳規劃摘要字串（供啟動日誌，可肉眼確認 Qwen 放在哪些卡）。"""
@@ -425,8 +428,8 @@ class GpuCapacityManager:
 
         - Qwen：``multi_card=True``、``max_slots=0``（= 用全域 QWEN_MAX_SLOTS_PER_GPU，同卡可塞多份）。
         - 其餘小模型：``multi_card=False``（單卡 best-fit，集中到 small_host）。
-        - **Saliency 不在此列**：U²-Net 為純 CPU（見 model.managers.saliency_model_manager），
-          由 model_pool_registry 的獨立 CPU pool 管理、在 _warm_up_auxiliary 預熱，不佔任何 GPU 預算。
+        - 純 CPU 模型（VAD / MediaPipe）不在此列：由 model_pool_registry 的獨立 CPU pool 管理、
+          在 _warm_up_auxiliary 預熱，不佔任何 GPU 預算。
         lazy import 各 Manager，避免「import 本模組」就把 transformers/pyiqa/panns 一併拉進來。
         """
         from model.managers.qwen_model_manager import QwenModelManager

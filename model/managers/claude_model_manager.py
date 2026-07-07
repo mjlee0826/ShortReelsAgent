@@ -41,6 +41,9 @@ from prompt_manager.base_prompt_manager import BasePromptManager
 from prompt_manager.default_prompt_manager import DefaultPromptManager
 from prompt_manager.schemas import schema_to_text
 from prompt_manager.task_mode import TaskMode
+import logging
+
+logger = logging.getLogger(__name__)
 
 # adaptive thinking：導演藍圖屬複雜 agentic 推理，讓 Claude 自行決定思考深度。
 # Opus 4.x 僅支援 adaptive（用 budget_tokens 會 400）；effort 省略 = 預設 high。
@@ -106,9 +109,13 @@ class ClaudeModelManager(BaseModelManager):
         """替換 Prompt Manager（Strategy Pattern），與 Gemini 對稱。"""
         self.prompt_manager = prompt_manager
 
-    def _record(self, response, model: str) -> None:
-        """把本次呼叫的 token 用量記入當前成本帳本（無帳本則 no-op）；phase 固定為 Phase 4。"""
-        phase = phase_for_mode(TaskMode.DIRECTOR_BLUEPRINT)
+    def _record(self, response, model: str, mode: TaskMode = TaskMode.DIRECTOR_BLUEPRINT) -> None:
+        """把本次呼叫的 token 用量記入當前成本帳本（無帳本則 no-op）；phase 由 ``mode`` 推得。
+
+        導演 loop 走預設 DIRECTOR_BLUEPRINT（Phase 4）；配樂 brief 等旁支任務傳入自己的 mode，
+        讓成本正確歸戶（brief → MUSIC_SEARCH_QUERY → Phase 3），不再全掛在 Phase 4 名下。
+        """
+        phase = phase_for_mode(mode)
         if phase is not None:
             record_anthropic_usage(response, model, phase)
 
@@ -176,7 +183,7 @@ class ClaudeModelManager(BaseModelManager):
         # 觀測快取命中：read 高 = 前綴命中（~0.1× 價）；write = 本輪寫入快取（~1.25×）
         usage = getattr(response, "usage", None)
         if usage is not None:
-            print(
+            logger.info(
                 f"[Claude Director] cache read={getattr(usage, 'cache_read_input_tokens', 0)} "
                 f"write={getattr(usage, 'cache_creation_input_tokens', 0)} "
                 f"input={getattr(usage, 'input_tokens', 0)}"
@@ -184,14 +191,30 @@ class ClaudeModelManager(BaseModelManager):
         return response
 
     @synchronized_inference
-    def generate_structured(self, prompt: str, schema: type[BaseModel]) -> dict:
+    def generate_structured(
+        self,
+        prompt: str,
+        schema: type[BaseModel],
+        model: str | None = None,
+        thinking_enabled: bool = True,
+        task_mode: TaskMode = TaskMode.DIRECTOR_BLUEPRINT,
+    ) -> dict:
         """
         one-shot 結構化輸出（tool use）：回 parsed dict。供配樂 brief 等小型結構化任務重用。
 
         走 :meth:`_generate_via_tool` 的 tool-use 路徑（schema 當 tool ``input_schema``），但回
         已解析的 dict（容錯解析，失敗回空 dict）。不掛多輪、不串流，純一次結構化呼叫。
+
+        :param model: 指定模型；None 沿用導演模型（向後相容）。小任務可傳 Haiku 等便宜模型。
+        :param thinking_enabled: False 時整包省略 thinking 參數（Haiku 等小任務不需思考、
+            且省思考 token 費），並改為**強制** ``tool_choice`` 指定 tool——thinking 關閉時 API
+            允許強制，從根拔除「模型沒呼叫 tool」的失敗模式（開 thinking 時只能 auto）。
+        :param task_mode: 成本歸戶用的 TaskMode（brief 傳 MUSIC_SEARCH_QUERY → Phase 3）。
         """
-        raw = self._generate_via_tool(prompt, schema, CLAUDE_DIRECTOR_MODEL)
+        raw = self._generate_via_tool(
+            prompt, schema, model or CLAUDE_DIRECTOR_MODEL,
+            thinking_enabled=thinking_enabled, task_mode=task_mode,
+        )
         return parse_json_lenient(raw, default={})
 
     def _create_message(self, **kwargs):
@@ -206,15 +229,24 @@ class ClaudeModelManager(BaseModelManager):
         with self.client.messages.stream(**kwargs) as stream:
             return stream.get_final_message()
 
-    def _generate_via_tool(self, prompt: str, schema: type[BaseModel], model: str) -> str:
+    def _generate_via_tool(
+        self,
+        prompt: str,
+        schema: type[BaseModel],
+        model: str,
+        thinking_enabled: bool = True,
+        task_mode: TaskMode = TaskMode.DIRECTOR_BLUEPRINT,
+    ) -> str:
         """
         以 tool use 取結構化輸出：schema 當 tool 的 ``input_schema``，模型回傳 SDK 已解析的 dict，
         再 ``json.dumps`` 回字串維持與 Gemini 對稱的契約。
 
-        adaptive thinking 開啟時 ``tool_choice`` 只能 ``auto``（無法強制特定 tool）。每次都印一行觀測
-        日誌（stop_reason / blocks / used_tool）以便確認模型是否真的呼叫了 tool。模型未呼叫 tool 時：
-        有文字就退回文字交下游容錯；連文字都空（常見於 max_tokens 在 thinking 階段就耗盡）則以自由文字
-        路徑同輪救援一次，避免空草稿白白觸發整輪重生。本方法不掛 ``@synchronized_inference``：由已持鎖
+        adaptive thinking 開啟時 ``tool_choice`` 只能 ``auto``（無法強制特定 tool）；
+        ``thinking_enabled=False``（Haiku 等小任務）時整包省略 thinking 並**強制**指定 tool，
+        結構化輸出不再依賴模型自願呼叫。每次都印一行觀測日誌（stop_reason / blocks / used_tool）
+        以便確認模型是否真的呼叫了 tool。模型未呼叫 tool 時：有文字就退回文字交下游容錯；
+        連文字都空（常見於 max_tokens 在 thinking 階段就耗盡）則以自由文字路徑同輪救援一次，
+        避免空草稿白白觸發整輪重生。本方法不掛 ``@synchronized_inference``：由已持鎖
         的 ``generate_structured`` 直呼，避免非重入鎖二次取用。
         """
         tool = {
@@ -222,22 +254,27 @@ class ClaudeModelManager(BaseModelManager):
             "description": "提交最終導演剪輯藍圖。務必呼叫本工具、依 input_schema 結構填寫，不要用純文字回覆。",
             "input_schema": schema.model_json_schema(),
         }
-        response = self._create_message(
+        kwargs = dict(
             model=model,
             max_tokens=CLAUDE_DIRECTOR_MAX_TOKENS,
-            thinking=_ADAPTIVE_THINKING,
             tools=[tool],
-            tool_choice={"type": "auto"},  # 開 thinking 時不能強制特定 tool，只能 auto
             messages=[{"role": "user", "content": prompt}],
         )
-        self._record(response, model)  # 記錄 token 用量（Phase 4）
+        if thinking_enabled:
+            kwargs["thinking"] = _ADAPTIVE_THINKING
+            kwargs["tool_choice"] = {"type": "auto"}  # 開 thinking 時不能強制特定 tool，只能 auto
+        else:
+            # 無 thinking：可強制指定 tool，從根拔除「模型沒呼叫 tool」的失敗模式
+            kwargs["tool_choice"] = {"type": "tool", "name": _BLUEPRINT_TOOL_NAME}
+        response = self._create_message(**kwargs)
+        self._record(response, model, task_mode)  # 記錄 token 用量（phase 依 task_mode 歸戶）
 
         # 觀測性：印出 stop_reason 與各 block 型別，據此判斷模型有沒有真的呼叫 tool
         tool_input = next(
             (block.input for block in response.content if block.type == "tool_use"),
             None,
         )
-        print(
+        logger.info(
             f"[Claude Director] stop_reason={response.stop_reason} "
             f"blocks={[block.type for block in response.content]} "
             f"used_tool={tool_input is not None}"
@@ -247,7 +284,7 @@ class ClaudeModelManager(BaseModelManager):
 
         # 模型未呼叫 tool：先給可行動診斷（最常見是 thinking 把 max_tokens 耗盡 → 來不及呼叫 tool）
         if response.stop_reason == "max_tokens":
-            print(
+            logger.info(
                 "[Claude Director] ⚠️ 輸出被 max_tokens 截斷（adaptive thinking + tool 輸出超過上限），"
                 "模型來不及產出 tool 呼叫 → 調高 CLAUDE_DIRECTOR_MAX_TOKENS"
             )
@@ -255,26 +292,37 @@ class ClaudeModelManager(BaseModelManager):
         text = self._extract_text(response)
         if text.strip():
             return text
-        print(
+        logger.info(
             f"[Claude Director] ⚠️ 未呼叫 {_BLUEPRINT_TOOL_NAME} 且無文字輸出"
             f"（stop_reason={response.stop_reason}）→ 以自由文字路徑救援重試一次"
         )
-        return self._generate_freetext(prompt, schema, model)
+        return self._generate_freetext(
+            prompt, schema, model, thinking_enabled=thinking_enabled, task_mode=task_mode
+        )
 
-    def _generate_freetext(self, prompt: str, schema: type[BaseModel] | None, model: str) -> str:
+    def _generate_freetext(
+        self,
+        prompt: str,
+        schema: type[BaseModel] | None,
+        model: str,
+        thinking_enabled: bool = True,
+        task_mode: TaskMode = TaskMode.DIRECTOR_BLUEPRINT,
+    ) -> str:
         """
         自由文字 + ``schema_to_text`` 生成路徑（``DIRECTOR_USE_TOOL_USE=False``、無 schema、或 tool use
         無輸出時的救援）。schema_to_text 已含「只輸出 JSON、不要 markdown」指示，下游以 robust parser
         解析。本方法不掛 ``@synchronized_inference``（由已持鎖的呼叫端直呼）。
         """
         content = f"{prompt}\n\n{schema_to_text(schema)}" if schema is not None else prompt
-        response = self._create_message(
+        kwargs = dict(
             model=model,
             max_tokens=CLAUDE_DIRECTOR_MAX_TOKENS,
-            thinking=_ADAPTIVE_THINKING,
             messages=[{"role": "user", "content": content}],
         )
-        self._record(response, model)  # 記錄 token 用量（Phase 4）
+        if thinking_enabled:
+            kwargs["thinking"] = _ADAPTIVE_THINKING
+        response = self._create_message(**kwargs)
+        self._record(response, model, task_mode)  # 記錄 token 用量（phase 依 task_mode 歸戶）
         return self._extract_text(response)
 
     @staticmethod

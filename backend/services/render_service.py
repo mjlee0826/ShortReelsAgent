@@ -4,6 +4,9 @@ import uuid
 import shutil
 from backend.services.remotion_adapter import RemotionAdapter
 from config.app_config import TEMP_WORKSPACES_DIR
+import logging
+
+logger = logging.getLogger(__name__)
 
 class RenderWorkspace:
     """
@@ -24,7 +27,7 @@ class RenderWorkspace:
         """資源回收 (Garbage Collection)：將整個暫存資料夾刪除"""
         if os.path.exists(self.workspace_dir):
             shutil.rmtree(self.workspace_dir)
-            print(f"🧹 [Workspace] 暫存資源已清除: {self.task_id}")
+            logger.info(f"🧹 [Workspace] 暫存資源已清除: {self.task_id}")
 
 class RenderService:
     """

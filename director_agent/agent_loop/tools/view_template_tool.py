@@ -11,7 +11,10 @@ from __future__ import annotations
 from config.director_config import DIRECTOR_VIEW_RAW_TEMPLATE_MAX_FRAMES
 from director_agent.agent_loop.agent_context import AgentContext
 from director_agent.agent_loop.tools.base_tool import BaseTool, ToolExecution
-from director_agent.agent_loop.tools.frame_blocks import grab_video_frames, resolve_frame_timestamps
+from director_agent.agent_loop.tools.frame_blocks import (
+    build_video_frame_blocks,
+    resolve_frame_timestamps,
+)
 
 # 抓出的幀在 tool_result 內的前綴標註（讓模型知道每張圖是範本的哪一秒）
 _TEMPLATE_LABEL = "範本"
@@ -53,7 +56,8 @@ class ViewTemplateTool(BaseTool):
             DIRECTOR_VIEW_RAW_TEMPLATE_MAX_FRAMES,
         )
         try:
-            blocks = grab_video_frames(template["abs_path"], _TEMPLATE_LABEL, timestamps)
+            # 多幀拼成一張 montage（與 view_raw 同路），6 幀的鏡頭序列一張圖看完、像素 token 大省
+            blocks = build_video_frame_blocks(template["abs_path"], _TEMPLATE_LABEL, timestamps)
         except Exception as exc:  # noqa: BLE001 - 抓幀失敗回 is_error 讓導演改時間點或放棄看範本
             return ToolExecution(content=f"讀取範本畫面失敗：{exc}", is_error=True)
 

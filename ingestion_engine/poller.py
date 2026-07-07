@@ -28,6 +28,9 @@ from ingestion_engine.models import (
     SOURCE_GDRIVE,
     SYNC_STATUS_PAUSED_AUTH,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -64,7 +67,7 @@ class IngestionPoller:
             return
         self._stopped.clear()
         self._task = asyncio.create_task(self._run_loop())
-        print(f"[IngestionPoller] 已啟動，tick={self._tick_sec}s")
+        logger.info(f"[IngestionPoller] 已啟動，tick={self._tick_sec}s")
 
     async def stop(self) -> None:
         """請求停止並等待迴圈優雅收尾。"""
@@ -77,7 +80,7 @@ class IngestionPoller:
         except asyncio.CancelledError:
             pass
         self._task = None
-        print("[IngestionPoller] 已停止")
+        logger.info("[IngestionPoller] 已停止")
 
     # ── 迴圈內部 ──────────────────────────────────────────────────────────────
 
@@ -87,7 +90,7 @@ class IngestionPoller:
             try:
                 await self._tick_once()
             except Exception as exc:  # best-effort：單輪失敗不應終結整個輪詢
-                print(f"⚠️ [IngestionPoller] 本輪同步發生未預期錯誤: {exc}")
+                logger.warning(f"⚠️ [IngestionPoller] 本輪同步發生未預期錯誤: {exc}")
             # 以可中斷的等待取代 sleep：stop() 時能立刻醒來退出
             try:
                 await asyncio.wait_for(self._stopped.wait(), timeout=self._tick_sec)
@@ -132,7 +135,7 @@ class IngestionPoller:
                 self._service.sync_project, target.user_id, target.project_name
             )
         except Exception as exc:  # 單一 project 失敗不影響其他
-            print(f"⚠️ [IngestionPoller] project {target.project_name} 同步失敗: {exc}")
+            logger.error(f"⚠️ [IngestionPoller] project {target.project_name} 同步失敗: {exc}")
         finally:
             self._in_flight.discard(target)
 

@@ -35,6 +35,9 @@ class AgentContext:
     # 範本 handle（view_template 用）：{abs_path（原始影片實體路徑）, cuts（切點秒）, dur（總長）}；
     # 無範本時為 None。範本非成片素材、不入 asset_index，故獨立承載於此，clip_id 驗證不受影響。
     template: Optional[dict] = None
+    # 微調模式的草稿藍圖（edit_blueprint 的編輯對象；上一版藍圖由 facade 載入）：
+    # {timeline, text_overlays, bgm_track}。初次生成為 None（edit_blueprint 不掛載）。
+    blueprint_draft: Optional[dict] = None
 
     def record_view(self, asset_id: str, start: float = 0.0, end: float = 0.0) -> None:
         """記錄某素材已被親看的一段時間範圍（圖片用 (0.0, 0.0)）。"""

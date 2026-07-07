@@ -25,6 +25,9 @@ from typing import Callable, Optional
 from media_processor.pipeline.progress.events import ProgressEvent, ProgressEventType
 from media_processor.pipeline.progress.observer import ProgressObserver
 from media_processor.pipeline.progress.system_health import SystemHealthProbe
+import logging
+
+logger = logging.getLogger(__name__)
 
 # stop() 等待背景執行緒結束的上限(秒),避免收工時卡住主流程
 _THREAD_JOIN_TIMEOUT_SEC = 2.0
@@ -81,7 +84,7 @@ class StallWatchdog(ProgressObserver):
                 faulthandler.register(signal.SIGUSR1, all_threads=True, chain=False)
             except (ValueError, RuntimeError) as exc:
                 # 非主執行緒等情況可能註冊失敗;dead-man timer 仍生效,故僅告警
-                print(f"[StallWatchdog] SIGUSR1 手動 dump 註冊失敗({exc});dead-man timer 仍有效")
+                logger.warning(f"[StallWatchdog] SIGUSR1 手動 dump 註冊失敗({exc});dead-man timer 仍有效")
 
     def _rearm_freeze_dump(self) -> None:
         """
@@ -121,7 +124,7 @@ class StallWatchdog(ProgressObserver):
         # 印一次機器健康基線，讓即使很快跑完的 run 也有「起跑當下機器狀態」可對照
         baseline = self._health_probe.render()
         if baseline:
-            print(baseline)
+            logger.info(baseline)
         self._thread = threading.Thread(target=self._loop, name="StallWatchdog", daemon=True)
         self._thread.start()
 
@@ -154,7 +157,7 @@ class StallWatchdog(ProgressObserver):
         # 有進行中 stage 才連帶印機器健康，讓「卡住」當下能直接判斷是程式卡住還是機器很糟
         health = self._health_probe.render()
         if health:
-            print(health)
+            logger.info(health)
         lines = [f"[Watchdog +{self._heartbeat_sec:.0f}s] 進行中 {len(items)} 個 stage："]
         for (asset_id, stage_name), started_at in items:
             elapsed = now - started_at
@@ -165,7 +168,7 @@ class StallWatchdog(ProgressObserver):
                 f"  asset={asset_id or '-'} stage={stage_name or '-'} "
                 f"已 {elapsed:.0f}s{warn}{wait_str}"
             )
-        print("\n".join(lines))
+        logger.info("\n".join(lines))
 
     @staticmethod
     def _format_wait(payload: dict) -> str:

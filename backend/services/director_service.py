@@ -1,17 +1,10 @@
 import os
-import json
 import time
 import contextvars
 from concurrent.futures import ThreadPoolExecutor
 from collections import Counter
 from datetime import datetime, timezone
 from config.app_config import ASSETS_DIR, DEFAULT_BACKEND_URL, RAW_SUBDIR, STANDARDIZED_SUBDIR, TEMP_TEMPLATES_DIR
-from config.project_artifacts import (
-    PHASE2_TEMPLATE_DNA_FILENAME,
-    PHASE3_AUDIO_DNA_FILENAME,
-    PHASE4_BLUEPRINT_FILENAME,
-    PHASE4_BLUEPRINT_AI_ORIGINAL_FILENAME,
-)
 from media_processor.pipeline import PipelineRunner, ProgressTracker
 from media_tools.media_standardizer import MediaStandardizer
 from director_agent.blueprint import (
@@ -21,20 +14,19 @@ from director_agent.blueprint import (
 from director_agent.director_facade import DirectorFacade, DEFAULT_CLIP_COLOR
 from director_agent.music_director import MusicDirector
 from backend.services.asset_repository import AssetRepository
+from backend.services.generation_request import GenerationRequest
+from backend.services.stores.artifact_store import artifact_store
 from backend.services.stores.project_meta_store import project_meta_store
 from backend.services.stores.snapshot_store import snapshot_store
 from backend.services.stores.preference_event_store import PreferenceEvent, preference_event_store
 from backend.services.stores.user_settings_store import user_settings_store
 from backend.services.stores.agent_session_store import AgentSession, agent_session_store
 from director_agent.agent_loop.exceptions import ClarificationRequested
+from config.model_config import CLAUDE_BRIEF_MODEL
 from model.managers.director_provider import get_director_manager
 from model.infra.usage_ledger import cost_session
-from backend.utils.asset_discovery import (
-    PHASE1_METADATA_FILENAME,
-    PHASE1_STATUS_FILENAME,
-    collect_asset_files,
-    to_abs_path,
-)
+from prompt_manager.task_mode import TaskMode
+from backend.utils.asset_discovery import collect_asset_files, to_abs_path
 from backend.utils.atomic_json import atomic_write_json, read_json_tolerant
 from ingestion_engine.models import (
     META_KEY_PHASE1_STATUS,
@@ -43,6 +35,9 @@ from ingestion_engine.models import (
     PHASE1_STATUS_PROCESSING,
     PHASE1_STATUS_SKIPPED,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # 素材尚未(完整)分析就嘗試生成時,run_workflow 對前端回報用的訊息(避免 magic string)
@@ -89,7 +84,7 @@ class DirectorService:
             asset_count = len(collect_asset_files(project_dir))
             meta["last_modified"] = datetime.now(timezone.utc).isoformat()
             meta["asset_count"] = asset_count
-            meta["has_blueprint"] = os.path.exists(os.path.join(project_dir, PHASE4_BLUEPRINT_FILENAME))
+            meta["has_blueprint"] = artifact_store.has_blueprint(project_dir)
             # 先前依設定略過自動分析(skipped)的專案,經此次手動分析後推進為 done,
             # 讓總覽卡片不再停留在「等待分析」(其餘狀態不動,避免干擾雲端同步流程管理的 phase1_status)
             if meta.get(META_KEY_PHASE1_STATUS) == PHASE1_STATUS_SKIPPED:
@@ -97,7 +92,7 @@ class DirectorService:
             # 原子寫回,避免與 poller / REST 請求併發寫造成 Extra data 損毀
             project_meta_store.write(project_dir, meta)
         except Exception as e:
-            print(f"⚠️ [Service] 更新專案 meta 失敗: {e}")
+            logger.error(f"⚠️ [Service] 更新專案 meta 失敗: {e}")
 
     def _mark_phase1_status(self, target_dir: str, status: str) -> None:
         """
@@ -190,7 +185,7 @@ class DirectorService:
             if under_root:
                 rel_path = os.path.relpath(abs_path, root_abs)
                 return f"{self.backend_url}/{prefix}/{rel_path}".replace('\\', '/')
-        print(f"⚠️ [Service] 配樂檔不在任何靜態根、無法服務: {abs_path}")
+        logger.warning(f"⚠️ [Service] 配樂檔不在任何靜態根、無法服務: {abs_path}")
         return None
 
     def _inject_beats(self, bgm_track: dict, audio_dna: dict) -> None:
@@ -210,17 +205,6 @@ class DirectorService:
             bgm_track["beats"] = analysis.get("beats", [])
             bgm_track["onsets"] = analysis.get("onsets", [])
 
-    def _dump_blueprint(self, target_dir: str, blueprint: dict) -> None:
-        """
-        原子寫回最終藍圖(PHASE4):生成(run_workflow)與編輯器自動儲存(save_blueprint)共用。
-
-        以 atomic_write_json(寫唯一 temp + os.replace)取代 open('w') 直寫:NFS 上截斷+寫入非原子,
-        併發 / 半寫會讓 load_blueprint 讀到損毀檔。讀者由 read_json_tolerant 兜底,二者搭配恆見完整檔。
-        """
-        dump_path = os.path.join(target_dir, PHASE4_BLUEPRINT_FILENAME)
-        atomic_write_json(dump_path, blueprint)
-        print(f"💾 [Dump] 最終劇本藍圖已儲存至 {dump_path}")
-
     def _capture_preference_data(self, target_dir: str, user_id: str | None, prompt: str,
                                  before: dict | None, after: dict, is_refinement: bool) -> None:
         """落地本次生成的偏好事件(偏好資料飛輪 T0;見 docs/preference_data_flywheel.md)。
@@ -237,9 +221,7 @@ class DirectorService:
 
             # 初始生成:(覆)寫不可變 AI 原版=本次創作的 AI 起點;微調不碰它(保留最初版)
             if not is_refinement:
-                atomic_write_json(
-                    os.path.join(target_dir, PHASE4_BLUEPRINT_AI_ORIGINAL_FILENAME), after
-                )
+                artifact_store.write_ai_original(target_dir, after)
 
             # 不論初始 / 微調都記一筆事件鏈(append-only)
             event = PreferenceEvent(
@@ -250,9 +232,9 @@ class DirectorService:
                 after=after,
             )
             preference_event_store.append(target_dir, event)
-            print(f"🌀 [Preference] 已捕捉偏好事件 (kind={event.kind})")
+            logger.info(f"🌀 [Preference] 已捕捉偏好事件 (kind={event.kind})")
         except Exception as e:  # noqa: BLE001 - 捕捉失敗絕不可影響生成,僅記 warning
-            print(f"⚠️ [Preference Warning] 偏好捕捉失敗(已略過,不影響生成): {e}")
+            logger.warning(f"⚠️ [Preference Warning] 偏好捕捉失敗(已略過,不影響生成): {e}")
 
     def _standardize(self, target_dir: str) -> None:
         """
@@ -285,7 +267,7 @@ class DirectorService:
                 asset_filenames=asset_filenames, asset_strategies=asset_strategies,
                 require_success=require_success,
             )
-            print(ledger.format_summary("Phase 1"))
+            logger.info(ledger.format_summary("Phase 1"))
             if cost_sink is not None:
                 cost_sink.update(ledger.summary())
             return result
@@ -324,7 +306,7 @@ class DirectorService:
             if is_subset:
                 wanted = set(asset_filenames)
                 asset_relpaths = [rel for rel in asset_relpaths if rel in wanted]
-            print(f"[Service] 正在處理 {len(asset_relpaths)} 個素材...")
+            logger.info(f"[Service] 正在處理 {len(asset_relpaths)} 個素材...")
 
             # Pipeline 需絕對路徑讀檔;身分(asset_id=relpath)由 runner 依 base_dir(target_dir)還原
             asset_files = [to_abs_path(target_dir, rel) for rel in asset_relpaths]
@@ -377,7 +359,7 @@ class DirectorService:
         # 重用既有差集機制:只挑「未處理 ∪ dirty(策略變更)」的素材身分
         pending = self.asset_repository.select_pending(user_id, folder_name)
         if not pending:
-            print("[Service] 無新增 / 變更素材,略過 Phase 1 增量重跑")
+            logger.warning("[Service] 無新增 / 變更素材,略過 Phase 1 增量重跑")
             return []
 
         strategies = self.asset_repository.get_asset_strategies(user_id, folder_name)
@@ -416,7 +398,7 @@ class DirectorService:
         全量重跑直接覆寫；子集重分析則保留未重跑的舊條目、移除本次重跑者的舊條目、append 新成功者
         （以 file 的 relpath 身分為鍵；重跑後變 rejected/error 者自然從 success 清單消失）。
         """
-        dump_path = os.path.join(target_dir, PHASE1_METADATA_FILENAME)
+        dump_path = artifact_store.phase1_metadata_path(target_dir)
         if merge:
             # 容錯讀既有清單(損毀 / 半寫回 []);file 與 reprocessed_ids(asset_id)同為 relpath 身分
             existing = read_json_tolerant(dump_path, [])
@@ -430,7 +412,7 @@ class DirectorService:
         merged = [e for e in merged if e.get("file", "") in valid_ids]
         # 原子寫(唯一 temp + os.replace):併發讀者恆見完整檔;讀-改-寫已由 Phase 1 執行鎖序列化
         atomic_write_json(dump_path, merged)
-        print(f"💾 [Dump] 素材特徵已儲存至 {dump_path}")
+        logger.info(f"💾 [Dump] 素材特徵已儲存至 {dump_path}")
 
     def _dump_phase1_status(self, target_dir: str, status_entries: list[dict], merge: bool) -> None:
         """
@@ -438,7 +420,7 @@ class DirectorService:
 
         全量重跑從頭建表（順手汰除已刪素材的舊狀態）；子集重分析則合併進既有表只更新重跑者。
         """
-        dump_path = os.path.join(target_dir, PHASE1_STATUS_FILENAME)
+        dump_path = artifact_store.phase1_status_path(target_dir)
         # 子集重分析合併既有表(容錯讀,損毀 / 半寫回空表);全量重跑從頭建表
         status_map: dict = read_json_tolerant(dump_path, {}) if merge else {}
         for entry in status_entries:
@@ -454,19 +436,11 @@ class DirectorService:
         讀 Phase 1 success-only 感知快取;偵測「未處理 ∪ 策略已變更(dirty)」素材即拋 AssetsNotAnalyzedError。
 
         單一檢查來源:供 run_workflow(完整生成)與端點 precheck_generation 共用,避免兩處檢查邏輯漂移。
-        無 user_id(CLI)無法算 pending,退而僅檢查快取是否存在且非空。
+        無 user_id(CLI)無法算 pending,退而僅檢查快取是否存在且非空。孤兒過濾（raw 被 _std 取代 /
+        已刪檔的舊條目剔除）由 ``artifact_store.read_phase1`` 統一把關。
         """
-        phase1_dump_path = os.path.join(target_dir, PHASE1_METADATA_FILENAME)
         pending = self.asset_repository.select_pending(user_id, folder_name) if user_id else []
-        raw_assets_metadata = []
-        if os.path.exists(phase1_dump_path):
-            with open(phase1_dump_path, 'r', encoding='utf-8') as f:
-                raw_assets_metadata = json.load(f)
-        # 只認「當前仍存在的素材身分」:素材經標準化後 raw 身分會被 standardized/_std 取代(raw 被隱藏);
-        # 舊 raw 條目若殘留(早期在 _std 出現前就分析、或增量 merge 未清孤兒),會讓 Phase 4 誤用不可播的
-        # raw(如 HEVC)。以 collect_asset_files 為唯一真相過濾,杜絕 Phase 4 看到已被取代 / 刪除的身分。
-        valid_ids = set(collect_asset_files(target_dir))
-        raw_assets_metadata = [e for e in raw_assets_metadata if e.get("file", "") in valid_ids]
+        raw_assets_metadata = artifact_store.read_phase1(target_dir)
         if pending or not raw_assets_metadata:
             raise AssetsNotAnalyzedError(ASSETS_NOT_ANALYZED_MESSAGE)
         return raw_assets_metadata
@@ -483,62 +457,37 @@ class DirectorService:
         target_dir = self._require_target_dir(folder_name, user_id)
         self._load_analyzed_assets(folder_name, user_id, target_dir)
 
-    def run_workflow(self, prompt: str, folder_name: str, user_id: str = None,
-                    template: str = None,
-                    subtitles: bool = True, filters: bool = True, old_timeline: dict = None,
-                    music_strategy: str = "search_copyright",
-                    user_music_file: str = None,
-                    regenerate_music: bool = True,
-                    previous_bgm_track: dict = None,
-                    tracker: ProgressTracker | None = None):
+    def run_workflow(self, request: GenerationRequest, user_id: str = None,
+                     tracker: ProgressTracker | None = None):
         """
         完整生成(Phase 2–4)公開入口:開 job 級成本帳本 → 委派 ``_run_workflow_inner`` → 併入分階段成本。
 
+        請求內容整包收斂在 :class:`GenerationRequest`（新選項只加欄位,各層簽名不再變動）。
         在 inner 回傳的 {blueprint, audio_dna, assets_root_url, timings} 之上再加 ``costs``
         (逐 Phase 推估花費),一併經 async job 的 result 上 WS / REST 供前端取得。
         """
         with cost_session() as ledger:
             try:
-                result = self._run_workflow_inner(
-                    prompt, folder_name, user_id=user_id, template=template,
-                    subtitles=subtitles, filters=filters, old_timeline=old_timeline,
-                    music_strategy=music_strategy, user_music_file=user_music_file,
-                    regenerate_music=regenerate_music, previous_bgm_track=previous_bgm_track,
-                    tracker=tracker,
-                )
+                result = self._run_workflow_inner(request, user_id=user_id, tracker=tracker)
             except ClarificationRequested as clarification:
                 # 導演中途提問（B2）：落地續跑 session、發事件、回 needs_input 結果。
                 # job 仍視為正常結束（既有 finally 清 meta + 釋鎖），由 /generate/resume 接答案續跑。
-                result = self._suspend_for_clarification(
-                    clarification, folder_name, user_id, prompt,
-                    subtitles, filters, old_timeline, regenerate_music, previous_bgm_track, tracker,
-                )
+                result = self._suspend_for_clarification(clarification, request, user_id, tracker)
                 result["costs"] = ledger.summary()
                 return result
-            print(ledger.format_summary("Phase 2-4"))
+            logger.info(ledger.format_summary("Phase 2-4"))
             result["costs"] = ledger.summary()
             return result
 
-    def _run_workflow_inner(self, prompt: str, folder_name: str, user_id: str = None,
-                    template: str = None,
-                    subtitles: bool = True, filters: bool = True, old_timeline: dict = None,
-                    music_strategy: str = "search_copyright",
-                    user_music_file: str = None,
-                    regenerate_music: bool = True,
-                    previous_bgm_track: dict = None,
-                    tracker: ProgressTracker | None = None):
+    def _run_workflow_inner(self, request: GenerationRequest, user_id: str = None,
+                            tracker: ProgressTracker | None = None):
         """
         執行完整生成工作流（Phase 2–4）：讀取素材頁已落地的 Phase 1 感知快取,以 fork-join 並行
         產出 Template DNA ∥ Music DNA,再呼叫導演大腦產生藍圖。感知分析（Phase 1）已改由素材頁
         專屬擁有,本方法不再代跑。tracker 非 None 時把藍圖準備的 stage 進度帶上前端(見 docs §10)。
         """
         # 若有 user_id，素材路徑改為 assets/{user_id}/{folder_name}/，實現使用者資料隔離
-        target_dir = self._require_target_dir(folder_name, user_id)
-        
-        # --- 定義各階段的 JSON 儲存路徑 ---
-        phase1_dump_path = os.path.join(target_dir, PHASE1_METADATA_FILENAME)
-        phase2_dump_path = os.path.join(target_dir, PHASE2_TEMPLATE_DNA_FILENAME)
-        phase3_dump_path = os.path.join(target_dir, PHASE3_AUDIO_DNA_FILENAME)
+        target_dir = self._require_target_dir(request.folder_name, user_id)
 
         raw_assets_metadata = []
         template_dna = None
@@ -547,43 +496,43 @@ class DirectorService:
         music_future = None
         music_executor = None
         creative_brief = ""
-        is_refinement = old_timeline is not None
+        is_refinement = request.is_refinement
 
         # 提示詞增強(字幕 / 濾鏡開關)提前算:fork-join 的 music 分支需吃它作搜尋關鍵字來源
-        enhanced_prompt = prompt
-        if not subtitles:
+        enhanced_prompt = request.prompt
+        if not request.subtitles:
             enhanced_prompt += " (注意：本影片不需要任何字幕，請讓 text_overlays 保持為空陣列 [])"
-        if not filters:
+        if not request.filters:
             enhanced_prompt += " (注意：請不要套用任何調色，每段 color.preset 請設為 none、且不要填任何 primitive 數值)"
 
         # 用戶上傳的自訂音樂轉絕對路徑(music 分支用);音訊上傳落在 raw/(與其他原始素材同層,不經 standardize)
         user_music_file_path = (
-            os.path.join(target_dir, RAW_SUBDIR, user_music_file) if user_music_file else None
+            os.path.join(target_dir, RAW_SUBDIR, request.user_music_file)
+            if request.user_music_file else None
         )
 
         # 量測 Phase 2+3+4 整體耗時(gen_start → generate_timeline 結束);2、3 並行,故為真實經過時間
         gen_start = time.perf_counter()
 
         # --- 微調模式:跳過耗時感知與配樂解析,直接載入 Phase 1–3 本地快取 ---
-        if is_refinement and os.path.exists(phase1_dump_path):
-            print("[Service] 🎯 偵測到微調模式 (Refinement)，跳過耗時感知，載入本地素材快取...")
-            with open(phase1_dump_path, 'r', encoding='utf-8') as f:
-                raw_assets_metadata = json.load(f)
+        if is_refinement and artifact_store.has_phase1(target_dir):
+            logger.info("[Service] 🎯 偵測到微調模式 (Refinement)，跳過耗時感知，載入本地素材快取...")
+            # 統一經 store 容錯讀 + 孤兒過濾（修正：微調路徑過去漏過濾,可能看到被 _std 取代的舊身分）
+            raw_assets_metadata = artifact_store.read_phase1(target_dir)
 
-            if template and os.path.exists(phase2_dump_path):
-                print("[Service] 🎯 載入本地範本 DNA 快取...")
-                with open(phase2_dump_path, 'r', encoding='utf-8') as f:
-                    template_dna = json.load(f)
+            if request.template:
+                template_dna = artifact_store.read_phase2(target_dir)
+                if template_dna:
+                    logger.info("[Service] 🎯 載入本地範本 DNA 快取...")
 
-            if os.path.exists(phase3_dump_path):
-                print("[Service] 🎯 載入本地配樂 DNA (Phase 3) 快取...")
-                with open(phase3_dump_path, 'r', encoding='utf-8') as f:
-                    audio_dna = json.load(f)
+            audio_dna = artifact_store.read_phase3(target_dir)
+            if audio_dna:
+                logger.info("[Service] 🎯 載入本地配樂 DNA (Phase 3) 快取...")
 
         # --- 完整生成：Stage 1 Claude brief → 配樂背景 future（∥ 導演 loop）∥ 範本分析 ---
         else:
             # Phase 1（感知分析）已改由素材頁專屬擁有；讀 success-only 感知快取（未分析/dirty 拋 AssetsNotAnalyzedError）。
-            raw_assets_metadata = self._load_analyzed_assets(folder_name, user_id, target_dir)
+            raw_assets_metadata = self._load_analyzed_assets(request.folder_name, user_id, target_dir)
             asset_mood_summary = self._summarize_asset_mood(raw_assets_metadata)
 
             # Stage 1：Claude 出配樂搜尋詞 + 創意定錨（失敗 → 空 dict，music 退回 Gemini 萃取）
@@ -592,34 +541,32 @@ class DirectorService:
 
             # Stage 2：配樂下載 + 節拍分析改背景 future（與導演 loop 重疊，導演用 get_music_beats join）；
             # 範本分析在主執行緒直跑（與 music future 重疊）。copy_context 讓 future 內 Gemini/cost 記同帳本。
-            print("[Service] Stage 1 brief 完成；配樂背景準備 ∥ 範本分析 ∥ 導演 loop ...")
+            logger.info("[Service] Stage 1 brief 完成；配樂背景準備 ∥ 範本分析 ∥ 導演 loop ...")
             music_executor = ThreadPoolExecutor(max_workers=1)
             music_future = music_executor.submit(
                 contextvars.copy_context().run,
                 MusicDirector().resolve,
-                music_strategy, user_music_file_path, enhanced_prompt,
+                request.music_strategy, user_music_file_path, enhanced_prompt,
                 asset_mood_summary, brief.get("search_query", ""), tracker,
             )
-            if template:
-                prep_ctx = PrepContext(template_url=template)
+            if request.template:
+                prep_ctx = PrepContext(template_url=request.template)
                 # 注入共享 pipeline_runner（重用已 warm 的模型，不可 new）
                 template_dna = TemplateDnaProducer(self.pipeline_runner).produce(prep_ctx, tracker) or None
                 if template_dna:
-                    with open(phase2_dump_path, 'w', encoding='utf-8') as f:
-                        json.dump(template_dna, f, ensure_ascii=False, indent=2)
-                        print(f"💾 [Dump] 範本 DNA 已儲存至 {phase2_dump_path}")
+                    artifact_store.write_phase2(target_dir, template_dna)
 
         # --- 5. Phase 4: 導演 agentic loop（配樂背景準備中，導演用 get_music_beats join 取 beats）---
-        print("[Service] 正在呼叫導演大腦生成藍圖（agentic loop）...")
+        logger.info("[Service] 正在呼叫導演大腦生成藍圖（agentic loop）...")
         p4_start = time.perf_counter()
         try:
             final_blueprint, audio_dna = self.director.generate_timeline(
                 user_prompt=enhanced_prompt,
                 raw_assets=raw_assets_metadata,
                 template_dna=template_dna,
-                previous_timeline=old_timeline,
-                regenerate_music=regenerate_music,
-                previous_bgm_track=previous_bgm_track,
+                previous_timeline=request.old_timeline,
+                regenerate_music=request.regenerate_music,
+                previous_bgm_track=request.previous_bgm_track,
                 tracker=tracker,
                 project_dir=target_dir,
                 music_future=music_future,        # 全新生成：背景配樂 future（與 loop 重疊）
@@ -628,7 +575,7 @@ class DirectorService:
             )
         except ClarificationRequested:
             # B2 暫停：把背景配樂 future join 完並落地 PHASE3（供 resume 重載），再 re-raise 交 run_workflow 落地 session
-            self._settle_music_future_on_suspend(music_future, phase3_dump_path)
+            self._settle_music_future_on_suspend(music_future, target_dir)
             raise
         finally:
             if music_executor is not None:
@@ -636,9 +583,7 @@ class DirectorService:
 
         # 全新生成：配樂由 future 解析回（generate_timeline 內 join），此時落地 PHASE3（微調沿用快取不重寫）
         if not is_refinement and audio_dna:
-            with open(phase3_dump_path, 'w', encoding='utf-8') as f:
-                json.dump(audio_dna, f, ensure_ascii=False, indent=2)
-                print(f"💾 [Dump] 配樂 DNA 已儲存至 {phase3_dump_path}")
+            artifact_store.write_phase3(target_dir, audio_dna)
         # Phase 4 生成腳本耗時、與 Phase 2+3+4 整體耗時(後者含上游 prepare / 快取載入)
         _now = time.perf_counter()
         phase4_sec = _now - p4_start
@@ -648,22 +593,19 @@ class DirectorService:
             "phase234_sec": round(phase234_sec, 2),
             "prep_sec": round(phase234_sec - phase4_sec, 2),  # Phase 2∥3 並行段(=234−4)
         }
-        print(f"[Service] ⏱ Phase 4 生成腳本: {phase4_sec:.1f}s | Phase 2+3+4: {phase234_sec:.1f}s")
+        logger.info(f"[Service] ⏱ Phase 4 生成腳本: {phase4_sec:.1f}s | Phase 2+3+4: {phase234_sec:.1f}s")
 
         # --- 6. 後處理收尾（配樂 URL / 節拍 / 字幕 / 調色 / 落地 / 偏好）；resume 共用同一收尾 ---
         result = self._finalize_blueprint(
-            target_dir=target_dir, folder_name=folder_name, user_id=user_id,
+            target_dir=target_dir, user_id=user_id, request=request,
             final_blueprint=final_blueprint, audio_dna=audio_dna,
-            subtitles=subtitles, filters=filters,
-            prompt=prompt, old_timeline=old_timeline, is_refinement=is_refinement,
         )
         result["timings"] = timings
         return result
 
-    def _finalize_blueprint(self, target_dir: str, folder_name: str, user_id: str | None,
-                            final_blueprint: dict, audio_dna: dict | None,
-                            subtitles: bool, filters: bool,
-                            prompt: str, old_timeline: dict | None, is_refinement: bool) -> dict:
+    def _finalize_blueprint(self, target_dir: str, user_id: str | None,
+                            request: GenerationRequest,
+                            final_blueprint: dict, audio_dna: dict | None) -> dict:
         """
         導演藍圖的後處理收尾（``run`` / ``resume`` 共用）：套配樂快取 URL、注入節拍、關字幕 / 調色雙保險、
         落地藍圖、更新專案 meta、記偏好事件，回 ``{blueprint, audio_dna, assets_root_url}``。
@@ -672,103 +614,100 @@ class DirectorService:
         audio_url = self._audio_public_url(audio_dna)
         if audio_url and isinstance(final_blueprint.get("bgm_track"), dict):
             final_blueprint["bgm_track"]["track_id"] = audio_url
-            print(f"🎵 [Service] 已套用配樂連結: {audio_url}")
+            logger.info(f"🎵 [Service] 已套用配樂連結: {audio_url}")
 
         # 6b. 自動運鏡卡點：節拍帶進 bgm_track（供前端 punch；總開關已由 DirectorFacade 初始化）
         self._inject_beats(final_blueprint.get("bgm_track"), audio_dna)
 
         # 6c/6d. 關閉字幕 / 調色：後端強制清空（雙保險，prompt 已提示，此處 post-LLM 再硬清）
-        if not subtitles:
+        if not request.subtitles:
             final_blueprint["text_overlays"] = []
-        if not filters:
+        if not request.filters:
             for clip in final_blueprint.get("timeline", []):
                 if isinstance(clip, dict):
                     clip["color"] = dict(DEFAULT_CLIP_COLOR)
 
         # 偏好資料飛輪：覆寫 phase4 前先讀舊版當「初始生成」的 before 基準（微調用前端送來的 old_timeline）
-        preference_before = old_timeline if is_refinement else read_json_tolerant(
-            os.path.join(target_dir, PHASE4_BLUEPRINT_FILENAME), None
+        preference_before = (
+            request.old_timeline if request.is_refinement
+            else artifact_store.read_blueprint(target_dir)
         )
-        self._dump_blueprint(target_dir, final_blueprint)
-        self._update_project_meta(target_dir, folder_name)
+        artifact_store.write_blueprint(target_dir, final_blueprint)
+        self._update_project_meta(target_dir, request.folder_name)
         self._capture_preference_data(
-            target_dir=target_dir, user_id=user_id, prompt=prompt,
-            before=preference_before, after=final_blueprint, is_refinement=is_refinement,
+            target_dir=target_dir, user_id=user_id, prompt=request.prompt,
+            before=preference_before, after=final_blueprint, is_refinement=request.is_refinement,
         )
         return {
             "blueprint": final_blueprint,
             "audio_dna": audio_dna,
-            "assets_root_url": self._assets_root_url(folder_name, user_id),
+            "assets_root_url": self._assets_root_url(request.folder_name, user_id),
         }
 
     def _suspend_for_clarification(self, clarification: ClarificationRequested,
-                                   folder_name: str, user_id: str | None, prompt: str,
-                                   subtitles: bool, filters: bool, old_timeline: dict | None,
-                                   regenerate_music: bool, previous_bgm_track: dict | None,
+                                   request: GenerationRequest, user_id: str | None,
                                    tracker) -> dict:
         """
         導演 ask_user（B2 暫停）：落地續跑 session、發 CLARIFICATION_NEEDED 事件，回 needs_input 結果。
 
         job 仍視為正常結束（呼叫端端點的 finally 清 active job meta + 釋放生成鎖）；之後由
-        ``/generate/resume`` 載回 session、接答案續跑。
+        ``/generate/resume`` 載回 session、接答案續跑。請求脈絡整包內嵌 session（resume 原樣取回）。
         """
-        target_dir = self._require_target_dir(folder_name, user_id)
+        target_dir = self._require_target_dir(request.folder_name, user_id)
         session = AgentSession(
             resume_state=clarification.resume_state,
             question=clarification.question,
             options=clarification.options,
-            prompt=prompt,
-            is_refinement=old_timeline is not None,
-            subtitles=subtitles,
-            filters=filters,
-            regenerate_music=regenerate_music,
-            previous_bgm_track=previous_bgm_track,
-            old_timeline=old_timeline,
-            folder_name=folder_name,
+            request=request,
         )
         agent_session_store.save(target_dir, session)
         if tracker is not None:
             tracker.emit_director_clarification_needed(clarification.question, clarification.options)
-        print(f"⏸ [Service] 導演提問，已暫停並落地 session：{clarification.question}")
+        logger.info(f"⏸ [Service] 導演提問，已暫停並落地 session：{clarification.question}")
         return {
             "status": "awaiting_input",
             "question": clarification.question,
             "options": clarification.options,
-            "assets_root_url": self._assets_root_url(folder_name, user_id),
+            "assets_root_url": self._assets_root_url(request.folder_name, user_id),
         }
 
     def _make_music_brief(self, user_prompt: str, asset_mood_summary: str) -> dict:
         """
         Stage 1：Claude 出配樂搜尋詞 search_query + 創意定錨 creative_brief（回 dict）。
 
+        走 Haiku + 關 thinking + 強制 tool_choice：任務只產一個搜尋詞 + 一句定錨，不需導演級模型；
+        且本呼叫是同步、擋在整條生成起跑線前，小模型同時省成本（~25×）與縮短生成延遲。
+        成本以 MUSIC_SEARCH_QUERY 歸戶 Phase 3（不再掛在 Phase 4 名下）。
         失敗（API / 解析）回空 dict —— search_query 空時 MusicDirector 自動退回 Gemini 萃取，creative_brief
         空時導演首則訊息不附定錨，皆 graceful。
         """
         try:
             manager = get_director_manager()
             spec = manager.prompt_manager.get_music_brief_prompt(user_prompt, asset_mood_summary)
-            brief = manager.generate_structured(spec.text, spec.schema)
-            print(
+            brief = manager.generate_structured(
+                spec.text, spec.schema,
+                model=CLAUDE_BRIEF_MODEL, thinking_enabled=False,
+                task_mode=TaskMode.MUSIC_SEARCH_QUERY,
+            )
+            logger.info(
                 f"[Service] 🎼 配樂 brief：query='{brief.get('search_query', '')}' / "
                 f"brief='{(brief.get('creative_brief', '') or '')[:40]}...'"
             )
             return brief or {}
         except Exception as exc:  # noqa: BLE001 - brief 失敗不擋生成，music 退回 Gemini 萃取
-            print(f"⚠️ [Service] 配樂 brief 失敗（{exc}），music 改走 Gemini 萃取搜尋詞。")
+            logger.warning(f"⚠️ [Service] 配樂 brief 失敗（{exc}），music 改走 Gemini 萃取搜尋詞。")
             return {}
 
-    def _settle_music_future_on_suspend(self, music_future, phase3_dump_path: str) -> None:
+    def _settle_music_future_on_suspend(self, music_future, target_dir: str) -> None:
         """B2 暫停前把背景配樂 future join 完並落地 PHASE3，使 resume 能重載（best-effort，不擋暫停）。"""
         if music_future is None:
             return
         try:
             resolved = music_future.result()
             if resolved:
-                with open(phase3_dump_path, 'w', encoding='utf-8') as f:
-                    json.dump(resolved, f, ensure_ascii=False, indent=2)
-                    print(f"💾 [Dump] (暫停) 配樂 DNA 已落地 {phase3_dump_path}")
+                artifact_store.write_phase3(target_dir, resolved)
         except Exception as exc:  # noqa: BLE001 - 結算失敗不擋暫停，resume 將視為無配樂
-            print(f"⚠️ [Service] 暫停時配樂 future 結算失敗（{exc}），resume 將無配樂。")
+            logger.warning(f"⚠️ [Service] 暫停時配樂 future 結算失敗（{exc}），resume 將無配樂。")
 
     def resume_generation(self, folder_name: str, user_id: str = None,
                           answer: str = "", tracker: ProgressTracker | None = None) -> dict:
@@ -782,16 +721,13 @@ class DirectorService:
         session = agent_session_store.load(target_dir)
         if session is None:
             raise ValueError("查無待回答的生成 session（可能已完成或逾時）")
+        request = session.request  # 首跑落地的完整請求脈絡（prompt / 開關 / 配樂設定）
 
-        raw_assets_metadata = read_json_tolerant(
-            os.path.join(target_dir, PHASE1_METADATA_FILENAME), []
-        )
-        audio_dna = read_json_tolerant(os.path.join(target_dir, PHASE3_AUDIO_DNA_FILENAME), None)
+        raw_assets_metadata = artifact_store.read_phase1(target_dir)
+        audio_dna = artifact_store.read_phase3(target_dir)
         # 重載範本 DNA（首跑於 loop 前已落地 phase2）：讓續跑重建 view_template handle、工具集與首跑一致。
         # 無範本時檔案不存在 → None，view_template 不註冊。
-        template_dna = read_json_tolerant(
-            os.path.join(target_dir, PHASE2_TEMPLATE_DNA_FILENAME), None
-        )
+        template_dna = artifact_store.read_phase2(target_dir)
 
         # 量測續跑耗時:prep(Phase 2∥3)已於首跑完成,此處只接回 Phase 4 導演 loop,故僅報續跑段
         resume_start = time.perf_counter()
@@ -801,35 +737,29 @@ class DirectorService:
                     resume_state=session.resume_state,
                     answer=answer,
                     raw_assets=raw_assets_metadata,
-                    regenerate_music=session.regenerate_music,
-                    previous_bgm_track=session.previous_bgm_track,
+                    regenerate_music=request.regenerate_music,
+                    previous_bgm_track=request.previous_bgm_track,
                     audio_dna=audio_dna,  # 從 PHASE3 重載的配樂 → 設入 ctx 供 get_music_beats 直接回
                     tracker=tracker,
                     project_dir=target_dir,
                     template_dna=template_dna,  # 從 PHASE2 重載 → 重建 view_template handle
+                    is_refinement=request.is_refinement,  # 微調續跑要重掛 edit_blueprint（工具集與首跑一致）
                 )
             except ClarificationRequested as clarification:
-                result = self._suspend_for_clarification(
-                    clarification, session.folder_name, user_id, session.prompt,
-                    session.subtitles, session.filters, session.old_timeline,
-                    session.regenerate_music, session.previous_bgm_track, tracker,
-                )
+                result = self._suspend_for_clarification(clarification, request, user_id, tracker)
                 result["costs"] = ledger.summary()
                 return result
 
             result = self._finalize_blueprint(
-                target_dir=target_dir, folder_name=session.folder_name, user_id=user_id,
+                target_dir=target_dir, user_id=user_id, request=request,
                 final_blueprint=final_blueprint, audio_dna=audio_dna,
-                subtitles=session.subtitles, filters=session.filters,
-                prompt=session.prompt, old_timeline=session.old_timeline,
-                is_refinement=session.is_refinement,
             )
             agent_session_store.clear(target_dir)  # 完成 → 清 session
             # 續跑只涵蓋 Phase 4 loop 的續段(首跑已印 prep / 暫停前耗時),與首跑的 timings 口徑對齊
             resume_sec = time.perf_counter() - resume_start
             result["timings"] = {"phase4_resume_sec": round(resume_sec, 2)}
-            print(f"[Service] ⏱ Phase 4 續跑: {resume_sec:.1f}s")
-            print(ledger.format_summary("Resume"))
+            logger.info(f"[Service] ⏱ Phase 4 續跑: {resume_sec:.1f}s")
+            logger.info(ledger.format_summary("Resume"))
             result["costs"] = ledger.summary()
             return result
 
@@ -841,11 +771,8 @@ class DirectorService:
         尚未生成過（或檔案半寫 / 損毀）時回傳 None，由 API 層轉 404。
         """
         target_dir = self._require_target_dir(folder_name, user_id)
-        blueprint_path = os.path.join(target_dir, PHASE4_BLUEPRINT_FILENAME)
-        if not os.path.exists(blueprint_path):
-            return None
-        # 容錯讀取：半寫 / 損毀回 None，視同尚未生成
-        blueprint = read_json_tolerant(blueprint_path, None)
+        # 容錯讀取：缺檔 / 半寫 / 損毀回 None，視同尚未生成
+        blueprint = artifact_store.read_blueprint(target_dir)
         if not blueprint:
             return None
         return {
@@ -906,7 +833,7 @@ class DirectorService:
         刻意不更新 project_meta（autosave 頻繁，has_blueprint 早已為 True，避免每次重算與競寫）。
         """
         target_dir = self._require_target_dir(folder_name, user_id)
-        self._dump_blueprint(target_dir, blueprint)
+        artifact_store.write_blueprint(target_dir, blueprint)
         return {"saved": True}
 
     # ── 編輯器具名快照（版本檢查點）：解析專案路徑後委派 snapshot_store ──────────────

@@ -5,6 +5,9 @@ from media_processor.pipeline.context import AssetContext
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
 from media_processor.pipeline.work.video_work import get_video_work
 from template_engine.scene_cut_extractor import SceneCutExtractor
+import logging
+
+logger = logging.getLogger(__name__)
 
 _STAGE_NAME = "scene_cut"
 
@@ -28,5 +31,5 @@ class SceneCutStage(Stage):
             work.scene_cuts = SceneCutExtractor().get_cuts(context.file_path)
         except Exception as e:
             # 場景切點失敗不阻斷主流程,但印出以免靜默吞錯後難以定位(對齊原 _extract_scene_cuts)
-            print(f"[SceneCutStage Warning] 場景切點擷取失敗 {context.file_path}: {e}")
+            logger.warning(f"[SceneCutStage Warning] 場景切點擷取失敗 {context.file_path}: {e}")
             work.scene_cuts = []

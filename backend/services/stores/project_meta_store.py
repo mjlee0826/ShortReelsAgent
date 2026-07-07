@@ -33,6 +33,9 @@ import threading
 from typing import Callable, Optional
 
 from config.project_artifacts import PROJECT_META_FILENAME
+import logging
+
+logger = logging.getLogger(__name__)
 
 # 原子寫入的暫存檔副檔名(PROJECT_META_FILENAME 已於頂部自 config.project_artifacts import)
 _TMP_SUFFIX = ".tmp"
@@ -104,9 +107,9 @@ class ProjectMetaStore:
             # raw_decode 只解析開頭一個 JSON 值、忽略其後殘留位元組(正是 Extra data 損毀的型態)
             meta, _ = json.JSONDecoder().raw_decode(raw.lstrip())
         except json.JSONDecodeError:
-            print(f"[ProjectMetaStore Error] meta 損毀且無法復原,視為缺檔: {meta_path}")
+            logger.error(f"[ProjectMetaStore Error] meta 損毀且無法復原,視為缺檔: {meta_path}")
             return None
-        print(f"[ProjectMetaStore Warning] meta 損毀,已從開頭合法段落復原並修復: {meta_path}")
+        logger.warning(f"[ProjectMetaStore Warning] meta 損毀,已從開頭合法段落復原並修復: {meta_path}")
         try:
             self._atomic_dump(meta_path, meta)  # 把乾淨內容寫回,後續讀取不再走復原路徑
         except OSError:

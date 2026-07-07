@@ -1,4 +1,7 @@
 from scenedetect import detect, ContentDetector
+import logging
+
+logger = logging.getLogger(__name__)
 
 class SceneCutExtractor:
     """
@@ -6,7 +9,7 @@ class SceneCutExtractor:
     找出影片中所有物理切點的時間戳記。
     """
     def get_cuts(self, video_path: str) -> list:
-        print(f"[Analyzer] 正在計算物理分鏡切點 (Visual Cuts)...")
+        logger.info("[Analyzer] 正在計算物理分鏡切點 (Visual Cuts)...")
         # 使用 ContentDetector 偵測像素劇烈變化
         scene_list = detect(video_path, ContentDetector(threshold=27.0))
         

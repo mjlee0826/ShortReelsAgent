@@ -1,12 +1,15 @@
 import librosa
 import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
 
 class AudioBeatExtractor:
     """
     Adapter Pattern: 封裝 Librosa 音訊處理。
     """
     def get_beats(self, audio_path: str) -> dict:
-        print(f"[Analyzer] 正在分析音樂節拍與能量點 (Beats & Onsets)...")
+        logger.info("[Analyzer] 正在分析音樂節拍與能量點 (Beats & Onsets)...")
         y, sr = librosa.load(audio_path)
         
         # 1. 估算 BPM 與 Beat Timestamps

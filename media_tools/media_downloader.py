@@ -2,6 +2,9 @@ import os
 import yt_dlp
 
 from config.app_config import TEMP_TEMPLATES_DIR, MUSIC_CACHE_SUBDIR
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class MediaDownloader:
@@ -70,11 +73,11 @@ class MediaDownloader:
         }
 
         if not os.path.exists(self.cookies_path):
-            print("[Downloader] 警告：未偵測到 cookies.txt，IG 扒取可能會被阻擋。")
+            logger.warning("[Downloader] 警告：未偵測到 cookies.txt，IG 扒取可能會被阻擋。")
         else:
-            print("[Downloader] 已掛載 cookies.txt，執行高權限扒取...")
+            logger.info("[Downloader] 已掛載 cookies.txt，執行高權限扒取...")
 
-        print(f"[Downloader] 正在解析並下載遠端素材: {input_source}")
+        logger.info(f"[Downloader] 正在解析並下載遠端素材: {input_source}")
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -95,7 +98,7 @@ class MediaDownloader:
                 }
 
         except Exception as e:
-            print(f"[Downloader Error] 下載失敗，可能是網址錯誤或被平台阻擋: {e}")
+            logger.error(f"[Downloader Error] 下載失敗，可能是網址錯誤或被平台阻擋: {e}")
             raise ValueError(f"無法獲取影片素材: {input_source}")
 
     def search_and_download_audio(self, search_query: str) -> str:
@@ -104,11 +107,11 @@ class MediaDownloader:
         os.makedirs(music_dir, exist_ok=True)
 
         if os.path.exists(self.cookies_path):
-            print(f"[Downloader] 成功找到並掛載 Cookie: {self.cookies_path}")
+            logger.info(f"[Downloader] 成功找到並掛載 Cookie: {self.cookies_path}")
         else:
-            print(f"[Downloader] 警告：找不到 Cookie 檔案於 {self.cookies_path}")
+            logger.warning(f"[Downloader] 警告：找不到 Cookie 檔案於 {self.cookies_path}")
 
-        print(f"[Downloader] 從 YouTube 搜尋: {search_query}")
+        logger.info(f"[Downloader] 從 YouTube 搜尋: {search_query}")
 
         ydl_opts = {
             **self._base_ydl_opts(),
@@ -131,5 +134,5 @@ class MediaDownloader:
                 return ydl.prepare_filename(info)
 
         except Exception as e:
-            print(f"[Downloader Error] YouTube 搜尋或下載失敗: {e}")
+            logger.error(f"[Downloader Error] YouTube 搜尋或下載失敗: {e}")
             raise

@@ -47,6 +47,16 @@ dependencies = [
 [tool.poetry]
 package-mode = false
 
+[tool.ruff]
+# venv（agent/）與前端不納入 lint
+extend-exclude = ["agent"]
+
+[tool.ruff.lint.per-file-ignores]
+# 進入點檔案的 imports-after-code 屬刻意：sys.path 注入 / load_dotenv / setup_logging
+# 必須先於重量級模組 import 執行（logging 未配置前 import 會吞掉啟動期 INFO 訊息）
+"backend/main.py" = ["E402"]
+"tools/ingest_local_folder.py" = ["E402"]
+
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"

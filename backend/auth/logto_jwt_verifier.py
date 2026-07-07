@@ -8,10 +8,12 @@ Strategy Pattern + Singleton：Logto JWT 存取令牌驗證器
 import os
 import time
 import httpx
-from jose import jwt, JWTError, jwk
-from jose.utils import base64url_decode
+from jose import jwt, JWTError
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+import logging
+
+logger = logging.getLogger(__name__)
 
 # 從環境變數讀取 Logto 設定
 _ISSUER     = os.getenv("LOGTO_ISSUER",   "")
@@ -51,7 +53,7 @@ class LogtoJWTVerifier:
         if self._jwks_cache is None or (time.time() - self._cached_at) > self._JWKS_TTL:
             self._jwks_cache = self._fetch_jwks()
             self._cached_at = time.time()
-            print("[LogtoJWT] 🔑 JWKS 公鑰快取已更新")
+            logger.info("[LogtoJWT] 🔑 JWKS 公鑰快取已更新")
         return self._jwks_cache
 
     def _find_key(self, kid: str, allow_refresh: bool = True):
@@ -62,7 +64,7 @@ class LogtoJWTVerifier:
                 return key_data
         # kid 找不到：可能是金鑰輪替，強制刷新快取後再試一次
         if allow_refresh:
-            print(f"[LogtoJWT] ⚠️ kid '{kid}' 不在快取中，嘗試刷新 JWKS...")
+            logger.warning(f"[LogtoJWT] ⚠️ kid '{kid}' 不在快取中，嘗試刷新 JWKS...")
             self._jwks_cache = None
             return self._find_key(kid, allow_refresh=False)
         return None
@@ -125,5 +127,5 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(_bearer_sch
         return _verifier.verify(credentials.credentials)
     except HTTPException as exc:
         # 印出後端認定的拒絕原因（aud/iss/exp 不符、kid 找不到、格式錯誤等）
-        print(f"[LogtoJWT] ❌ 401 拒絕原因：{exc.detail}")
+        logger.error(f"[LogtoJWT] ❌ 401 拒絕原因：{exc.detail}")
         raise

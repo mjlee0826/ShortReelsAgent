@@ -39,6 +39,9 @@ from ingestion_engine.exceptions import (
     RemoteFileUnavailableError,
 )
 from ingestion_engine.models import RemoteEntry
+import logging
+
+logger = logging.getLogger(__name__)
 
 # 視為「授權／權限失效」的 HTTP 狀態碼（API key 對非公開檔案無效、資料夾轉私人皆落此）。
 _AUTH_ERROR_STATUS = (401, 403)
@@ -163,7 +166,7 @@ class PublicDriveApiAdapter(CloudStorageAdapter):
             try:
                 self._download_file(entry.locator, dest_path)
             except RemoteFileUnavailableError as exc:
-                print(f"[PublicDriveApi] ⏭ 略過無法下載的檔案 '{entry.name}'：{exc}")
+                logger.warning(f"[PublicDriveApi] ⏭ 略過無法下載的檔案 '{entry.name}'：{exc}")
                 continue
 
     # ── Drive API 呼叫 ─────────────────────────────────────────────────────────
@@ -257,7 +260,7 @@ class PublicDriveApiAdapter(CloudStorageAdapter):
                         "稍後將自動再嘗試。"
                     ) from exc
                 wait_sec = self._backoff_with_jitter(backoff_sec)
-                print(
+                logger.info(
                     f"[PublicDriveApi] ⏳ {context} 遇限流，{wait_sec:.1f}s 後重試"
                     f"（{attempt_index + 1}/{DRIVE_API_MAX_RETRIES}）：{exc}"
                 )
@@ -279,7 +282,7 @@ class PublicDriveApiAdapter(CloudStorageAdapter):
             return
         reason = self._extract_error_reason(resp)
         # 診斷：把 Drive API 真正回的 status / reason / body 印出來，便於分辨「限流」vs「真授權」根因
-        print(
+        logger.info(
             f"[PublicDriveApi] ⚠️ {context}：HTTP {status_code} reason={reason!r} "
             f"body={self._body_snippet(resp)!r}"
         )

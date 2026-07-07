@@ -1,4 +1,4 @@
-"""TechScoreStage:MUSIQ 技術畫質評分(image / video 共用),供 RejectFilter 短路。"""
+"""TechScoreStage:MUSIQ 技術畫質評分(image / video 共用),只算分寫入 metadata。"""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
@@ -34,10 +34,10 @@ def _musiq_batch(images: list) -> list:
 
 class TechScoreStage(Stage):
     """
-    以 MUSIQ 計算當前幀的技術畫質分數,寫入 ``FrameAnalysis.tech_score``(保留原始值供 reject 比較)。
+    以 MUSIQ 計算當前幀的技術畫質分數,寫入 ``FrameAnalysis.tech_score``。
 
     **image / video 共用**(media-agnostic,透過 ``get_frame_analysis`` 取幀):image 對整張圖、
-    video 對中間代表幀。儘早執行讓 RejectFilter 能在跑昂貴的 saliency / aes / qwen 前就短路掉廢片。
+    video 對中間代表幀。只算分寫入 metadata、不做 gate(評分與過濾解耦,取捨交 ContextCompressor)。
     GPU 資源;singleton manager 延遲載入。代表幀缺失(video 抽幀失敗)時跳過、留預設 0.0。
     """
 

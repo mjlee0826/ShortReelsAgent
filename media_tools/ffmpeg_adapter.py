@@ -10,6 +10,9 @@ from config.media_processor_config import (
     TIMECODE_POSITION_Y,
 )
 from config.model_config import AUDIO_SAMPLING_RATE
+import logging
+
+logger = logging.getLogger(__name__)
 
 # 影片容器中可能存放 GPS 座標的標籤名稱，依優先順序嘗試
 _GPS_TAG_CANDIDATES = (
@@ -76,7 +79,7 @@ class FFmpegAdapter:
         採樣率固定為 AUDIO_SAMPLING_RATE（Whisper/VAD/AudioEnv 共同要求）。
         allow_failure=True：部分影片無音軌，ffmpeg 非零退出屬正常情況。
         """
-        print(f"[FFmpeg] 正在提取 AI 專用音軌: {os.path.basename(output_path)}")
+        logger.info(f"[FFmpeg] 正在提取 AI 專用音軌: {os.path.basename(output_path)}")
         self._run(
             [
                 "ffmpeg", "-y", "-i", input_path,
@@ -203,7 +206,7 @@ class FFmpegAdapter:
 
     def strip_audio_fast(self, input_path: str, output_path: str) -> None:
         """無損快速剝離音軌，僅保留影像（Stream Copy，速度極快）。"""
-        print(f"[FFmpeg] 正在執行無損畫面剝離: {os.path.basename(output_path)}")
+        logger.info(f"[FFmpeg] 正在執行無損畫面剝離: {os.path.basename(output_path)}")
         self._run(
             ["ffmpeg", "-y", "-i", input_path, "-an", "-c:v", "copy", output_path],
             error_prefix="[FFmpeg] 畫面剝離失敗",
@@ -214,7 +217,7 @@ class FFmpegAdapter:
         在影片左上角燒錄視覺時間碼（供 Gemini 深度索引使用）。
         時間碼格式為浮點秒數，字體大小與位置由 media_processor_config 常數控制。
         """
-        print(f"[FFmpeg] 正在燒錄視覺時間碼: {os.path.basename(output_path)}")
+        logger.info(f"[FFmpeg] 正在燒錄視覺時間碼: {os.path.basename(output_path)}")
         vf_filter = (
             f"drawtext=text='%{{pts\\:flt}}'"
             f": x={TIMECODE_POSITION_X}"

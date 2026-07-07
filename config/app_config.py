@@ -32,6 +32,24 @@ MUSIC_CACHE_SUBDIR = "music_cache"
 # SSR 算圖暫存工作區：每次 render 建一個子目錄，render 完成後自動清除
 TEMP_WORKSPACES_DIR = os.environ.get("TEMP_WORKSPACES_DIR", "/data1/cache/mjlee/temp_workspaces")
 
+# --- Remotion SSR 算圖 ---
+
+# Remotion 常駐 bundle 目錄：`npx remotion render <entry>` 每次呼叫都會重跑 webpack bundle
+# （典型 20–60s），而 blueprint 只是 props、前端程式碼沒變 —— 故改為先 `remotion bundle` 落地一次、
+# 之後每次 render 直接吃 bundle 目錄（serve URL），只在前端原始碼 mtime 變新時重建。
+REMOTION_BUNDLE_DIR = os.environ.get(
+    "REMOTION_BUNDLE_DIR", os.path.join(TEMP_WORKSPACES_DIR, "remotion_bundle")
+)
+# 逃生閥：設 1/true 停用 bundle 快取，回到「每次 render 從 entry 重新 bundle」的舊路徑（排查用）。
+REMOTION_DISABLE_BUNDLE_CACHE = os.environ.get(
+    "REMOTION_DISABLE_BUNDLE_CACHE", "0"
+).strip().lower() in ("1", "true", "yes")
+# render 並行度（Chromium 分頁數）：空字串 = 交給 Remotion 依 CPU 自動決定；
+# 多核機（如 80 緒雙路 Xeon）可調高逼近核數以縮短逐幀算圖 wall time。
+REMOTION_CONCURRENCY = os.environ.get("REMOTION_CONCURRENCY", "").strip()
+# 單次 render / bundle 子行程的逾時秒數（過長影片或首次 bundle 慢時可調高）。
+REMOTION_RENDER_TIMEOUT_SEC = int(os.environ.get("REMOTION_RENDER_TIMEOUT_SEC", "600"))
+
 # --- 進度推播 / 背景生成 job 的執行期常數 ---
 
 # 每個 job 的進度事件 replay buffer 上限：WS 晚連時可補播開頭事件，避免漏掉。

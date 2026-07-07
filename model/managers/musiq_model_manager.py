@@ -34,6 +34,9 @@ from config.model_config import (
     SCORE_MIN,
     SCORE_MAX,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class MusiqModelManager(BaseModelManager):
@@ -69,7 +72,7 @@ class MusiqModelManager(BaseModelManager):
             # CUDA OOM 往上拋給 @oom_resilient 重試；其餘維持 Null Object（保底分數）
             if is_cuda_oom(e):
                 raise
-            print(f"[Technical Scorer Error] 畫質評估失敗: {e}")
+            logger.error(f"[Technical Scorer Error] 畫質評估失敗: {e}")
             return DEFAULT_FALLBACK_SCORE
         finally:
             if torch.cuda.is_available():
@@ -118,7 +121,7 @@ class MusiqModelManager(BaseModelManager):
             # CUDA OOM 往上拋給 @oom_resilient 重試；其餘整批回保底分數（不阻擋下游）
             if is_cuda_oom(e):
                 raise
-            print(f"[Technical Scorer Batch Error] 畫質批次評估失敗: {e}")
+            logger.error(f"[Technical Scorer Batch Error] 畫質批次評估失敗: {e}")
             return [DEFAULT_FALLBACK_SCORE] * len(pil_images)
         finally:
             if torch.cuda.is_available():

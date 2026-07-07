@@ -1,5 +1,8 @@
 import os
 import requests
+import logging
+
+logger = logging.getLogger(__name__)
 
 class JamendoAdapter:
     """
@@ -30,7 +33,7 @@ class JamendoAdapter:
                 "JAMENDO_CLIENT_ID 環境變數未設定，請至 developer.jamendo.com 免費申請"
             )
 
-        print(f"[JamendoAdapter] 搜尋關鍵字: {query}")
+        logger.info(f"[JamendoAdapter] 搜尋關鍵字: {query}")
 
         params = {
             "client_id": self.client_id,
@@ -68,7 +71,7 @@ class JamendoAdapter:
         track_id = track.get("id", "unknown")
         track_name = track.get("name", "Unknown")
         artist_name = track.get("artist_name", "Unknown")
-        print(f"[JamendoAdapter] 找到: {artist_name} - {track_name} (id={track_id})")
+        logger.info(f"[JamendoAdapter] 找到: {artist_name} - {track_name} (id={track_id})")
 
         # 串流下載至 output_dir
         os.makedirs(output_dir, exist_ok=True)
@@ -82,5 +85,5 @@ class JamendoAdapter:
                 if chunk:
                     f.write(chunk)
 
-        print(f"[JamendoAdapter] 下載完成: {output_path}")
+        logger.info(f"[JamendoAdapter] 下載完成: {output_path}")
         return output_path

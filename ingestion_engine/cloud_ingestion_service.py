@@ -49,6 +49,9 @@ from ingestion_engine.models import (
     SyncReport,
     _now_iso,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Phase 1 觸發 callback 型別：吃 (user_id, project_name)，對該本地 project 跑 Phase 1；失敗時 raise。
 Phase1Runner = Callable[[str, str], None]
@@ -166,7 +169,7 @@ class CloudIngestionService:
                 )
         except Phase1DeferredError as exc:
             # 前景已有 Phase 1 在跑:本輪不下載/不分析、不前進簽章,保留狀態讓下輪 poller 重試
-            print(f"[CloudIngestion] {exc}")
+            logger.info(f"[CloudIngestion] {exc}")
             return self._mark_synced(project_dir, report)
 
     def _ingest_changed(
@@ -287,7 +290,7 @@ class CloudIngestionService:
         try:
             self._prune_artifacts(user_id, project_name)
         except Exception as exc:  # noqa: BLE001 - 清除衍生產物失敗不應中斷同步主流程
-            print(f"⚠️ [CloudIngestion] 清除衍生產物失敗（{project_name}）: {exc}")
+            logger.warning(f"⚠️ [CloudIngestion] 清除衍生產物失敗（{project_name}）: {exc}")
             report.errors.append(f"清除衍生產物失敗: {exc}")
 
     # ── 同步收尾 ──────────────────────────────────────────────────────────────
@@ -304,7 +307,7 @@ class CloudIngestionService:
 
     def _pause_for_auth(self, project_dir: str, report: SyncReport, exc: object) -> SyncReport:
         """授權失效：暫停此 project 同步、記錄錯誤並持久化（其他 project 不受影響）。"""
-        print(f"⚠️ [CloudIngestion] 授權失效，暫停專案同步（{report.project_name}）：{exc}")
+        logger.warning(f"⚠️ [CloudIngestion] 授權失效，暫停專案同步（{report.project_name}）：{exc}")
         self._patch_meta(project_dir, {
             META_KEY_SYNC_STATUS: SYNC_STATUS_PAUSED_AUTH,
             META_KEY_LAST_SYNC_ERROR: str(exc),
@@ -316,7 +319,7 @@ class CloudIngestionService:
 
     def _fail_sync(self, project_dir: str, report: SyncReport, exc: object) -> SyncReport:
         """非授權類雲端錯誤：標 error（暫時性，下輪重試）並持久化。"""
-        print(f"⚠️ [CloudIngestion] 同步錯誤（暫時性，下輪重試）（{report.project_name}）：{exc}")
+        logger.warning(f"⚠️ [CloudIngestion] 同步錯誤（暫時性，下輪重試）（{report.project_name}）：{exc}")
         self._patch_meta(project_dir, {
             META_KEY_SYNC_STATUS: SYNC_STATUS_ERROR,
             META_KEY_LAST_SYNC_ERROR: str(exc),

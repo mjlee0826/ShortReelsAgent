@@ -16,6 +16,9 @@ from typing import Callable, Optional
 from backend.services.jobs.job_manager import job_manager
 from backend.services.jobs.progress_hub import progress_hub, ws_progress_observer
 from media_processor.pipeline.progress import ProgressTracker
+import logging
+
+logger = logging.getLogger(__name__)
 
 # work_fn:在 worker thread 內執行實際工作(收到帶 job_id 的 tracker),回傳要落地的結果 dict
 WorkFn = Callable[[ProgressTracker], dict]
@@ -80,7 +83,7 @@ class AsyncJobRunner:
             tracker.emit_job_finished(payload={"result": result})
             return {"job_id": job_id, "result": result}
         except Exception as exc:  # noqa: BLE001 - 轉成 job 錯誤並發終端事件後,仍 raise 交回呼叫端
-            print("\n❌ [背景 job 發生錯誤] 詳細報錯資訊如下：")
+            logger.error("\n❌ [背景 job 發生錯誤] 詳細報錯資訊如下：")
             traceback.print_exc()
             job_manager.mark_error(job_id, str(exc))
             tracker.emit_job_error(error=str(exc))
@@ -96,7 +99,7 @@ class AsyncJobRunner:
             job_manager.mark_done(job_id, result)
             tracker.emit_job_finished(payload={"result": result})
         except Exception as exc:  # noqa: BLE001 - 背景工作任何例外都需轉成 job 錯誤,不可逸出
-            print("\n❌ [背景 job 發生錯誤] 詳細報錯資訊如下：")
+            logger.error("\n❌ [背景 job 發生錯誤] 詳細報錯資訊如下：")
             traceback.print_exc()
             job_manager.mark_error(job_id, str(exc))
             tracker.emit_job_error(error=str(exc))

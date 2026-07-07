@@ -1,3 +1,4 @@
+import logging
 import sys
 import os
 import asyncio
@@ -11,6 +12,13 @@ sys.path.append(PROJECT_ROOT)
 
 # 【關鍵修正】在讀取任何環境變數之前，必須先載入 .env 檔案
 load_dotenv()
+
+# logging 必須在重量級模組 import（director_service 會於建構期輸出資源佈局 INFO）之前配置，
+# 否則啟動期訊息會被 root logger 的預設 WARNING 門檻吞掉
+from shared.logging_config import setup_logging
+
+setup_logging()
+logger = logging.getLogger(__name__)
 
 from config.app_config import ASSETS_DIR, TEMP_TEMPLATES_DIR
 from config.ingestion_config import ENABLE_INGESTION_POLLER
@@ -92,7 +100,7 @@ if __name__ == "__main__":
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", 5174))
     
-    print(f"🚀 [系統啟動] FastAPI 伺服器運行於 http://{host}:{port}")
-    print(f"🔒 [CORS 設定] 允許的前端連線來源: {frontend_url}")
+    logger.info(f"🚀 [系統啟動] FastAPI 伺服器運行於 http://{host}:{port}")
+    logger.info(f"🔒 [CORS 設定] 允許的前端連線來源: {frontend_url}")
     
     uvicorn.run(app, host=host, port=port)

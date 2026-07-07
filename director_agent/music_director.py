@@ -6,6 +6,9 @@ from music_engine.music_engine_facade import MusicEngineFacade
 from media_processor.pipeline.progress import ProgressTracker
 from prompt_manager.prompt_factory import PromptFactory
 from prompt_manager.task_mode import TaskMode
+import logging
+
+logger = logging.getLogger(__name__)
 
 # 配樂策略常數（取代散落的字串，禁 magic string）
 MUSIC_STRATEGY_NONE = "none"
@@ -49,26 +52,26 @@ class MusicDirector:
         """
         # 最高優先：用戶已上傳自訂音樂，直接使用本地檔案，跳過所有搜尋邏輯
         if user_music_file:
-            print(f"[MusicDirector] ⏩ 使用本地上傳音訊 ({user_music_file})")
+            logger.info(f"[MusicDirector] ⏩ 使用本地上傳音訊 ({user_music_file})")
             return self.music_engine.use_local_audio(user_music_file, tracker=tracker)
 
         # 不加配樂：直接返回，無需呼叫 Gemini
         if music_strategy == MUSIC_STRATEGY_NONE:
-            print("[MusicDirector] ⏩ 策略: 不加配樂")
+            logger.info("[MusicDirector] ⏩ 策略: 不加配樂")
             return {}
 
         # 搜尋配樂：優先用外部傳入的搜尋詞（Stage 1 Claude brief），無則 Gemini 萃取（change_music fallback）
         search_query = pre_generated_search_query or self._extract_search_query(user_prompt, asset_mood_summary)
 
         if music_strategy == MUSIC_STRATEGY_SEARCH_FREE:
-            print(f"[MusicDirector] 🆓 策略: 免費配樂 (Jamendo)，關鍵字: '{search_query}'")
+            logger.info(f"[MusicDirector] 🆓 策略: 免費配樂 (Jamendo)，關鍵字: '{search_query}'")
             return self._safe_fetch_free_music(search_query, tracker=tracker)
 
         if music_strategy != MUSIC_STRATEGY_SEARCH_COPYRIGHT:
             # 未知策略：fallback 至 search_copyright，避免靜默失敗
-            print(f"⚠️ [MusicDirector] 未知策略 '{music_strategy}'，fallback 至 search_copyright")
+            logger.warning(f"⚠️ [MusicDirector] 未知策略 '{music_strategy}'，fallback 至 search_copyright")
         else:
-            print(f"[MusicDirector] 🎵 策略: 搜尋配樂（含版權），關鍵字: '{search_query}'")
+            logger.info(f"[MusicDirector] 🎵 策略: 搜尋配樂（含版權），關鍵字: '{search_query}'")
         return self._safe_fetch_music(search_query, tracker=tracker)
 
     def _extract_search_query(self, user_prompt: str, asset_mood_summary: str = "") -> str:
@@ -93,10 +96,10 @@ class MusicDirector:
                 data = json.loads(match.group(0))
                 query = data.get("search_query", "").strip()
                 if query:
-                    print(f"[MusicDirector] Gemini 萃取搜尋關鍵字: '{query}'")
+                    logger.info(f"[MusicDirector] Gemini 萃取搜尋關鍵字: '{query}'")
                     return query
         except Exception as e:
-            print(f"⚠️ [MusicDirector 解析錯誤] 將使用原始 Prompt 作為搜尋詞。原因: {e}")
+            logger.error(f"⚠️ [MusicDirector 解析錯誤] 將使用原始 Prompt 作為搜尋詞。原因: {e}")
 
         return user_prompt
 
@@ -104,7 +107,7 @@ class MusicDirector:
         """呼叫 yt-dlp 搜尋並下載配樂（含版權）。失敗時回傳空 dict。"""
         result = self.music_engine.fetch_and_analyze(query=query, tracker=tracker)
         if result.get("status") != "success":
-            print(f"⚠️ [music_engine] 配樂獲取失敗: {result.get('message', '未知錯誤')}，將使用空配樂繼續。")
+            logger.error(f"⚠️ [music_engine] 配樂獲取失敗: {result.get('message', '未知錯誤')}，將使用空配樂繼續。")
             return {}
         return result
 
@@ -112,6 +115,6 @@ class MusicDirector:
         """呼叫 Jamendo 搜尋免費配樂（無版權）。失敗時回傳空 dict。"""
         result = self.music_engine.fetch_free_music(query=query, tracker=tracker)
         if result.get("status") != "success":
-            print(f"⚠️ [music_engine] 免費配樂獲取失敗: {result.get('message', '未知錯誤')}，將使用空配樂繼續。")
+            logger.error(f"⚠️ [music_engine] 免費配樂獲取失敗: {result.get('message', '未知錯誤')}，將使用空配樂繼續。")
             return {}
         return result

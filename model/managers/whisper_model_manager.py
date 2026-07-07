@@ -11,9 +11,11 @@ WhisperModelManager：Whisper 語音辨識器（faster-whisper / CTranslate2 後
 
 批次說明
 --------
-faster-whisper 原生不支援「多檔一次 forward」（其 ``BatchedInferencePipeline`` 是單檔分段批次，軸不同）。
-:meth:`transcribe_batch` 改以單一借出實例**循序**轉錄多檔，維持 ``BatchCollector`` 的 list→list 等長契約；
-短音訊本就少受跨檔合批之益，turbo + CT2 的單次速度足以覆蓋。
+faster-whisper 原生不支援「多檔一次 forward」，故本 Manager **不做跨檔合批**（舊 ``transcribe_batch``
+是循序假合批：無吞吐收益、純增隊頭延遲，已移除）。真正的加速來自 **單檔內** 的
+``BatchedInferencePipeline``：以 VAD 把長音檔切塊、多塊一次 forward（``WHISPER_CHUNK_BATCH_SIZE``），
+對配樂歌詞聽寫（3–5 分鐘全曲）與長影片有數倍加速；短音檔只有 1 塊、行為與循序等價、無回歸。
+``WHISPER_USE_BATCHED_PIPELINE=false`` 可回退純循序路徑（A/B / 排查用）。
 
 設計模式
 --------
@@ -23,7 +25,7 @@ faster-whisper 原生不支援「多檔一次 forward」（其 ``BatchedInferenc
 - **Null Object**：失敗時回填 ``{"text": "", "chunks": [], "language": "", "error": ...}``，下游契約一致。
 """
 import numpy as np
-from faster_whisper import WhisperModel
+from faster_whisper import BatchedInferencePipeline, WhisperModel
 from model.infra.base_model_manager import (
     BaseModelManager,
     synchronized_inference,
@@ -37,20 +39,36 @@ from config.model_config import (
     WHISPER_CPU_COMPUTE_TYPE,
     WHISPER_BEAM_SIZE,
     WHISPER_VAD_FILTER,
+    WHISPER_USE_BATCHED_PIPELINE,
+    WHISPER_CHUNK_BATCH_SIZE,
     WHISPER_HALLUCINATION_THRESHOLD,
     MODEL_WEIGHTS_DIR,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # CTranslate2 的 device 名（self.device 為 'cuda:N' / 'cpu'，CT2 則把 device 與 device_index 拆開收）
 _CT2_DEVICE_CUDA = "cuda"
 _CT2_DEVICE_CPU = "cpu"
-# transcribe 共用參數：condition_on_previous_text=False 抑制跨段幻覺（對齊舊 condition_on_prev_tokens=False）
+# 循序路徑共用參數：condition_on_previous_text=False 抑制跨段幻覺（對齊舊 condition_on_prev_tokens=False）
 _TRANSCRIBE_KWARGS = {
     "task": "transcribe",
     "beam_size": WHISPER_BEAM_SIZE,
     "condition_on_previous_text": False,
     "vad_filter": WHISPER_VAD_FILTER,
+}
+# 單檔分塊批次路徑參數：vad_filter 強制 True（批次以 VAD 切塊是其自然模式，也順帶抑制幻覺）；
+# without_timestamps=False 保留 timestamp token 解碼，段落時間戳維持與循序路徑同等細粒度
+# （字幕卡點 / ducking 依賴逐段 timestamp，不可退化成 30s 粗塊）。
+_BATCHED_TRANSCRIBE_KWARGS = {
+    "task": "transcribe",
+    "beam_size": WHISPER_BEAM_SIZE,
+    "condition_on_previous_text": False,
+    "vad_filter": True,
+    "without_timestamps": False,
+    "batch_size": WHISPER_CHUNK_BATCH_SIZE,
 }
 # warmup 用的靜音樣本長度（秒）與取樣率：單執行緒先觸發 CT2 kernel 編譯 / 原生庫載入
 _WARMUP_SILENCE_SEC = 1
@@ -87,6 +105,8 @@ class WhisperModelManager(BaseModelManager):
                 compute_type=compute_type,
                 download_root=MODEL_WEIGHTS_DIR,
             )
+            # 單檔分塊批次管線：包同一份權重（零額外常駐），長音檔多塊一次 forward 數倍加速
+            self._batched = BatchedInferencePipeline(model=self._model)
 
     def warmup(self) -> None:
         """
@@ -107,7 +127,7 @@ class WhisperModelManager(BaseModelManager):
                 pass
         except Exception as exc:
             # best-effort：預熱失敗不擋啟動，執行期首呼叫仍會自行初始化
-            print(f"[Whisper] warmup 預熱略過：{exc}")
+            logger.warning(f"[Whisper] warmup 預熱略過：{exc}")
 
     def _filter_hallucination(self, raw_result: dict) -> dict:
         """
@@ -145,13 +165,16 @@ class WhisperModelManager(BaseModelManager):
 
     def _transcribe_one(self, audio_path: str) -> dict:
         """
-        單檔核心轉錄（**無鎖**，供 :meth:`transcribe` 與 :meth:`transcribe_batch` 共用）。
+        單檔核心轉錄（**無鎖**，由已持鎖的 :meth:`transcribe` 呼叫）。
 
-        刻意不掛 ``@synchronized_inference``：L3 ``_inference_lock`` 為非重入鎖，若批次方法已持鎖
-        又呼叫帶鎖的單檔方法會自我死結。鎖序統一由外層兩個公開方法持有。
+        預設走 ``BatchedInferencePipeline``（VAD 切塊 + 多塊一次 forward）：長音檔數倍加速、
+        短音檔行為等價；``WHISPER_USE_BATCHED_PIPELINE=false`` 回退純循序。兩條路徑的
+        segments 皆為惰性產生器，迭代即觸發推論，轉成與舊 HF pipeline 一致的 chunk 格式。
         """
-        segments, info = self._model.transcribe(audio_path, **_TRANSCRIBE_KWARGS)
-        # CT2 segments 為惰性產生器；迭代即觸發推論，轉成與舊 HF pipeline 一致的 chunk 格式
+        if WHISPER_USE_BATCHED_PIPELINE:
+            segments, info = self._batched.transcribe(audio_path, **_BATCHED_TRANSCRIBE_KWARGS)
+        else:
+            segments, info = self._model.transcribe(audio_path, **_TRANSCRIBE_KWARGS)
         chunks = [
             {"text": seg.text, "timestamp": (seg.start, seg.end)}
             for seg in segments
@@ -171,31 +194,5 @@ class WhisperModelManager(BaseModelManager):
             # CUDA OOM 往上拋給 @oom_resilient 重試；其餘吞成 Null Object（先印出）
             if is_cuda_oom(e):
                 raise
-            print(f"[Whisper Error] 轉錄失敗: {e}")
+            logger.error(f"[Whisper Error] 轉錄失敗: {e}")
             return {"text": "", "chunks": [], "language": _DEFAULT_LANGUAGE, "error": str(e)}
-
-    @oom_resilient
-    @synchronized_inference
-    def transcribe_batch(self, audio_paths: list[str]) -> list[dict]:
-        """
-        對多個音檔以單一借出實例**循序**轉錄，回傳結果列表（與輸入順序一致）。
-
-        faster-whisper 無「多檔一次 forward」介面，故以迴圈逐檔呼叫 :meth:`_transcribe_one`；
-        維持 ``BatchCollector`` 的 list→list 等長契約。單檔失敗回 Null Object 不連坐整批；
-        但 CUDA OOM 往上拋給 ``@oom_resilient`` 重試整批（與單張一致）。空輸入回 ``[]``。
-        """
-        if not audio_paths:
-            # 早退：空輸入直接回空列表，避免下游零長度迭代誤判
-            return []
-
-        results: list[dict] = []
-        for path in audio_paths:
-            try:
-                results.append(self._transcribe_one(path))
-            except Exception as e:
-                # OOM 往上拋觸發整批重試；其餘單檔回等長 Null Object（下游 zip 不錯位）
-                if is_cuda_oom(e):
-                    raise
-                print(f"[Whisper Batch Error] 轉錄失敗（{path}）: {e}")
-                results.append({"text": "", "chunks": [], "language": _DEFAULT_LANGUAGE, "error": str(e)})
-        return results

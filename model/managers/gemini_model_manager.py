@@ -45,6 +45,9 @@ from config.model_config import (
     GEMINI_VIDEO_DEFAULT_MIME,
 )
 from model.infra.usage_ledger import phase_for_mode, record_usage
+import logging
+
+logger = logging.getLogger(__name__)
 
 # analyze_media 的媒體型別參數值（與 semantic_*_stage 傳入字串對齊，集中為常數免 magic string）
 MEDIA_TYPE_IMAGE = "image"
@@ -170,7 +173,7 @@ class GeminiModelManager(BaseModelManager):
             self._record(response, model, mode)
             return self._parse_json_output(response.text)
         except Exception as e:
-            print(f"[Gemini API Error] 推理失敗: {str(e)}")
+            logger.error(f"[Gemini API Error] 推理失敗: {str(e)}")
             return _failure_result()
 
     def _analyze_via_file_api(self, video_path: str, spec, model: str, mode: TaskMode) -> dict:
@@ -180,7 +183,7 @@ class GeminiModelManager(BaseModelManager):
         """
         video_file = None
         try:
-            print(f"[Gemini API] 正在上傳影片至雲端: {video_path}")
+            logger.info(f"[Gemini API] 正在上傳影片至雲端: {video_path}")
             video_file = self.client.files.upload(file=video_path)
 
             # 輪詢等待 Gemini 後台處理影片完成
@@ -197,7 +200,7 @@ class GeminiModelManager(BaseModelManager):
             if video_file.state.name == _FILE_STATE_FAILED:
                 raise ValueError("Gemini 影片處理失敗。")
 
-            print("[Gemini API] 開始進行語意與時間碼推論...")
+            logger.info("[Gemini API] 開始進行語意與時間碼推論...")
             response = self.client.models.generate_content(
                 model=model,
                 contents=[video_file, spec.text],
@@ -208,7 +211,7 @@ class GeminiModelManager(BaseModelManager):
             return self._parse_json_output(response.text)
 
         except Exception as e:
-            print(f"[Gemini API Error] 推理失敗: {str(e)}")
+            logger.error(f"[Gemini API Error] 推理失敗: {str(e)}")
             return _failure_result()
         finally:
             # 確保上傳的檔案會被刪除，保護隱私與配額
@@ -217,7 +220,7 @@ class GeminiModelManager(BaseModelManager):
                     # 清理成功屬預期行為，不印 log；僅在刪除失敗時警告（涉及配額與隱私風險）
                     self.client.files.delete(name=video_file.name)
                 except Exception as e:
-                    print(f"[Gemini API Warning] 無法刪除雲端暫存檔: {e}")
+                    logger.warning(f"[Gemini API Warning] 無法刪除雲端暫存檔: {e}")
 
     def generate_text(self, mode: TaskMode, prompt: str, schema: type[BaseModel] | None = None) -> str:
         """

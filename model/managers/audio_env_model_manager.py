@@ -21,6 +21,9 @@ from model.infra.base_model_manager import (
 )
 from config.media_processor_config import AUDIO_ENV_TRANSIENT_VRAM_GB
 from config.model_config import AUDIO_ENV_TOP_K, AUDIO_SAMPLING_RATE, AUDIO_ENV_MIN_SCORE
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # top-k 分數輸出的四捨五入小數位數（命名常數，避免 magic number；沿用單張歷史行為）
@@ -88,7 +91,7 @@ class AudioEnvModelManager(BaseModelManager):
             # CUDA OOM 往上拋給 @oom_resilient 重試；其餘維持 Null Object（空列表）
             if is_cuda_oom(e):
                 raise
-            print(f"[AudioEnv Error] 環境音分類失敗: {e}")
+            logger.error(f"[AudioEnv Error] 環境音分類失敗: {e}")
             return []
         finally:
             if torch.cuda.is_available():
@@ -130,7 +133,7 @@ class AudioEnvModelManager(BaseModelManager):
             # CUDA OOM 往上拋給 @oom_resilient 重試；其餘整批回等長 Null Object（下游 zip 不錯位）
             if is_cuda_oom(e):
                 raise
-            print(f"[AudioEnv Batch Error] 環境音批次分類失敗: {e}")
+            logger.error(f"[AudioEnv Batch Error] 環境音批次分類失敗: {e}")
             return [[] for _ in audio_paths]
         finally:
             if torch.cuda.is_available():

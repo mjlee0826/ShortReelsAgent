@@ -5,15 +5,10 @@ PipelineBuilder:依 asset 類型與策略組裝 Pipeline 依賴圖 (Builder Patt
 只拿成品 Pipeline,不需知道 Stage 細節。以 :class:`StageNode` 宣告**每個 Stage 的真依賴**,
 由 Pipeline 以拓樸順序排程 —— 無依賴的 Stage 真正並行、不互相 block。
 
-各 Pipeline 的依賴圖見對應的 build 方法;``USE_LEGACY_*_PIPELINE`` 旗標可回退單節點 Legacy 供 A/B 逐欄一致回歸。
+各 Pipeline 的依賴圖見對應的 build 方法。（Legacy 單節點回退路徑已於逐欄一致 A/B 驗收後移除。）
 """
 from __future__ import annotations
 
-from config.pipeline_config import (
-    COMPLEX_AUDIO_VIA_GEMINI,
-    USE_LEGACY_IMAGE_PIPELINE,
-    USE_LEGACY_VIDEO_PIPELINE,
-)
 from media_processor.pipeline.context import AssetContext, MediaKind
 from media_processor.pipeline.node import StageNode
 from media_processor.pipeline.pipeline import Pipeline
@@ -29,7 +24,6 @@ from media_processor.pipeline.stages.tech_score_stage import TechScoreStage
 from media_processor.pipeline.stages.assembly_image_stage import AssemblyImageStage
 from media_processor.pipeline.stages.decode_image_stage import DecodeImageStage
 from media_processor.pipeline.stages.exif_stage import ExifStage
-from media_processor.pipeline.stages.legacy.legacy_image_stage import LegacyImagePipelineStage
 from media_processor.pipeline.stages.semantic_image_stage import SemanticImageStage
 
 # ── 影片專屬 Stage ────────────────────────────────────────────────────────────
@@ -37,14 +31,13 @@ from media_processor.pipeline.stages.assembly_video_stage import AssemblyVideoSt
 from media_processor.pipeline.stages.audio_env_stage import AudioEnvStage
 from media_processor.pipeline.stages.audio_extraction_stage import AudioExtractionStage
 from media_processor.pipeline.stages.decode_video_stage import DecodeVideoStage
-from media_processor.pipeline.stages.legacy.legacy_video_stage import LegacyVideoPipelineStage
 from media_processor.pipeline.stages.motion_intensity_stage import MotionIntensityStage
 from media_processor.pipeline.stages.scene_cut_stage import SceneCutStage
 from media_processor.pipeline.stages.semantic_video_stage import SemanticVideoStage
 from media_processor.pipeline.stages.vad_stage import VadStage
 from media_processor.pipeline.stages.whisper_stage import WhisperStage
 
-# Pipeline 名稱(legacy 與細粒度兩種編排共用同一識別,下游無感)
+# Pipeline 名稱
 _IMAGE_PIPELINE_NAME = "image_pipeline"
 _VIDEO_PIPELINE_NAME = "video_pipeline"
 
@@ -62,16 +55,13 @@ class PipelineBuilder:
 
     def _build_image_pipeline(self, context: AssetContext) -> Pipeline:
         """
-        圖片 Pipeline(DAG 表達,可旗標回退 Legacy)。
+        圖片 Pipeline(DAG 表達)。
 
         依賴圖:``decode → {tech, semantic, aes, cv, face, exif} → assembly``。主體框改由 semantic(Qwen)
         直接輸出,無效時退臉部 / 全畫面安全框,故已移除 U²-Net SaliencyStage。
         評分與過濾已解耦:不再有硬性 reject 短路(避免 MUSIQ 單訊號低估誤刪好素材),tech 退為
         decode 後的平行 Stage 之一,只負責算分寫入 metadata;畫質取捨改由 ContextCompressor 寬容把關。
         """
-        if USE_LEGACY_IMAGE_PIPELINE:
-            return Pipeline([StageNode(LegacyImagePipelineStage())], name=_IMAGE_PIPELINE_NAME)
-
         decode = DecodeImageStage()
         # decode 之後全部並行(各只依賴代表幀);semantic 依策略走 Qwen / Gemini
         parallel = [
@@ -92,9 +82,7 @@ class PipelineBuilder:
     # ── 影片 ─────────────────────────────────────────────────────────────────
 
     def _build_video_pipeline(self, context: AssetContext) -> Pipeline:
-        """影片 Pipeline:旗標回退 Legacy,否則依 strategy 建 Simple / Complex 依賴圖。"""
-        if USE_LEGACY_VIDEO_PIPELINE:
-            return Pipeline([StageNode(LegacyVideoPipelineStage())], name=_VIDEO_PIPELINE_NAME)
+        """影片 Pipeline:依 strategy 建 Simple / Complex / Template 依賴圖。"""
         if context.video_strategy == VideoStrategy.COMPLEX:
             return self._build_complex_video_pipeline(context)
         if context.video_strategy == VideoStrategy.TEMPLATE:
@@ -146,16 +134,14 @@ class PipelineBuilder:
         """
         Complex 影片依賴圖(所有工作 decode 後全並行;Gemini 直接讀原始影片)。
 
-        ``decode → {tech, aes, semantic(Gemini), scene, cv, face} → assembly``;音訊來源由
-        ``COMPLEX_AUDIO_VIA_GEMINI`` 旗標決定:
-          - 開啟(預設):**不建** audio_extract/vad/whisper/audio_env,音訊欄位改由 semantic(Gemini)
-            一併輸出並寫回 VideoWork(省 GPU、消除與 Gemini「聆聽」的重複勞動)。
-          - 關閉(回退):重建 ``audio_extract→vad→whisper`` + ``audio_env``,音訊由 Whisper/AudioEnv 產出。
+        ``decode → {tech, aes, semantic(Gemini), scene, cv, face} → assembly``。音訊欄位
+        （has_speech / 逐字稿 / 環境音）由 semantic(Gemini) 一併輸出並寫回 VideoWork——不建
+        VAD/Whisper/AudioEnv 鏈（省 GPU、消除與 Gemini「聆聽」的重複勞動；品質已驗收轉正）。
         tech / aes 對代表幀算畫質 / 美學分(與 Simple/Image 同一條 Stage,只算分、不 gate)。逐 event
         主體框的正規化已併入 AssemblyVideoStage。
         """
         decode = DecodeVideoStage()
-        # 代表幀畫質 / 美學評分 + 場景 / 視覺特徵 / 臉部(與音訊來源無關,恆建)
+        # 代表幀畫質 / 美學評分 + 場景 / 視覺特徵 / 臉部
         tech = TechScoreStage()
         aes = AesScoreStage()
         scene = SceneCutStage()
@@ -164,35 +150,13 @@ class PipelineBuilder:
         semantic = SemanticVideoStage(context.video_strategy)  # COMPLEX → Gemini(API)
 
         decode_name = decode.meta.name
+        parallel = [tech, aes, scene, cv, face, semantic]
         nodes = [
             StageNode(decode),
-            StageNode(tech, (decode_name,)),
-            StageNode(aes, (decode_name,)),
-            StageNode(scene, (decode_name,)),
-            StageNode(cv, (decode_name,)),
-            StageNode(face, (decode_name,)),
-            StageNode(semantic, (decode_name,)),              # Gemini 直接讀原始影片,decode 後即可上傳
+            # Gemini 直接讀原始影片,decode 後即可上傳;其餘各對代表幀 / 音軌並行
+            *[StageNode(stage, (decode_name,)) for stage in parallel],
+            StageNode(AssemblyVideoStage(), tuple(stage.meta.name for stage in parallel)),
         ]
-        # Assembly 依賴:視覺 / 語意群恆含;音訊鏈(whisper/audio_env)只在旗標關閉時納入
-        assembly_deps = [
-            tech.meta.name, aes.meta.name, scene.meta.name,
-            cv.meta.name, face.meta.name, semantic.meta.name,
-        ]
-        if not COMPLEX_AUDIO_VIA_GEMINI:
-            # 回退路徑:重建原 Whisper 音訊鏈(全拆:vad→whisper 語音鏈;audio_env 獨立並行)
-            audio_extract = AudioExtractionStage()
-            vad = VadStage()
-            whisper = WhisperStage()
-            audio_env = AudioEnvStage()
-            nodes += [
-                StageNode(audio_extract, (decode_name,)),
-                StageNode(vad, (audio_extract.meta.name,)),
-                StageNode(whisper, (vad.meta.name,)),
-                StageNode(audio_env, (audio_extract.meta.name,)),
-            ]
-            assembly_deps += [whisper.meta.name, audio_env.meta.name]
-
-        nodes.append(StageNode(AssemblyVideoStage(), tuple(assembly_deps)))
         return Pipeline(nodes, name=_VIDEO_PIPELINE_NAME)
 
     def _build_template_video_pipeline(self, context: AssetContext) -> Pipeline:

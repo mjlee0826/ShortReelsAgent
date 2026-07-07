@@ -33,6 +33,9 @@ from media_processor.image_strategy import ImageStrategy
 from media_processor.pipeline.scheduler.hybrid_scheduler import HybridScheduler
 from media_processor.pipeline.utils.startup_report import StartupReporter
 from media_processor.video_strategy import DEFAULT_VIDEO_STRATEGY, VideoStrategy
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_video_strategy(strategy_value: str | None) -> VideoStrategy:
@@ -85,10 +88,10 @@ class PipelineRunner:
         # Phase 1 最近一次 run 的總耗時(秒);run() 結束時寫入,供外部查詢 / 測試
         self.last_run_elapsed_sec: float | None = None
 
-        print(f"[PipelineRunner] {self._registry.describe()}")
+        logger.info(f"[PipelineRunner] {self._registry.describe()}")
         # 印啟動規劃佈局表(GPU VRAM 規劃放置 + 各 pool 並行度),讓使用者一眼確認資源分佈;
         # 實際載權重延後到 warm_up()(lifespan 於 fork 後呼叫),此處不載權重
-        print(StartupReporter(
+        logger.info(StartupReporter(
             capacity_manager=self._model_pool_registry.capacity,
             executor_registry=self._registry,
             max_assets_parallel=max_assets_parallel,
@@ -103,7 +106,7 @@ class PipelineRunner:
         避免 import 副作用與 CUDA-fork 不相容(見 docs/blueprint_prep_design.md §6)。
         依 capacity 規劃優先序預載(Qwen 多卡常駐、VRAM 不足自動降 lazy);無 CUDA 時自動 no-op。
         """
-        print("[PipelineRunner] 啟動期依 capacity 規劃預載熱門模型...")
+        logger.info("[PipelineRunner] 啟動期依 capacity 規劃預載熱門模型...")
         self._model_pool_registry.warm_up()
 
     def run(
@@ -162,7 +165,7 @@ class PipelineRunner:
                 watchdog.stop()
             # 計時與摘要寫在 finally,例外中斷也能看到已花多久
             self.last_run_elapsed_sec = time.perf_counter() - start_ts
-            print(
+            logger.info(
                 f"[PipelineRunner] Phase 1 處理 {len(contexts)} 個素材完成,"
                 f"總耗時 {self.last_run_elapsed_sec:.1f}s"
                 f"(平均 {self.last_run_elapsed_sec / len(contexts):.1f}s/素材)"
@@ -219,7 +222,7 @@ class PipelineRunner:
                 media_kind = derive_media_kind(file_path)
             except ValueError:
                 # 理論上呼叫端已過濾;防呆跳過不支援的副檔名
-                print(f"[PipelineRunner] 跳過不支援的檔案: {os.path.basename(file_path)}")
+                logger.info(f"[PipelineRunner] 跳過不支援的檔案: {os.path.basename(file_path)}")
                 continue
             # 素材身分 = 相對 project root 的 relpath(正斜線);與 collect_asset_files / 策略 meta 鍵一致
             asset_id = os.path.relpath(file_path, base_dir).replace(os.sep, "/")

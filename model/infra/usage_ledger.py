@@ -29,7 +29,12 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Iterator, Optional
 
-from config.pricing_config import TOKENS_PER_MILLION, ModelPricing, get_pricing
+from config.pricing_config import (
+    ANTHROPIC_CACHE_WRITE_MULTIPLIER,
+    TOKENS_PER_MILLION,
+    ModelPricing,
+    get_pricing,
+)
 from prompt_manager.task_mode import TaskMode
 
 # 金額在輸出 dict 內的小數位數（避免浮點雜訊；cents 以下精度已足夠）
@@ -155,8 +160,9 @@ def record_usage(response, model: str, phase: Phase) -> None:
     if usage is None:  # 某些錯誤回應可能無 usage
         return
 
-    pricing = get_pricing(model)
     input_tokens = _safe_int(getattr(usage, "prompt_token_count", 0))
+    # 階梯價(Gemini 3.1 Pro)：>200k prompt 換高檔費率;無階梯模型 rates_for_prompt 為 no-op
+    pricing = get_pricing(model).rates_for_prompt(input_tokens)
     # 思考 token 計費算輸出,務必併入(漏算會低估 Phase 4 等思考模型成本)
     output_tokens = (
         _safe_int(getattr(usage, "candidates_token_count", 0))
@@ -178,6 +184,10 @@ def record_anthropic_usage(response, model: str, phase: Phase) -> None:
     供 ``ClaudeModelManager`` 在 director 出口呼叫。與 Gemini 版 ``record_usage`` 對稱：兩者皆為
     「各家 usage 物件的 Adapter」，最終都寫進同一本 ``UsageLedger``，各自隔離供應商欄位差異。
     Anthropic 的 thinking token 已計入 ``output_tokens``（輸出價），無須像 Gemini 另外併入。
+
+    Anthropic 的 ``input_tokens`` **不含**快取讀寫兩塊：``cache_read_input_tokens``（0.1× 讀取價）與
+    ``cache_creation_input_tokens``（1.25× 寫入價）都要另計——agentic loop 每輪都在寫入遞增前綴快取，
+    漏算寫入費會系統性低估 Phase 4 成本（漏算量 ≈ 整段對話累積輸入 × 1.25 × 輸入價）。
     """
     ledger = _active_ledger.get()
     if ledger is None:  # Null Object：無 job 帳本時不記
@@ -187,20 +197,29 @@ def record_anthropic_usage(response, model: str, phase: Phase) -> None:
         return
 
     pricing = get_pricing(model)
-    # input_tokens 為「未命中快取」的輸入；命中快取者另計（director 走 one-shot、通常無快取）
+    # input_tokens 為「未命中快取、也非快取寫入」的輸入；讀 / 寫快取各以其費率另計
     input_tokens = _safe_int(getattr(usage, "input_tokens", 0))
-    cached_tokens = _safe_int(getattr(usage, "cache_read_input_tokens", 0))
+    cache_read_tokens = _safe_int(getattr(usage, "cache_read_input_tokens", 0))
+    cache_write_tokens = _safe_int(getattr(usage, "cache_creation_input_tokens", 0))
     output_tokens = _safe_int(getattr(usage, "output_tokens", 0))
     cached_rate = pricing.cached_input if pricing.cached_input is not None else pricing.input_text
+    # 快取寫入費：模型未明列時以「輸入價 × 1.25」後備（Anthropic 5m TTL 官方倍率）
+    cache_write_rate = (
+        pricing.cache_write_input
+        if pricing.cache_write_input is not None
+        else pricing.input_text * ANTHROPIC_CACHE_WRITE_MULTIPLIER
+    )
     cost = (
         input_tokens / TOKENS_PER_MILLION * pricing.input_text
-        + cached_tokens / TOKENS_PER_MILLION * cached_rate
+        + cache_read_tokens / TOKENS_PER_MILLION * cached_rate
+        + cache_write_tokens / TOKENS_PER_MILLION * cache_write_rate
         + output_tokens / TOKENS_PER_MILLION * pricing.output
     )
-    # input 統計併入快取部分，讓帳本反映實際輸入量（與 Gemini 版的歸戶口徑一致）
+    # input 統計併入快取讀寫部分，讓帳本反映實際輸入量（與 Gemini 版的歸戶口徑一致）
     ledger.add(UsageRecord(
         phase=phase, model=model,
-        input_tokens=input_tokens + cached_tokens, output_tokens=output_tokens, cost_usd=cost,
+        input_tokens=input_tokens + cache_read_tokens + cache_write_tokens,
+        output_tokens=output_tokens, cost_usd=cost,
     ))
 
 

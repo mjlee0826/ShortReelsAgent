@@ -16,6 +16,9 @@ from PIL import Image
 
 from config.media_processor_config import INFERENCE_MAX_SHORT_SIDE
 from media_tools.ffmpeg_adapter import FFmpegAdapter
+import logging
+
+logger = logging.getLogger(__name__)
 
 # metadata 數值四捨五入位數(逐字對齊原 _extract_video_metadata)
 _ASPECT_RATIO_NDIGITS = 4
@@ -86,5 +89,5 @@ def grab_frame_at_time(file_path: str, time_sec: float) -> Optional[Image.Image]
             return cap_pil_resolution(pil_image)
     except Exception as e:
         # 抓幀失敗不致命(下游退預設 / 安全區),印警告協助定位
-        print(f"[VideoFrameUtils Warning] 抓幀失敗 (t={time_sec:.1f}s): {e}")
+        logger.warning(f"[VideoFrameUtils Warning] 抓幀失敗 (t={time_sec:.1f}s): {e}")
     return None

@@ -189,8 +189,16 @@ class DefaultPromptManager(BasePromptManager):
         )
         if is_refinement:
             system += (
-                "\n# 微調模式\n"
-                "首則訊息附【上一版藍圖】：只針對使用者最新指令做局部修改，未提及的部分保留原樣；改動到的素材一樣要先 view_raw 確認。\n"
+                "\n# 微調模式（局部編輯，不要整份重寫）\n"
+                "上一版藍圖已載入為【當前草稿】。工作流：\n"
+                "1. 對照使用者最新指令，判斷要動哪幾段（timeline 索引 0 起算，與驗證錯誤的 [N] 同一套）。\n"
+                "2. 用 edit_blueprint 下一批 ops 做局部修改（update_clip / insert_clip / remove_clip / "
+                "set_text_overlays / update_bgm）；一次呼叫可帶多個 op。未編輯到的部分自動保留原樣——"
+                "嚴禁為了小改動整份重寫。\n"
+                "3. 每次套用後系統會回草稿驗證結果；有錯再下 ops 修，直到通過。\n"
+                "4. 完成後呼叫 submit_blueprint【不帶參數】提交當前草稿。\n"
+                "沿用素材不需重新 view_raw；只有『新引入的素材』或『超出原用區間的片段』才要先親看。\n"
+                "若需要讀新素材資訊，get_fields / view_raw 照常可用。\n"
             )
         if has_template:
             system += (
@@ -235,11 +243,19 @@ class DefaultPromptManager(BasePromptManager):
         if template_dna:
             msg += self._format_template_skeleton(template_dna)
         if previous_timeline:
-            msg += f"\n# 上一版藍圖（微調用）\n{json.dumps(previous_timeline, ensure_ascii=False)}\n"
-        msg += (
-            "\n請開始：先掃目錄摘要鎖定候選 → get_fields 深讀關鍵欄位 → view_raw 親眼看你要用的素材片段 → "
-            "（必要時 correct_metadata 修正、卡點前 get_music_beats）→ 確認後 submit_blueprint。"
-        )
+            msg += (
+                "\n# 上一版藍圖（已載入為當前草稿；用 edit_blueprint 局部修改）\n"
+                f"{json.dumps(previous_timeline, ensure_ascii=False)}\n"
+            )
+            msg += (
+                "\n請開始微調：判斷指令影響哪幾段 → edit_blueprint 下 ops 局部修改（未提及的部分保留）→ "
+                "驗證通過後 submit_blueprint（不帶參數）提交草稿。"
+            )
+        else:
+            msg += (
+                "\n請開始：先掃目錄摘要鎖定候選 → get_fields 深讀關鍵欄位 → view_raw 親眼看你要用的素材片段 → "
+                "（必要時 correct_metadata 修正、卡點前 get_music_beats）→ 確認後 submit_blueprint。"
+            )
         return msg
 
     @staticmethod

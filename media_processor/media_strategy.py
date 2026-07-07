@@ -28,38 +28,9 @@ class MediaStrategy(ABC):
         """執行素材感知分析，回傳標準格式的結果 dict。"""
         pass
 
-    # ── Saliency Bbox ─────────────────────────────────────────────────────────
-
-    @staticmethod
-    def _compute_saliency_bbox(
-        mask: np.ndarray, width: int, height: int
-    ) -> SubjectBbox:
-        """
-        從顯著性遮罩計算主體必須保留的矩形區域（百分比座標）。
-        取非零像素的 min/max x,y 作為 bbox；遮罩全黑時退回全畫面 (0,0,100,100)。
-        """
-        nonzero = cv2.findNonZero(mask)
-        if nonzero is not None:
-            x, y, w, h = cv2.boundingRect(nonzero)
-            return SubjectBbox(
-                x1=round(x / width * 100, 1),
-                y1=round(y / height * 100, 1),
-                x2=round((x + w) / width * 100, 1),
-                y2=round((y + h) / height * 100, 1),
-            )
-        return SubjectBbox(x1=0.0, y1=0.0, x2=100.0, y2=100.0)
-
-    @staticmethod
-    def _union_bboxes(bboxes: list[SubjectBbox]) -> SubjectBbox:
-        """多幀 SubjectBbox 取聯集，確保主體在整段影片中不被裁切。"""
-        if not bboxes:
-            return SubjectBbox(x1=0.0, y1=0.0, x2=100.0, y2=100.0)
-        return SubjectBbox(
-            x1=min(b.x1 for b in bboxes),
-            y1=min(b.y1 for b in bboxes),
-            x2=max(b.x2 for b in bboxes),
-            y2=max(b.y2 for b in bboxes),
-        )
+    # ── Crop Feasibility ─────────────────────────────────────────────────────
+    # （U²-Net saliency bbox 相關 helper 已隨 legacy processors 一併移除：主體框
+    #   改由 semantic VLM 直接輸出,無效退臉部 / 全幅安全框。）
 
     @staticmethod
     def _compute_crop_feasibility(bbox: SubjectBbox, aspect_ratio: float) -> str:

@@ -47,6 +47,9 @@ from ingestion_engine.models import (
     SYNC_STATUS_ACTIVE,
     SyncReport,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -224,9 +227,9 @@ def _list_projects_sync(user_id: str) -> list[dict]:
             meta["cover_thumbnail_url"] = _cover_service.resolve_cover_url(user_id, name, project_dir)
             projects.append(meta)
         except Exception as exc:  # noqa: BLE001 - 單一專案的任何意外都不該讓整份列表 500
-            print(f"[Projects Error] 略過無法讀取的專案 '{name}': {exc}")
+            logger.error(f"[Projects Error] 略過無法讀取的專案 '{name}': {exc}")
             continue
-    print(f"[Projects] 列出使用者 '{user_id[:8]}...' 的 {len(projects)} 個專案")
+    logger.info(f"[Projects] 列出使用者 '{user_id[:8]}...' 的 {len(projects)} 個專案")
     return projects
 
 
@@ -278,7 +281,7 @@ async def create_project_from_drive(req: CreateFromDriveRequest, user_id: str = 
     project_meta_store.write(project_dir, meta)
     _schedule_first_sync(user_id, name)
 
-    print(f"[Projects] 建立雲端來源專案: '{name}' (使用者 '{user_id[:8]}...')")
+    logger.info(f"[Projects] 建立雲端來源專案: '{name}' (使用者 '{user_id[:8]}...')")
     return meta
 
 
@@ -335,7 +338,7 @@ async def create_project_from_folder(
     project_meta_store.write(project_dir, meta)
     _schedule_local_processing(user_id, name, auto_analyze)
 
-    print(f"[Projects] 建立本機來源專案: '{name}'（{saved} 個素材，使用者 '{user_id[:8]}...'）")
+    logger.info(f"[Projects] 建立本機來源專案: '{name}'（{saved} 個素材，使用者 '{user_id[:8]}...'）")
     return meta
 
 
@@ -417,9 +420,9 @@ def _on_first_sync_done(project_name: str):
         try:
             report = task.result()
         except Exception as exc:  # noqa: BLE001 - 背景首同步任何意外都只記錄，不影響請求流程
-            print(f"⚠️ [Projects] 首同步未預期失敗（{project_name}）：{exc}")
+            logger.warning(f"⚠️ [Projects] 首同步未預期失敗（{project_name}）：{exc}")
             return
-        print(f"[Projects] 首同步完成（{project_name}）：status={report.sync_status}, "
+        logger.info(f"[Projects] 首同步完成（{project_name}）：status={report.sync_status}, "
               f"downloaded={report.downloaded}, phase1_ran={report.phase1_ran}, errors={report.errors}")
     return _callback
 
@@ -466,7 +469,7 @@ def _schedule_local_processing(user_id: str, project_name: str, auto_analyze: bo
 
     # 與其他 Phase 1 路徑互斥；剛建立的專案幾乎不會被占用，占用則略過、留 pending 待手動觸發
     if not phase1_lock.acquire(user_id, project_name, blocking=False):
-        print(f"⚠️ [Projects] 本機專案 '{project_name}' Phase 1 鎖被占用，略過自動分析（待手動觸發）")
+        logger.warning(f"⚠️ [Projects] 本機專案 '{project_name}' Phase 1 鎖被占用，略過自動分析（待手動觸發）")
         return
 
     # job_id 須在 work 開跑前就緒：launch 回傳後同步填入（中間無 await，work 於 event loop 讓出後
@@ -506,9 +509,9 @@ def _on_local_processing_done(project_name: str):
         try:
             task.result()
         except Exception as exc:  # noqa: BLE001 - 背景標準化任何意外都只記錄，不影響請求流程
-            print(f"⚠️ [Projects] 本機專案標準化未預期失敗（{project_name}）：{exc}")
+            logger.warning(f"⚠️ [Projects] 本機專案標準化未預期失敗（{project_name}）：{exc}")
             return
-        print(f"[Projects] 本機專案標準化完成（{project_name}）")
+        logger.info(f"[Projects] 本機專案標準化完成（{project_name}）")
     return _callback
 
 
@@ -522,4 +525,4 @@ async def delete_project(project_name: str, user_id: str = Depends(verify_token)
         raise HTTPException(status_code=404, detail=f"找不到專案: {project_name}")
 
     shutil.rmtree(project_dir)
-    print(f"[Projects] 已刪除專案: '{project_name}' (使用者 '{user_id[:8]}...')")
+    logger.info(f"[Projects] 已刪除專案: '{project_name}' (使用者 '{user_id[:8]}...')")

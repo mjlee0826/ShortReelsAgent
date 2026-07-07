@@ -40,6 +40,9 @@ from config.media_processor_config import OOM_RETRY_MAX_ATTEMPTS, OOM_RETRY_BACK
 from model.infra.gpu_gate import GpuGate, BinaryGate, NO_PRIORITY
 from model.infra.resource_wait_clock import ResourceWaitClock
 from shared.json_utils import parse_json_lenient
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # 預設槽位 id：呼叫端未指定時用此值，向後相容既有「一卡一 instance」配置
@@ -116,13 +119,13 @@ def oom_resilient(method):
                 # 鎖此刻已隨例外往外釋放，於鎖外釋放 VRAM 讓他人騰出空間
                 BaseModelManager._release_gpu_memory()
                 if attempt < OOM_RETRY_MAX_ATTEMPTS:
-                    print(
+                    logger.info(
                         f"[OOM Retry] {type(self).__name__} 第 {attempt}/{OOM_RETRY_MAX_ATTEMPTS} "
                         f"次遇 CUDA OOM，釋放 VRAM 後重試：{exc}"
                     )
                     # 線性 backoff：給同卡其他 forward / 鄰居 process 時間釋放 VRAM
                     time.sleep(OOM_RETRY_BACKOFF_SEC * attempt)
-        print(
+        logger.info(
             f"[OOM Retry] {type(self).__name__} 連續 {OOM_RETRY_MAX_ATTEMPTS} 次 CUDA OOM，放棄重試"
         )
         raise last_oom
@@ -297,16 +300,16 @@ class BaseModelManager(ABC):
 
         模型載入是整條流程中最耗時的一次性操作（可能含權重下載 / 量化），
         且每個 (device, slot) singleton 只發生一次，故值得印出供觀察；
-        所有 Manager 共用同一入口，日後要改成正式 logging 只需改這一處。
+        所有 Manager 共用同一入口（已走標準 logging，等級 / 格式由 shared.logging_config 統一）。
         子類別 ``_initialize`` 把載入邏輯包進此 context manager 即可。
         """
         # device 屬性可能尚未設定（rembg / silero 由套件內部自行管理裝置）
         device = getattr(self, "device", None) or "內部管理"
-        print(f"[{model_name}] 開始載入模型 (device={device})")
+        logger.info(f"[{model_name}] 開始載入模型 (device={device})")
         start = time.perf_counter()
         yield
         # 載入失敗時例外會往上拋，不會印出「完成」，符合直覺
-        print(f"[{model_name}] 模型載入完成，耗時 {time.perf_counter() - start:.1f}s")
+        logger.info(f"[{model_name}] 模型載入完成，耗時 {time.perf_counter() - start:.1f}s")
 
     def _uses_gpu(self) -> bool:
         """

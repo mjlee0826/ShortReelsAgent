@@ -38,6 +38,9 @@ from config.model_config import (
     SCORE_MIN,
     SCORE_MAX,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class LAIONAestheticMLP(nn.Module):
@@ -85,7 +88,7 @@ class LaionModelManager(BaseModelManager):
             os.makedirs(MODEL_WEIGHTS_DIR, exist_ok=True)
             weight_path = os.path.join(MODEL_WEIGHTS_DIR, LAION_WEIGHT_FILENAME)
             if not os.path.exists(weight_path):
-                print("[LAION] 首次使用，正在下載 Aesthetic 權重...")
+                logger.info("[LAION] 首次使用，正在下載 Aesthetic 權重...")
                 urllib.request.urlretrieve(LAION_WEIGHT_URL, weight_path)
 
             # weights_only=True 防止反序列化任意程式碼（PyTorch >= 2.0 安全要求）
@@ -113,7 +116,7 @@ class LaionModelManager(BaseModelManager):
             # CUDA OOM 往上拋給 @oom_resilient 重試；其餘維持 Null Object（保底分數）
             if is_cuda_oom(e):
                 raise
-            print(f"[Aesthetic Scorer Error] 美學評估失敗: {e}")
+            logger.error(f"[Aesthetic Scorer Error] 美學評估失敗: {e}")
             return DEFAULT_FALLBACK_SCORE
         finally:
             if torch.cuda.is_available():
@@ -148,7 +151,7 @@ class LaionModelManager(BaseModelManager):
             # CUDA OOM 往上拋給 @oom_resilient 重試；其餘整批回保底分數
             if is_cuda_oom(e):
                 raise
-            print(f"[Aesthetic Scorer Batch Error] 美學批次評估失敗: {e}")
+            logger.error(f"[Aesthetic Scorer Batch Error] 美學批次評估失敗: {e}")
             return [DEFAULT_FALLBACK_SCORE] * len(pil_images)
         finally:
             if torch.cuda.is_available():

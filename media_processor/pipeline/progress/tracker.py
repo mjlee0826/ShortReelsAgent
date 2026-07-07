@@ -10,6 +10,9 @@ from typing import Optional
 
 from media_processor.pipeline.progress.events import ProgressEvent, ProgressEventType
 from media_processor.pipeline.progress.observer import ProgressObserver
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ProgressTracker:
@@ -67,7 +70,7 @@ class ProgressTracker:
                 observer.on_event(event)
             except Exception as exc:
                 # Observer 失敗隔離：印 warning 但繼續通知其他 Observer
-                print(
+                logger.info(
                     f"[ProgressTracker Warning] observer={observer.__class__.__name__} "
                     f"raised {exc.__class__.__name__}: {exc}"
                 )

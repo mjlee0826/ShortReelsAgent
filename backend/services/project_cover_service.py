@@ -18,6 +18,9 @@ from typing import Optional
 from backend.utils.asset_discovery import PHASE1_METADATA_FILENAME, to_abs_path
 from backend.services.thumbnail_service import ThumbnailService
 from media_processor.pipeline.context import derive_media_kind
+import logging
+
+logger = logging.getLogger(__name__)
 
 # phase1_assets_metadata.json 每筆條目的欄位鍵(具名常數,避免散落 magic string)
 _ENTRY_KEY_FILE = "file"                      # 素材身分 relpath(如 raw/photo.jpg)
@@ -54,7 +57,7 @@ class ProjectCoverService:
             media_kind = derive_media_kind(relpath)
             return self._thumbnails.ensure_url(user_id, project, relpath, src_path, media_kind)
         except Exception as exc:  # noqa: BLE001 - 封面非關鍵路徑,任何意外都退 None 改顯佔位
-            print(f"[ProjectCoverService Warning] 解析封面失敗 ({project}): {exc}")
+            logger.warning(f"[ProjectCoverService Warning] 解析封面失敗 ({project}): {exc}")
             return None
 
     @staticmethod

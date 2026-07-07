@@ -42,6 +42,9 @@ from config.media_processor_config import (
 )
 from model.infra.base_model_manager import BaseModelManager, is_cuda_oom
 from model.infra.resource_wait_clock import ResourceWaitClock
+import logging
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModelManager)
 
@@ -219,7 +222,7 @@ class ModelPool(Generic[T]):
                 break
             # 逾時：盡力放行（讓 forward 去試，OOM 由 oom_resilient 兜底），避免無限卡死
             if time.monotonic() >= deadline:
-                print(
+                logger.info(
                     f"[ModelPool] cuda:{device_id} free {free_gb:.2f}GB < 需求 {required_gb:.2f}GB "
                     f"等待逾 {self._max_wait_sec}s，盡力放行（OOM 由重試兜底）"
                 )
@@ -279,7 +282,7 @@ class ModelPool(Generic[T]):
                 last_oom = exc
                 device_id = getattr(instance, "_device_id", None)
                 tried_devices.add(device_id)
-                print(
+                logger.info(
                     f"[ModelPool failover] {type(instance).__name__} cuda:{device_id} 持續 OOM，"
                     f"改換其他卡重試（已試 {sorted(d for d in tried_devices if d is not None)}）"
                 )

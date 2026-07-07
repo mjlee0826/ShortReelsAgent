@@ -17,14 +17,16 @@ import os
 
 from config.app_config import RAW_SUBDIR, STANDARDIZED_MARKER, STANDARDIZED_SUBDIR
 from config.media_formats import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
-from config.project_artifacts import PHASE1_METADATA_FILENAME, PHASE1_STATUS_FILENAME
+# PHASE1_* 檔名由 config.project_artifacts 提供;此處以「``X as X`` 再匯出慣用法」(PEP 484,
+# linter 不誤判未使用)re-export,維持下游既有 `from asset_discovery import PHASE1_*` 相容
+# (asset_repository / cover / director / artifact_store)。
+from config.project_artifacts import (
+    PHASE1_METADATA_FILENAME as PHASE1_METADATA_FILENAME,
+    PHASE1_STATUS_FILENAME as PHASE1_STATUS_FILENAME,
+)
 
 # Phase 1 感知分析支援的媒體副檔名(圖片 ∪ 影片;不含純音訊,音訊由 Phase 3 處理)
 SUPPORTED_MEDIA_EXTENSIONS: frozenset[str] = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
-
-# PHASE1_STATUS_FILENAME / PHASE1_METADATA_FILENAME 改由 config.project_artifacts 提供(見頂部 import),
-# 於此 re-export 維持既有 `from asset_discovery import PHASE1_*` 的下游相容(asset_repository / cover / director)。
-# 標準化標記亦改用 config.app_config.STANDARDIZED_MARKER(原始檔已有此版本則被略過)。
 
 
 def to_abs_path(project_dir: str, relpath: str) -> str:

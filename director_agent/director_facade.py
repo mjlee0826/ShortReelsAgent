@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 from config.director_config import DIRECTOR_AGENTIC_MAX_STEPS, DIRECTOR_MAX_CRITIC_RETRIES
 from director_agent.agent_loop import field_manifest
 from director_agent.agent_loop.agent_context import AgentContext
@@ -5,6 +7,9 @@ from director_agent.agent_loop.critic_gate import CriticGate
 from director_agent.agent_loop.loop_runner import DirectorAgentLoop, build_director_registry
 from director_agent.context_compressor import ContextCompressor
 from model.managers.director_provider import get_director_manager
+import logging
+
+logger = logging.getLogger(__name__)
 
 # ── 藍圖預設值（禁 magic number / magic string，集中具名）──────────────────────────
 # 運鏡 / 卡點為純 render-time 視覺旗標，與 AI 決策無關：生成時固定給開啟預設，
@@ -48,7 +53,7 @@ class DirectorFacade:
         :param tracker: (選填) ProgressTracker，串流導演 thinking / 工具旁白到 WS
         :param project_dir: (選填) 專案絕對路徑，供 ``view_raw`` 解析素材實體檔
         """
-        print("\n🎬 [Director Agent] 導演大腦啟動（agentic loop）...")
+        logger.info("\n🎬 [Director Agent] 導演大腦啟動（agentic loop）...")
 
         # 1. 預處理：資料降維 + 建 id → 完整 dossier 反查表
         compressed_assets = self.compressor.compress(raw_assets)
@@ -72,15 +77,19 @@ class DirectorFacade:
         )
 
         # 3. 跑 agentic loop（get_fields / view_raw / view_template / correct_metadata / get_music_beats /
-        #    ask_user / submit）；有範本才把範本 handle 設入 ctx 並加掛 view_template 工具
+        #    ask_user / submit）；有範本才把範本 handle 設入 ctx 並加掛 view_template 工具；
+        #    微調才載入草稿並加掛 edit_blueprint（局部編輯，取代整份重生）
+        is_refinement = bool(previous_timeline)
         template_handle = self._build_template_handle(template_dna)
         ctx = AgentContext(
             asset_index=asset_index, project_dir=project_dir or "", tracker=tracker,
             music_future=music_future, audio_dna=audio_dna, template=template_handle,
         )
-        blueprint_draft = self._build_loop(has_template=template_handle is not None).run(
-            system_prompt, user_message, ctx
-        )
+        if is_refinement:
+            self._seed_refinement_ctx(ctx, previous_timeline)
+        blueprint_draft = self._build_loop(
+            has_template=template_handle is not None, is_refinement=is_refinement
+        ).run(system_prompt, user_message, ctx)
 
         # 4. 後處理組裝（全局 FPS / 逐段預設 / 配樂保護）
         final_blueprint = self._assemble_blueprint(
@@ -95,16 +104,17 @@ class DirectorFacade:
     def resume_timeline(self, resume_state: dict, answer: str, raw_assets: list,
                         regenerate_music: bool = True, previous_bgm_track: dict = None,
                         audio_dna: dict = None, tracker=None, project_dir: str = "",
-                        template_dna: dict = None) -> dict:
+                        template_dna: dict = None, is_refinement: bool = False) -> dict:
         """
         B2 續跑：以使用者答案接回暫停的 loop，回最終藍圖（dict）。導演若再次 ask_user 仍會往上拋。
 
-        重建 ctx：重新 compress 素材 → 還原已看範圍 viewed 與 metadata 修正 corrections，使必讀強制 /
-        修正狀態延續。素材 / DNA 由 ``director_service`` 從 PHASE1/2/3 快取重載後傳入（``audio_dna`` 設入
-        ctx 供 get_music_beats 直接回；``template_dna`` 重建範本 handle 供 view_template 續用；系統提示與
-        素材目錄已在持久化的 messages 內，無須重建，但工具集須與首跑一致故依範本有無重建 registry）。
+        重建 ctx：重新 compress 素材 → 還原已看範圍 viewed / metadata 修正 corrections / 微調草稿
+        blueprint_draft，使必讀強制、修正與編輯進度延續。素材 / DNA 由 ``director_service`` 從
+        PHASE1/2/3 快取重載後傳入（``audio_dna`` 設入 ctx 供 get_music_beats 直接回；``template_dna``
+        重建範本 handle 供 view_template 續用；系統提示與素材目錄已在持久化的 messages 內，無須重建，
+        但工具集須與首跑一致故依範本有無 / 是否微調重建 registry）。
         """
-        print("\n🎬 [Director Agent] 導演大腦續跑（resume）...")
+        logger.info("\n🎬 [Director Agent] 導演大腦續跑（resume）...")
         compressed_assets = self.compressor.compress(raw_assets)
         asset_index = {asset["id"]: asset for asset in compressed_assets if asset.get("id")}
         template_handle = self._build_template_handle(template_dna)
@@ -112,23 +122,59 @@ class DirectorFacade:
             asset_index, project_dir, tracker, resume_state, audio_dna, template_handle
         )
 
-        blueprint_draft = self._build_loop(has_template=template_handle is not None).resume(
-            resume_state, answer, ctx
-        )
+        blueprint_draft = self._build_loop(
+            has_template=template_handle is not None, is_refinement=is_refinement
+        ).resume(resume_state, answer, ctx)
         return self._assemble_blueprint(
             compressed_assets, blueprint_draft, regenerate_music, previous_bgm_track
         )
 
     # ── 內部組裝 ──────────────────────────────────────────────────────────────
-    def _build_loop(self, has_template: bool = False) -> DirectorAgentLoop:
-        """組一個導演 loop（manager / 工具 / CriticGate / 收斂上限）；有範本才加掛 view_template。"""
+    def _build_loop(self, has_template: bool = False, is_refinement: bool = False) -> DirectorAgentLoop:
+        """組一個導演 loop（manager / 工具 / CriticGate / 收斂上限）；範本 / 微調決定加掛哪些工具。"""
         return DirectorAgentLoop(
             manager=get_director_manager(),
-            registry=build_director_registry(has_template),
+            registry=build_director_registry(has_template, is_refinement),
             critic_gate=CriticGate(),
             max_steps=DIRECTOR_AGENTIC_MAX_STEPS,
             max_critic_retries=DIRECTOR_MAX_CRITIC_RETRIES,
         )
+
+    @staticmethod
+    def _seed_refinement_ctx(ctx: AgentContext, previous_blueprint: dict) -> None:
+        """
+        微調模式的 ctx 初始化：上一版藍圖載入草稿 + 沿用片段視為已親看。
+
+        - 草稿只取 LLM schema 形狀的三塊（timeline / text_overlays / bgm_track），global_settings
+          由 ``_assemble_blueprint`` 後處理統一補，不入草稿。deepcopy 隔離：編輯不可污染呼叫端的
+          previous_timeline（偏好事件的 before 基準還要用它）。
+        - 已親看 seeding：上一版用到的片段區間是使用者已接受的成品內容，微調時視為已看過——
+          否則必讀強制會逼導演把沒動到的素材全部重新 view_raw 一遍（純燒 token 無資訊增量）。
+          新引入的素材 / 超出原區間的延伸仍受必讀強制。
+        """
+        ctx.blueprint_draft = {
+            "timeline": deepcopy(previous_blueprint.get("timeline") or []),
+            "text_overlays": deepcopy(previous_blueprint.get("text_overlays") or []),
+            "bgm_track": deepcopy(previous_blueprint.get("bgm_track") or {"track_id": None}),
+        }
+        for clip in ctx.blueprint_draft["timeline"]:
+            if not isinstance(clip, dict):
+                continue
+            clip_id = clip.get("clip_id")
+            if clip_id:
+                ctx.record_view(
+                    clip_id,
+                    float(clip.get("source_start") or 0.0),
+                    float(clip.get("source_end") or 0.0),
+                )
+            pip = clip.get("pip_video")
+            if isinstance(pip, dict) and pip.get("clip_id"):
+                # pip 的必讀檢查以 source_start 為點（見 ViewedBeforeUseValidator），seed 同口徑
+                ctx.record_view(
+                    pip["clip_id"],
+                    float(pip.get("source_start") or 0.0),
+                    float(pip.get("source_start") or 0.0),
+                )
 
     @staticmethod
     def _build_template_handle(template_dna: dict | None) -> dict | None:
@@ -152,7 +198,7 @@ class DirectorFacade:
     @staticmethod
     def _restore_ctx(asset_index: dict, project_dir: str, tracker, resume_state: dict,
                      audio_dna: dict = None, template: dict = None) -> AgentContext:
-        """從續跑狀態還原 ctx：重套 metadata 修正、還原已看範圍、設入重載的配樂與範本 handle。"""
+        """從續跑狀態還原 ctx：重套 metadata 修正、還原已看範圍與微調草稿、設入配樂與範本 handle。"""
         ctx = AgentContext(
             asset_index=asset_index, project_dir=project_dir or "", tracker=tracker,
             audio_dna=audio_dna, template=template,
@@ -168,6 +214,8 @@ class DirectorFacade:
             aid: [tuple(rng) for rng in ranges]
             for aid, ranges in (resume_state.get("viewed") or {}).items()
         }
+        # 還原微調草稿（edit_blueprint 的編輯進度；初次生成為 None）
+        ctx.blueprint_draft = resume_state.get("blueprint_draft")
         return ctx
 
     def _assemble_blueprint(self, compressed_assets: list, blueprint_draft: dict,
@@ -214,5 +262,5 @@ class DirectorFacade:
         if not regenerate_music and previous_bgm_track is not None:
             final_blueprint["bgm_track"] = previous_bgm_track
 
-        print(f"✅ [Director Agent] 藍圖規劃完成！(自動設定全局 FPS 為: {target_fps})")
+        logger.info(f"✅ [Director Agent] 藍圖規劃完成！(自動設定全局 FPS 為: {target_fps})")
         return final_blueprint

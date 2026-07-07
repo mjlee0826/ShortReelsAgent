@@ -31,6 +31,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+# CLI 進入點也要配置 logging：service 層已全面改 logger，未配置時 INFO 進度訊息會被吞掉
+# （本工具自身的使用者輸出仍走 print，屬 CLI 介面而非日誌）
+from shared.logging_config import setup_logging
+
+setup_logging()
+
 # 重用正規路徑的命名 / 去重 / meta 欄位邏輯,確保與 from-folder 端點零漂移
 from backend.api.projects import (
     _allocate_unique_filename,

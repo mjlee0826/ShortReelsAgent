@@ -25,6 +25,9 @@ from config.model_config import (
     MEDIAPIPE_FACE_MODEL_URL,
     MODEL_WEIGHTS_DIR,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 # 相對座標 → 百分比的換算係數與上下界（避免 magic number）
 _RATIO_TO_PERCENT = 100.0
@@ -52,7 +55,7 @@ class MediaPipeModelManager(BaseModelManager):
             os.makedirs(MODEL_WEIGHTS_DIR, exist_ok=True)
             model_path = os.path.join(MODEL_WEIGHTS_DIR, MEDIAPIPE_FACE_MODEL_FILENAME)
             if not os.path.exists(model_path):
-                print("[MediaPipe] 首次使用，正在下載臉部偵測模型...")
+                logger.info("[MediaPipe] 首次使用，正在下載臉部偵測模型...")
                 urllib.request.urlretrieve(MEDIAPIPE_FACE_MODEL_URL, model_path)
 
             # Tasks API：以 IMAGE 模式（FaceDetectorOptions 預設）建立偵測器

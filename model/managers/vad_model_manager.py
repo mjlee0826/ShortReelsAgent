@@ -16,6 +16,9 @@ L2 BudgetGate 依 ``_uses_gpu`` 自動跳過，不佔任何 GPU 預算。
 import torch
 from model.infra.base_model_manager import BaseModelManager, synchronized_inference
 from config.model_config import VAD_REPO, VAD_SAMPLING_RATE
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class VadModelManager(BaseModelManager):
@@ -51,7 +54,7 @@ class VadModelManager(BaseModelManager):
             import torchcodec  # noqa: F401 — 觸發 torchcodec._core 的 dlopen + fake-op 註冊
         except Exception as exc:
             # best-effort：缺套件 / 載入異常都不擋啟動，執行期 read_audio 仍會自行 lazy 再試
-            print(f"[VAD] warmup 預載 torchcodec 略過：{exc}")
+            logger.warning(f"[VAD] warmup 預載 torchcodec 略過：{exc}")
 
     @synchronized_inference
     def has_speech(self, audio_path: str) -> bool:
@@ -66,6 +69,6 @@ class VadModelManager(BaseModelManager):
             speech_timestamps = self.get_speech_timestamps(wav, self.model, sampling_rate=VAD_SAMPLING_RATE)
             return len(speech_timestamps) > 0
         except Exception as e:
-            print(f"[VAD Error] 語音偵測失敗: {e}")
+            logger.error(f"[VAD Error] 語音偵測失敗: {e}")
             # 保守策略：若偵測失敗，預設為有講話，交由 Whisper 處理
             return True

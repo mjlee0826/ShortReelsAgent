@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
 
-from config.pipeline_config import COMPLEX_AUDIO_VIA_GEMINI, GPU_POOL_ENABLED
+from config.pipeline_config import GPU_POOL_ENABLED
 from media_processor.pipeline.context import AssetContext
 from media_processor.pipeline.stage import ResourceType, Stage, StageMeta
 from media_processor.pipeline.work.video_work import get_video_work
@@ -61,8 +61,8 @@ class SemanticVideoStage(Stage):
         """
         依策略呼叫對應引擎,語意結果寫入 ``VideoWork.vlm_result``。
 
-        - COMPLEX → Gemini ``VIDEO_EVENT_INDEX``;``COMPLEX_AUDIO_VIA_GEMINI`` 開啟時把 Gemini
-          一併產出的音訊欄位寫回 work(取代已移除的 VAD/Whisper/AudioEnv 鏈)。
+        - COMPLEX → Gemini ``VIDEO_EVENT_INDEX``;Gemini 一併產出的音訊欄位寫回 work
+          （Complex 不建 VAD/Whisper/AudioEnv 鏈,品質已驗收轉正）。
         - SIMPLE → 本地 Qwen 全局分析。
         (TEMPLATE 不經本 Stage:範本改由導演 view_template 看原始幀,DAG 已無 semantic 節點。)
         """
@@ -73,9 +73,8 @@ class SemanticVideoStage(Stage):
                 media_type=_MEDIA_TYPE_VIDEO,
                 mode=TaskMode.VIDEO_EVENT_INDEX,
             )
-            # 旗標開啟:不建音訊鏈,改把 Gemini 的音訊欄位寫回 VideoWork,讓 Assembly 來源透明、不需改。
-            if COMPLEX_AUDIO_VIA_GEMINI:
-                self._apply_gemini_audio(work)
+            # Complex 不建音訊鏈:把 Gemini 的音訊欄位寫回 VideoWork,讓 Assembly 來源透明、不需改。
+            self._apply_gemini_audio(work)
         else:
             work.vlm_result = self._analyze_with_qwen(context.file_path, context)
 

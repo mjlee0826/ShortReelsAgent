@@ -19,6 +19,9 @@ from media_tools.video_encode_strategy import (
     X264EncodeStrategy,
     common_output_args,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 # 一律轉檔的視訊容器副檔名（非 .mp4：含 iPhone .mov HEVC 與其他非網頁友善容器）／HEIC 圖片副檔名
 # 改由 config.media_formats 提供單一來源（asset_repository 顯示層隱藏未標準化原始檔時共用同一份）
@@ -74,9 +77,9 @@ class MediaStandardizer:
         if not STANDARDIZE_USE_NVENC:
             return [x264]
         if self.ffmpeg.supports_encoder(NvencEncodeStrategy.ENCODER_NAME):
-            print("🚀 [Standardizer] 啟用 NVENC 硬體編碼（失敗自動回退 libx264）")
+            logger.info("🚀 [Standardizer] 啟用 NVENC 硬體編碼（失敗自動回退 libx264）")
             return [NvencEncodeStrategy(), x264]
-        print("⚠️ [Standardizer] 已設定 STANDARDIZE_USE_NVENC，但此 ffmpeg 無 h264_nvenc，回退 libx264")
+        logger.warning("⚠️ [Standardizer] 已設定 STANDARDIZE_USE_NVENC，但此 ffmpeg 無 h264_nvenc，回退 libx264")
         return [x264]
 
     def standardize_folder(self, input_dir: str, output_dir: str):
@@ -92,10 +95,10 @@ class MediaStandardizer:
         ``STANDARDIZE_MAX_WORKERS`` 設上限,避免共用機 CPU/RAM 超賣(libx264 單檔本就吃滿多核)。
         每個 worker 回傳「是否實際轉了檔」,在主執行緒彙總計數,避免共享計數器的競態。
         """
-        print(f"🧹 [Standardizer] 開始掃描並標準化素材: {input_dir} -> {output_dir}")
+        logger.info(f"🧹 [Standardizer] 開始掃描並標準化素材: {input_dir} -> {output_dir}")
 
         if not os.path.isdir(input_dir):
-            print(f"✅ [Standardizer] 來源目錄不存在,無素材可標準化: {input_dir}")
+            logger.info(f"✅ [Standardizer] 來源目錄不存在,無素材可標準化: {input_dir}")
             return
 
         # 衍生檔輸出目錄先建好(NFS 上 makedirs 對既有目錄為 no-op,安全)
@@ -103,7 +106,7 @@ class MediaStandardizer:
 
         all_files = [f for f in os.listdir(input_dir) if os.path.isfile(os.path.join(input_dir, f))]
         if not all_files:
-            print("✅ [Standardizer] 來源目錄無檔案,無素材可標準化。")
+            logger.info("✅ [Standardizer] 來源目錄無檔案,無素材可標準化。")
             return
 
         # 並行度取 min(上限, 檔案數),至少 1;檔案數少時不浪費開執行緒
@@ -116,7 +119,7 @@ class MediaStandardizer:
                 1 for converted in executor.map(standardize_one, all_files) if converted
             )
 
-        print(f"✅ [Standardizer] 標準化完成，處理了 {standardized_count} 個檔案。")
+        logger.info(f"✅ [Standardizer] 標準化完成，處理了 {standardized_count} 個檔案。")
 
     def _standardize_one(self, filename: str, input_dir: str, output_dir: str) -> bool:
         """
@@ -134,7 +137,7 @@ class MediaStandardizer:
             new_file_path = os.path.join(output_dir, os.path.splitext(filename)[0] + STANDARDIZED_MARKER + self.web_safe_video_ext)
             # 衍生檔已存在即跳過(idempotent):增量同步重跑時不重轉已標準化的素材
             if not os.path.exists(new_file_path):
-                print(f"   🎥 正在標準化影片: {filename} -> H.264")
+                logger.info(f"   🎥 正在標準化影片: {filename} -> H.264")
                 # 使用 FFmpegAdapter 轉檔 (c:v libx264 確保網頁相容性)；原始檔保留在 raw/，
                 # 後續流程改用 standardized/ 的新檔案
                 return self._convert_to_h264(file_path, new_file_path)
@@ -143,7 +146,7 @@ class MediaStandardizer:
         elif ext in _HEIC_IMAGE_EXT:
             new_file_path = os.path.join(output_dir, os.path.splitext(filename)[0] + STANDARDIZED_MARKER + self.web_safe_image_ext)
             if not os.path.exists(new_file_path):
-                print(f"   📸 正在標準化圖片: {filename} -> JPG")
+                logger.info(f"   📸 正在標準化圖片: {filename} -> JPG")
                 return self._convert_image_to_jpg(file_path, new_file_path)
 
         return False
@@ -246,7 +249,7 @@ class MediaStandardizer:
             subprocess.run(args, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             return True
         except subprocess.CalledProcessError as e:
-            print(f"   ⚠️ 影片轉檔失敗（{strategy.name}）: {e.stderr.decode(errors='replace')}")
+            logger.warning(f"   ⚠️ 影片轉檔失敗（{strategy.name}）: {e.stderr.decode(errors='replace')}")
             return False
 
     @staticmethod
@@ -293,5 +296,5 @@ class MediaStandardizer:
             self._remove_quietly(temp_path)
             # 附上檔案大小，日後遇到「真損毀／空檔」可與「副檔名 vs 內容不符」一眼區分
             size = os.path.getsize(input_path) if os.path.exists(input_path) else -1
-            print(f"   ❌ 圖片轉檔失敗 ({size} bytes): {e}")
+            logger.error(f"   ❌ 圖片轉檔失敗 ({size} bytes): {e}")
             return False

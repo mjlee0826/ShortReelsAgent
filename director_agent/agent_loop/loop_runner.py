@@ -14,6 +14,9 @@ from director_agent.agent_loop.agent_context import AgentContext
 from director_agent.agent_loop.critic_gate import CriticGate
 from director_agent.agent_loop.exceptions import ClarificationRequested
 from director_agent.agent_loop.tools.tool_registry import ToolRegistry
+import logging
+
+logger = logging.getLogger(__name__)
 
 # 達步數 / 重試上限仍無有效藍圖時，no-tool-use 回合用此 nudge 要模型收斂提交
 _SUBMIT_NUDGE = "請依工作流完成並呼叫 submit_blueprint 提交藍圖。"
@@ -185,7 +188,7 @@ class DirectorAgentLoop:
                 messages.append({"role": "user", "content": tool_results})
 
         if last_blueprint is not None:
-            print("⚠️ [DirectorAgentLoop] 達步數上限，輸出最後一次提交的草稿（可能仍有 Critic 錯誤）。")
+            logger.warning("⚠️ [DirectorAgentLoop] 達步數上限，輸出最後一次提交的草稿（可能仍有 Critic 錯誤）。")
             return last_blueprint
         raise RuntimeError("導演 agentic loop 達步數上限仍未提交有效藍圖")
 
@@ -202,6 +205,8 @@ class DirectorAgentLoop:
             # tuple → list 以利 JSON 落地；resume 還原時再轉回
             "viewed": {aid: [list(rng) for rng in ranges] for aid, ranges in ctx.viewed.items()},
             "corrections": ctx.corrections,
+            # 微調模式的當前草稿（edit_blueprint 的編輯進度）；初次生成為 None
+            "blueprint_draft": ctx.blueprint_draft,
         }
         if ctx.tracker is not None:
             ctx.tracker.emit_director_tool_call("ask_user", "等待使用者回答…")
@@ -218,9 +223,9 @@ class DirectorAgentLoop:
         """
         errors, repairs = self.critic_gate.validate(blueprint, list(ctx.asset_index.values()), ctx)
         if repairs:
-            print(f"🔧 [DirectorAgentLoop] 自動修補 {len(repairs)} 項：")
+            logger.info(f"🔧 [DirectorAgentLoop] 自動修補 {len(repairs)} 項：")
             for fix in repairs:
-                print(f"   - {fix}")
+                logger.info(f"   - {fix}")
 
         if not errors:
             if ctx.tracker is not None:
@@ -233,7 +238,7 @@ class DirectorAgentLoop:
                 "submit_blueprint", f"驗證發現 {len(errors)} 個錯誤（第 {critic_retries} 次）"
             )
         if critic_retries >= self.max_critic_retries:
-            print(f"🚨 [DirectorAgentLoop] 達 Critic 重試上限（{self.max_critic_retries}），輸出當前草稿。")
+            logger.error(f"🚨 [DirectorAgentLoop] 達 Critic 重試上限（{self.max_critic_retries}），輸出當前草稿。")
             return _SubmitOutcome(terminal=True, critic_retries=critic_retries, tool_result=None)
 
         err_text = (
@@ -263,14 +268,15 @@ class _SubmitOutcome:
         self.tool_result = tool_result
 
 
-def build_director_registry(has_template: bool = False) -> ToolRegistry:
+def build_director_registry(has_template: bool = False, is_refinement: bool = False) -> ToolRegistry:
     """
     組裝導演工具註冊表（工廠）。
 
     基礎工具：``get_fields`` / ``view_raw`` / ``correct_metadata`` / ``get_music_beats`` / ``ask_user`` /
     ``submit_blueprint``。``has_template`` 時才加掛 ``view_template``（無範本就不註冊，避免導演看到一個
-    沒用的工具而誤呼叫）。工具皆無狀態（於 execute 收 ctx），可安全共用單一 registry 實例；延遲 import
-    避免時序耦合。
+    沒用的工具而誤呼叫）；``is_refinement`` 時加掛 ``edit_blueprint``（局部編輯草稿）並讓 submit 支援
+    無參數提交草稿——初次生成不掛（完整時間軸是全域約束的產物，維持一次成型）。工具皆無狀態
+    （於 execute 收 ctx），可安全共用單一 registry 實例；延遲 import 避免時序耦合。
     """
     from director_agent.agent_loop.tools.ask_user_tool import AskUserTool
     from director_agent.agent_loop.tools.correct_metadata_tool import CorrectMetadataTool
@@ -285,10 +291,14 @@ def build_director_registry(has_template: bool = False) -> ToolRegistry:
         CorrectMetadataTool(),
         GetMusicBeatsTool(),
         AskUserTool(),
-        SubmitBlueprintTool(),
+        SubmitBlueprintTool(draft_mode=is_refinement),
     ]
     if has_template:
         # 緊接 view_raw 之後加掛，讓「看素材 / 看範本」兩個視覺工具相鄰、語意成對
         from director_agent.agent_loop.tools.view_template_tool import ViewTemplateTool
         tools.insert(2, ViewTemplateTool())
+    if is_refinement:
+        # 排在 submit 之前：微調的主要工作流是「edit_blueprint 局部修 → submit（無參）提交草稿」
+        from director_agent.agent_loop.tools.edit_blueprint_tool import EditBlueprintTool
+        tools.insert(-1, EditBlueprintTool())
     return ToolRegistry(tools)

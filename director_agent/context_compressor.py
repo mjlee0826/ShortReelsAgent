@@ -3,6 +3,9 @@ from config.media_processor_config import (
     TECHNICAL_SCORE_REJECT_THRESHOLD,
 )
 from prompt_manager.schemas import CastingCard
+import logging
+
+logger = logging.getLogger(__name__)
 
 # 缺臉資訊時的空 dict 預設(避免 None.get)
 _EMPTY_FACES: dict = {}
@@ -30,7 +33,7 @@ class ContextCompressor:
 
             # --- 1. 寬容雙訊號過濾(非破壞性:不刪檔,只是不送進導演決策)---
             if self._is_low_quality(metadata):
-                print(f"[Compressor] 剔除技術+美學雙低素材: {asset.get('file')}")
+                logger.info(f"[Compressor] 剔除技術+美學雙低素材: {asset.get('file')}")
                 continue
 
             # --- 2. 特徵降維 (Dimensionality Reduction) ---
